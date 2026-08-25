@@ -1,0 +1,195 @@
+<title>Kapsam — Okul İdare Paneli</title>
+<meta name="description" content="evrakburada.com'u klonlayıp iyileştirme projesi için MVP kapsamı, faz planı ve açık kararlar.">
+<style>
+  :root {
+    --ink: #211c17; --ink-soft: #4a4238; --muted: #7d7365;
+    --paper: #f6f3ec; --surface: #ffffff; --surface-2: #efe9dd;
+    --line: #e2dac9; --line-strong: #cdc0a4;
+    --accent: #1f6b65; --accent-ink: #ffffff; --accent-soft: #dcece9;
+    --good: #2f7d4f; --good-soft: #e3f1e6;
+    --warn: #a5690a; --warn-soft: #f6ecd8;
+    --crit: #b3402c; --crit-soft: #f8e4de;
+    --shadow: 0 1px 2px rgba(33,28,23,.06), 0 8px 24px -12px rgba(33,28,23,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #ede7db; --ink-soft: #cdc4b3; --muted: #948a78;
+      --paper: #16140f; --surface: #201c16; --surface-2: #2a2519;
+      --line: #3a3323; --line-strong: #4d4530;
+      --accent: #57bdb2; --accent-ink: #0d1512; --accent-soft: #1e3532;
+      --good: #6fc48c; --good-soft: #1c3327;
+      --warn: #e0ac4c; --warn-soft: #3a2e17;
+      --crit: #e2897a; --crit-soft: #3a231e;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #ede7db; --ink-soft: #cdc4b3; --muted: #948a78;
+    --paper: #16140f; --surface: #201c16; --surface-2: #2a2519;
+    --line: #3a3323; --line-strong: #4d4530;
+    --accent: #57bdb2; --accent-ink: #0d1512; --accent-soft: #1e3532;
+    --good: #6fc48c; --good-soft: #1c3327;
+    --warn: #e0ac4c; --warn-soft: #3a2e17;
+    --crit: #e2897a; --crit-soft: #3a231e;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 24px 90px; }
+  .eyebrow { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin-bottom: 10px; }
+  h1 { font-size: 30px; margin: 0 0 8px; letter-spacing: -.02em; text-wrap: balance; }
+  .subtitle { color: var(--muted); font-size: 15px; max-width: 62ch; margin-bottom: 34px; }
+  h2 { font-size: 19px; margin: 46px 0 6px; letter-spacing: -.01em; }
+  h2 .n { color: var(--muted); font-weight: 500; margin-right: 8px; }
+  .lede { color: var(--muted); font-size: 13.5px; max-width: 68ch; margin-bottom: 18px; }
+  p { max-width: 68ch; }
+
+  .note { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; font-size: 13px; color: var(--ink-soft); margin: 18px 0 30px; }
+  .note strong { color: var(--ink); }
+  .note.open { background: var(--warn-soft); border-color: var(--warn); }
+  .note.open strong { color: var(--warn); }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); background: var(--surface); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 680px; }
+  thead th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 700; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--surface-2); white-space: nowrap; }
+  tbody td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  .cell-strong { font-weight: 700; }
+  .cell-muted { color: var(--muted); font-size: 12px; }
+  .tag { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); margin-top: 4px; }
+  .tag-diff { background: var(--good-soft); color: var(--good); }
+
+  .phase { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; box-shadow: var(--shadow); margin-bottom: 14px; }
+  .phase h3 { margin: 0 0 4px; font-size: 16px; }
+  .phase .goal { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+  .phase ul { margin: 0; padding-left: 20px; font-size: 13.5px; color: var(--ink-soft); }
+  .phase li { margin-bottom: 4px; }
+  .phase li strong { color: var(--ink); }
+
+  .skip-list, .decision-list { display: grid; gap: 10px; }
+  .skip, .decision { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; font-size: 13px; }
+  .skip strong, .decision strong { color: var(--ink); }
+  .skip span { color: var(--muted); }
+  .decision .q { color: var(--muted); margin-top: 4px; }
+  .decision .opts { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .opt { font-size: 11.5px; font-weight: 700; padding: 3px 10px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+
+  .sources { font-size: 12px; color: var(--muted); margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .sources a { color: var(--accent); }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">Kapsam</div>
+  <h1>Okul İdare Paneli</h1>
+  <div class="subtitle">evrakburada.com'u (bkz. <a href="rakip-analizi.html">rakip-analizi.html</a>) klonlayıp iyileştirme projesinin MVP kapsamı, faz planı ve henüz kararlaştırılmamış açık noktalar.</div>
+
+  <div class="note">
+    <strong>Pozisyonlama:</strong> Devlet okulu idarecileri (müdür/müdür yardımcısı) için idari evrak, denetim ve planlama işlerini tek panelde toplayan bir asistan — evrakburada'nın kapsadığı alanın aynısı, ama sahadan gelen pratik bilgi + otomatik bildirim katmanıyla zenginleştirilmiş.
+  </div>
+
+  <h2><span class="n">01</span>Mimari Fark — Önceki Panellerden Farklı</h2>
+  <div class="lede">servis-takip-paneli ve mali-musavir-cari-paneli tek kullanıcılı, localStorage'a yazan tek-HTML dosyaları. Bu proje öyle olamaz.</div>
+  <p>evrakburada'nın çekirdek değer önerisi — okul bilgisini bir kez girip her cihazda/her belgede otomatik kullanmak, öğretmenle görev paylaşmak, nöbet çizelgesini ortak görmek — <strong>çoklu kullanıcı + hesap + sunucu tarafı veri</strong> gerektiriyor. localStorage bu ihtiyacı karşılamaz (cihazlar arası senkron yok, öğretmenle paylaşım yok). Bu, projeye başlamadan önce netleşmesi gereken en kritik mimari karar (bkz. Açık Kararlar, madde 1).</p>
+
+  <h2><span class="n">02</span>Faz 1 — MVP</h2>
+  <div class="lede">60 aracın tamamını değil, günlük kullanımda en çok karşılığı olan ve farklılaştırıcımızı içeren en küçük kümeyi kapsıyor.</div>
+
+  <div class="phase">
+    <h3>Hesap &amp; Kurulum</h3>
+    <div class="goal">Diğer her modülün üzerine oturduğu temel.</div>
+    <ul>
+      <li>Okul adı, il, ilçe, müdür adı — bir kez gir, tüm belgelerde otomatik kullan</li>
+      <li>Giriş/kayıt, cihazlar arası senkron</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h3>Evrak Deposu <span class="tag">evrakburada'da var</span></h3>
+    <div class="goal">En sık kullanılan 10-15 belge/tutanak/form ile başla, zamanla genişlet.</div>
+    <ul>
+      <li>Tebliğ-Tebellüğ Belgesi, Öğretmenler Kurulu Toplantı Tutanağı, Müdür Yardımcısı/Hizmetli Görev Dağılımı, Nöbetçi Öğretmen Talimatnamesi, Müdür Devir-Teslim Tutanağı gibi en yüksek kullanım sıklığına sahip belgeler</li>
+      <li>Word/PDF otomatik doldurma (okul/il/ilçe/müdür bilgisiyle)</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h3>Nöbet Programı <span class="tag">evrakburada'da var</span><span class="tag tag-diff">+ bildirim farkı</span></h3>
+    <div class="goal">evrakburada'nın en olgun modülü — aynı seviyede kurulmalı, üstüne bildirim eklenmeli.</div>
+    <ul>
+      <li>Otomatik + adil çizelge, yasaklı alan (🚫), sabitleme (📌), resmî tatil kuralı, haftalık nöbet sayısı kotası</li>
+      <li><strong>Fark:</strong> çizelge güncellenince ilgili öğretmene <span class="mono">wa.me</span> linkiyle tek tıkla WhatsApp bildirimi (rakip analizindeki Öneri #1)</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h3>Teftişe Hazırlık / Öz Denetim <span class="tag tag-diff">asıl fark burada</span></h3>
+    <div class="goal">Ahmet'in sahadan gelen deneyiminin ürüne girdiği yer — kopyalanamayan avantaj.</div>
+    <ul>
+      <li>Okul türüne göre süzülen kontrol listesi (evrakburada'daki 699-974 madde ölçeğine yakın bir başlangıç seti, zamanla büyütülür)</li>
+      <li>Her madde için resmî dayanağın yanında, <strong>ayrı ve açıkça etiketlenmiş</strong> "pratikte böyle işliyor" notu — Ahmet'in bizzat yazacağı/onaylayacağı içerik</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h3>Aylık Yönetim Akışı <span class="tag">evrakburada'da var</span></h3>
+    <div class="goal">Düşük efor, yüksek günlük kullanım — ay ay ne yapılması gerektiğinin listesi.</div>
+    <ul>
+      <li>Yaz döneminden Haziran'a, aya göre idari iş/işlem listesi</li>
+    </ul>
+  </div>
+
+  <h2><span class="n">03</span>Faz 2 — MVP Sonrası</h2>
+  <div class="phase">
+    <ul>
+      <li><strong>Mevzuata Sor (AI/RAG)</strong> — evrakburada'nın en teknik yatırım gerektiren modülü; mevzuat indeksleme ve RAG altyapısı ister, MVP'ye alınmadı</li>
+      <li><strong>İSG, Sivil Savunma, Okul Güvenliği/Sağlığı</strong> — önemli ama MVP'nin çekirdek döngüsü için şart değil</li>
+      <li><strong>Personel İşleri</strong> (maaş değişikliği, terfi takip, devam çizelgesi) — kişisel veri içerir; evrakburada'nın yaptığı gibi <strong>sunucuya hiç gönderilmeden</strong> tarayıcıda tutulmalı</li>
+      <li><strong>Kendi ders/nöbet dağıtım motoru</strong> — evrakburada üçüncü tarafa (Zerdali Soft) yönlendiriyor, biz nöbet motorunun üzerine inşa edip bünyede tutabiliriz (Öneri #2)</li>
+      <li>Anket Modülü, Kütüphane Yönetimi, Pansiyon Yönetimi — niş, sadece ilgili okul türüne hitap ediyor</li>
+    </ul>
+  </div>
+
+  <h2><span class="n">04</span>Faz 3 — İleride</h2>
+  <div class="phase">
+    <ul>
+      <li>Öğretmen tarafı araçları (sınav analizi, performans ölçeği vb.) — birincil kullanıcı idareci, öğretmen araçları ikincil genişleme</li>
+      <li>Native mobil uygulama</li>
+    </ul>
+  </div>
+
+  <h2><span class="n">05</span>Kapsam Dışı (Bilinçli)</h2>
+  <div class="skip-list">
+    <div class="skip"><strong>Gerçek KBS/MEBBİS API entegrasyonu</strong> <span>— rakip analizinde netleşti: sektörde kimse bunu yapmıyor, "yükle/yapıştır → otomatik işle" modeli yeterli.</span></div>
+    <div class="skip"><strong>Özel okul ERP'sine genişleme</strong> <span>— finans/taksit/yemekhane/servis, farklı müşteri segmenti.</span></div>
+  </div>
+
+  <h2><span class="n">06</span>Açık Kararlar — Start Öncesi Netleşmeli</h2>
+  <div class="lede">Bunlar benim tek başıma karar veremeyeceğim, senin onayını/tercihini gerektiren noktalar.</div>
+
+  <div class="decision-list">
+    <div class="decision">
+      <strong>1. Backend/altyapı</strong>
+      <div class="q">localStorage yetmiyor (çoklu kullanıcı, cihazlar arası senkron gerekiyor). Bu ortamda zaten Supabase bağlantısı hazır duruyor — auth + Postgres + depolama için mantıklı bir aday.</div>
+      <div class="opts"><span class="opt">Supabase (önerilen)</span><span class="opt">Başka bir tercih</span></div>
+    </div>
+    <div class="decision">
+      <strong>2. İsim/marka</strong>
+      <div class="q">evrakburada'dan farklı bir isim gerekiyor. Aklında bir yön var mı, yoksa öneri mi çıkarayım?</div>
+    </div>
+    <div class="decision">
+      <strong>3. Fiyatlandırma modeli</strong>
+      <div class="q">evrakburada beta'da tamamen ücretsiz. Biz de ücretsiz mi başlayacağız (kullanıcı/güven toplamak için), yoksa baştan hafif bir ücretli katman mı olacak?</div>
+    </div>
+  </div>
+
+  <div class="sources">
+    İlgili dosya: <a href="rakip-analizi.html">rakip-analizi.html</a> — bu kapsamın dayandığı rakip analizi.
+  </div>
+</div>

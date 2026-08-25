@@ -1,0 +1,233 @@
+<title>Rakip Analizi — Okul İdare Panelleri</title>
+<meta name="description" content="evrakburada.com ve okul yönetim yazılımlarında rakip analizi; klonlanacak ürünün tam envanteri ve fark yaratma önerileri.">
+<style>
+  :root {
+    --ink: #211c17; --ink-soft: #4a4238; --muted: #7d7365;
+    --paper: #f6f3ec; --surface: #ffffff; --surface-2: #efe9dd;
+    --line: #e2dac9; --line-strong: #cdc0a4;
+    --accent: #1f6b65; --accent-ink: #ffffff; --accent-soft: #dcece9;
+    --good: #2f7d4f; --good-soft: #e3f1e6;
+    --warn: #a5690a; --warn-soft: #f6ecd8;
+    --crit: #b3402c; --crit-soft: #f8e4de;
+    --shadow: 0 1px 2px rgba(33,28,23,.06), 0 8px 24px -12px rgba(33,28,23,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #ede7db; --ink-soft: #cdc4b3; --muted: #948a78;
+      --paper: #16140f; --surface: #201c16; --surface-2: #2a2519;
+      --line: #3a3323; --line-strong: #4d4530;
+      --accent: #57bdb2; --accent-ink: #0d1512; --accent-soft: #1e3532;
+      --good: #6fc48c; --good-soft: #1c3327;
+      --warn: #e0ac4c; --warn-soft: #3a2e17;
+      --crit: #e2897a; --crit-soft: #3a231e;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #ede7db; --ink-soft: #cdc4b3; --muted: #948a78;
+    --paper: #16140f; --surface: #201c16; --surface-2: #2a2519;
+    --line: #3a3323; --line-strong: #4d4530;
+    --accent: #57bdb2; --accent-ink: #0d1512; --accent-soft: #1e3532;
+    --good: #6fc48c; --good-soft: #1c3327;
+    --warn: #e0ac4c; --warn-soft: #3a2e17;
+    --crit: #e2897a; --crit-soft: #3a231e;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 24px 90px; }
+  .eyebrow { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin-bottom: 10px; }
+  h1 { font-size: 30px; margin: 0 0 8px; letter-spacing: -.02em; text-wrap: balance; }
+  .subtitle { color: var(--muted); font-size: 15px; max-width: 62ch; margin-bottom: 34px; }
+  h2 { font-size: 19px; margin: 46px 0 6px; letter-spacing: -.01em; }
+  h2 .n { color: var(--muted); font-weight: 500; margin-right: 8px; }
+  .lede { color: var(--muted); font-size: 13.5px; max-width: 68ch; margin-bottom: 18px; }
+  p { max-width: 68ch; }
+
+  .note {
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; font-size: 13px; color: var(--ink-soft); margin: 18px 0 30px;
+  }
+  .note strong { color: var(--ink); }
+  .note.risk { background: var(--warn-soft); border-color: var(--warn); }
+  .note.risk strong { color: var(--warn); }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); background: var(--surface); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 720px; }
+  thead th {
+    text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--muted); font-weight: 700; padding: 10px 14px; border-bottom: 1px solid var(--line);
+    background: var(--surface-2); white-space: nowrap;
+  }
+  tbody td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  .cell-strong { font-weight: 700; }
+  .cell-muted { color: var(--muted); font-size: 12px; }
+  .tag { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); margin-top: 4px; }
+  .tag-intl { background: var(--surface-2); color: var(--muted); }
+
+  .feat-grid { display: grid; gap: 14px; }
+  .feat {
+    display: grid; grid-template-columns: 40px 1fr; gap: 14px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px; box-shadow: var(--shadow);
+  }
+  .feat .rank { font-size: 20px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .feat h3 { margin: 0 0 4px; font-size: 15px; }
+  .feat .meta { display: flex; gap: 8px; margin-bottom: 8px; }
+  .pill { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 99px; }
+  .pill-value-yuksek { background: var(--good-soft); color: var(--good); }
+  .pill-value-orta { background: var(--warn-soft); color: var(--warn); }
+  .pill-effort-dusuk { background: var(--accent-soft); color: var(--accent); }
+  .pill-effort-orta { background: var(--surface-2); color: var(--ink-soft); }
+  .feat p { margin: 0; font-size: 13.5px; color: var(--ink-soft); max-width: 66ch; }
+  .feat .why { margin-top: 8px; font-size: 12.5px; color: var(--muted); border-left: 2px solid var(--line-strong); padding-left: 10px; }
+
+  .skip-list, .cat-list { display: grid; gap: 10px; }
+  .skip, .cat { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; font-size: 13px; }
+  .skip strong, .cat strong { color: var(--ink); }
+  .skip span, .cat span { color: var(--muted); }
+  .cat .count { float: right; font-size: 11px; color: var(--accent); font-weight: 700; }
+
+  .sources { font-size: 12px; color: var(--muted); margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .sources a { color: var(--accent); }
+  .sources li { margin-bottom: 4px; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">Rakip Analizi</div>
+  <h1>Okul İdare Panelleri</h1>
+  <div class="subtitle">Klonlayıp iyileştirmeyi planladığımız <strong>evrakburada.com</strong>'un tam envanteri, komşu nişteki oyuncular (okulbilgisistemleri.tr, okulyonetimsistemi.com) ve fark yaratma fırsatları.</div>
+
+  <div class="note">
+    <strong>Yöntem notu:</strong> evrakburada.com'un modül listesi ve SSS sayfası girişsiz (login gerekmeden) tarayıcıyla incelendi — hesap açılmadı, hiçbir form doldurulup gönderilmedi. Mevzuata Sor ve Öğretmen Araçları'nın gerçek arayüzü giriş gerektirdiği için sadece dış açıklamalardan değerlendirildi.
+  </div>
+
+  <h2><span class="n">01</span>İncelenen Ürünler</h2>
+  <div class="lede">Klonlanacak doğrudan model + aynı pazarda farklı açıdan konumlanan komşu oyuncular.</div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Ürün</th><th>Odak</th><th>Öne Çıkan Yaklaşım</th><th>Fiyat / Model</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="cell-strong">evrakburada.com<div class="tag">Klon hedefi</div></td>
+          <td class="cell-muted">İdari evrak, mevzuat, denetim, planlama (devlet okulu)</td>
+          <td><strong>60 araç</strong> (36 idareci + 14 öğretmen + 10 diğer), RAG tabanlı "Mevzuata Sor" AI (90+ resmî belge, madde madde), otomatik nöbet motoru (yasaklı alan/sabitleme/rotasyon kuralları), Word şablon otomatik doldurma, İSG/sivil savunma/Öz Denetim (974 madde) gibi ağır mevzuat modülleri</td>
+          <td class="mono">Tamamen ücretsiz (beta)<br><span class="cell-muted">3 belge + 5 soru/gün limiti, Eylül'de sınırsız</span></td>
+        </tr>
+        <tr>
+          <td class="cell-strong">okulbilgisistemleri.tr<div class="tag tag-intl">Komşu niş</div></td>
+          <td class="cell-muted">Sınav planlama, devamsızlık, veli iletişimi</td>
+          <td>E-Okul/KBS/MEBBİS'ten <strong>indirilen Excel/PDF'i sisteme yükleyip otomatik işleme</strong> (gerçek API entegrasyonu değil), WhatsApp toplu bildirim, AI destekli kelebek sınav yerleştirme, kat nöbet programı</td>
+          <td class="mono">Tamamen ücretsiz</td>
+        </tr>
+        <tr>
+          <td class="cell-strong">okulyonetimsistemi.com<div class="tag tag-intl">Farklı segment</div></td>
+          <td class="cell-muted">Özel okul ERP'si</td>
+          <td>Öğrenci/veli/öğretmen mobil uygulamaları, ön muhasebe/taksit, yemekhane, servis, ilaç takip — devlet okulu idari evrak ihtiyacıyla örtüşmüyor</td>
+          <td class="cell-muted">Kurulum + ücretli (belirtilmemiş)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note risk">
+    <strong>KBS/MEBBİS entegrasyon riski — cevaplandı:</strong> Gerçek API erişimi resmî sistemlerde izne bağlı, bunu biz de alamayabiliriz. Ama incelemede görüldü ki <strong>evrakburada da böyle bir izne sahip değil</strong> — "MYS KBS TKYS" modülü sadece genel bilgi + kılavuz. Asıl otomasyonu olan okulbilgisistemleri.tr da API kullanmıyor; kullanıcı E-Okul/KBS'den <strong>kendi indirdiği Excel/PDF'i sisteme yüklüyor</strong>, sistem onu client-side/AI ile işliyor. evrakburada'nın öğretmen araçlarının çoğu da aynı deseni kullanıyor ("e-Okul listesini yapıştırın", "e-Okul Excel dosyasını yükleyin"). Yani izin gerektirmeyen bu "yapıştır/yükle → otomatik işle" modeli sektör standardı — bizim de güvenle kurabileceğimiz yol bu, resmî API'ye ihtiyacımız yok.
+  </div>
+
+  <h2><span class="n">02</span>evrakburada'nın Tam Envanteri</h2>
+  <div class="lede">60 araç, üç kategoride. Sayı, o kategoride ne kadar derinleşmişler konusunda fikir veriyor.</div>
+
+  <div class="cat-list">
+    <div class="cat"><span class="count">36 araç</span><strong>İdareci Araçları</strong><br><span>Aylık Yönetim Akışı, Planlama İşleri, Teftişe Hazırlık, Öz Denetim (974 madde), Okul Aile Birliği, İSG, Sivil Savunma, Okul Güvenliği/Sağlığı, MYS·KBS·TKYS, Nöbet Programı, Personel İşleri, Zil Sistemi, Talep Modülü, Sınav Kelebek, Yoklama, Pansiyon, Kütüphane, Evrak Deposu, Tebliğ-Tebellüğ, E-İmza, Pasaport, Arşiv Saklama Süreleri ve devamı.</span></div>
+    <div class="cat"><span class="count">14 araç</span><strong>Öğretmen Araçları</strong><br><span>Sınav Analizi, Performans/Proje Ölçeği v2-v3, e-Okul Gelişim Düzeyleri, Sosyal Duygusal Öğrenme, Yazılı Kâğıdı Teslim Tutanağı, Ders Kesim Raporu, Sınıf Oturma Planı — çoğu "e-Okul listesini yapıştırın/yükleyin" deseniyle çalışıyor.</span></div>
+    <div class="cat"><span class="count">10 araç</span><strong>Diğer Araçlar</strong><br><span>Mevzuata Sor (AI), Hesaplama Araçları, Anket Modülü, Notlar & Hatırlatıcı, Görevlerim ve Paylaş, Güncel Bilgi, Ders Dağıtım Programı (bu sonuncusu kendi ürünleri değil — "Zerdali Soft" adlı üçüncü tarafa yönlendiriyor).</span></div>
+  </div>
+
+  <h2><span class="n">03</span>Gözlemlenen Eksikler</h2>
+  <div class="lede">İlk bakışta göründüğünden çok daha olgun bir ürün — asıl boşluklar burada.</div>
+
+  <div class="skip-list">
+    <div class="skip"><strong>WhatsApp/otomatik bildirim yok.</strong> <span>60 araçtan hiçbiri veli/öğretmene otomatik mesaj göndermiyor — okulbilgisistemleri.tr'nin en güçlü olduğu yer burası, evrakburada'da tamamen boş.</span></div>
+    <div class="skip"><strong>Ders Dağıtım Programı kendi ürünleri değil.</strong> <span>Üçüncü tarafa (Zerdali Soft) yönlendiriyor, yeni sekmede açılıyor — kopuk bir deneyim, kendi AI motorlarıyla tutarsız.</span></div>
+    <div class="skip"><strong>Native mobil uygulama yok.</strong> <span>Sadece "Ana ekrana ekle" ile PWA benzeri kısayol; push bildirim gibi native özellikler yok.</span></div>
+    <div class="skip"><strong>Beta rate-limit'i deneyimi kısıtlıyor.</strong> <span>Günde 3 belge + 5 mevzuat sorusu — yoğun bir denetim/teftiş dönemi öncesinde bu limit gerçek bir engel olabilir.</span></div>
+    <div class="skip"><strong>Bağımsız güven sinyali yok.</strong> <span>Şikayetvar ve benzeri sitelerde hiç iz yok, Instagram'daki "ücretli mi?" sorusu orada yanıtsız kalmış (SSS'de cevap var ama duyuru kanalında yok) — topluluk yönetimi zayıf.</span></div>
+  </div>
+
+  <h2><span class="n">04</span>Öncelikli 5 Fark Yaratma Önerisi</h2>
+  <div class="lede">Değer/efor sırasına göre; evrakburada'nın boşluk bıraktığı yerlere odaklı.</div>
+
+  <div class="feat-grid">
+    <div class="feat">
+      <div class="rank">1</div>
+      <div>
+        <h3>WhatsApp/otomatik bildirim katmanı</h3>
+        <div class="meta"><span class="pill pill-value-yuksek">Değer: Yüksek</span><span class="pill pill-effort-dusuk">Efor: Düşük</span></div>
+        <p>Nöbet çizelgesi güncellenince, görev/duyuru yayınlanınca ilgili öğretmene <span class="mono">wa.me</span> linkiyle ya da (ileride) gerçek API ile otomatik bildirim. evrakburada'da bu tamamen yok, okulbilgisistemleri.tr'de en güçlü özellik.</p>
+        <div class="why">Neden önemli: idarecinin en çok zaman kaybettiği iş "kim nöbetçi, kime söyledim" takibi — bunu otomatikleştirmek günlük kullanımda hemen hissedilir.</div>
+      </div>
+    </div>
+    <div class="feat">
+      <div class="rank">2</div>
+      <div>
+        <h3>Kendi içinde ders/nöbet dağıtım motoru</h3>
+        <div class="meta"><span class="pill pill-value-yuksek">Değer: Yüksek</span><span class="pill pill-effort-orta">Efor: Orta</span></div>
+        <p>evrakburada'nın nöbet motoru (yasaklı alan, sabitleme, rotasyon) zaten iyi tasarlanmış — aynı deseni ders dağıtımına da uygulayıp üçüncü tarafa yönlendirmeden kendi bünyede tutmak, deneyimi bütünleştirir.</p>
+        <div class="why">Neden önemli: evrakburada bu adımı kendi ürününde tamamlayamamış — bu, "bizim ürün gerçekten tek panel" iddiasını güçlendirecek bariz bir boşluk.</div>
+      </div>
+    </div>
+    <div class="feat">
+      <div class="rank">3</div>
+      <div>
+        <h3>Senin sahadan gelen mevzuat/pratik bilgin</h3>
+        <div class="meta"><span class="pill pill-value-yuksek">Değer: Yüksek</span><span class="pill pill-effort-orta">Efor: Orta</span></div>
+        <p>Mevzuata Sor RAG tabanlı ve sadece resmî metne dayanıyor — doğru ama "kuru". Sen bizzat okul yöneticisi olarak hangi maddenin pratikte nasıl uygulandığını, denetimde neyin gerçekten sorulduğunu biliyorsun. Bu pratik bilgiyi resmî metnin yanında (ayrı, açıkça etiketlenmiş) bir "pratik not" katmanı olarak eklemek gerçek bir farklılaşma.</p>
+        <div class="why">Neden önemli: bu, evrakburada'yı yapanların sahip olmadığı, kopyalanamayan bir avantaj — [[project_okul_idare_paneli]] kararının asıl gerekçesi buydu.</div>
+      </div>
+    </div>
+    <div class="feat">
+      <div class="rank">4</div>
+      <div>
+        <h3>Şeffaf topluluk/güven kanalı</h3>
+        <div class="meta"><span class="pill pill-value-orta">Değer: Orta</span><span class="pill pill-effort-dusuk">Efor: Düşük</span></div>
+        <p>evrakburada'nın Instagram'da yanıtsız kalan sorularının aksine, fiyatlandırma/kurumsal kullanım sorularını duyuru kanalında (Instagram/Telegram) net ve hızlı yanıtlamak, kullanıcıdan gelen taleplere görünür şekilde karşılık vermek.</p>
+        <div class="why">Neden önemli: bu pazarda güven düşük eforla kazanılabilir — rakip bunu atlamış, biz atlamayalım.</div>
+      </div>
+    </div>
+    <div class="feat">
+      <div class="rank">5</div>
+      <div>
+        <h3>Rate-limit'siz veya daha cömert deneyim</h3>
+        <div class="meta"><span class="pill pill-value-orta">Değer: Orta</span><span class="pill pill-effort-dusuk">Efor: Düşük</span></div>
+        <p>evrakburada beta'da günlük 3 belge / 5 soru limitiyle çalışıyor. Kaynak/maliyet durumumuza göre daha yüksek bir günlük limitle başlamak, özellikle teftiş/denetim dönemlerinde fark yaratır.</p>
+        <div class="why">Neden önemli: yoğun dönemde (teftiş öncesi) tam da en çok araca ihtiyaç duyulan an limite takılmak, kullanıcıyı kaçırır.</div>
+      </div>
+    </div>
+  </div>
+
+  <h2><span class="n">05</span>Bilinçli Olarak Önermediklerim</h2>
+  <div class="skip-list">
+    <div class="skip"><strong>Gerçek KBS/MEBBİS API entegrasyonu</strong> <span>— izin belirsiz, resmî sistemler üçüncü taraf erişimine kapalı olabilir. Sektördeki hiçbir oyuncu bunu yapmıyor, biz de riske girmeyelim; "yükle/yapıştır → otomatik işle" modeli yeterli ve kanıtlanmış.</span></div>
+    <div class="skip"><strong>Özel okul ERP'sine genişleme</strong> <span>(okulyonetimsistemi.com'daki finans/taksit/yemekhane/servis modülleri) — farklı müşteri segmenti (özel okul), devlet okulu idari ihtiyacından kopar; kapsam şişirme riski.</span></div>
+    <div class="skip"><strong>Native mobil uygulama (ilk aşamada)</strong> <span>— evrakburada'da da yok, PWA yeterli; geliştirme maliyeti şu an getirisine değmez.</span></div>
+  </div>
+
+  <div class="sources">
+    Kaynaklar:
+    <ul>
+      <li><a href="https://evrakburada.com">evrakburada.com</a> — İdareci Araçları, SSS sayfaları</li>
+      <li><a href="https://www.okulbilgisistemleri.tr/">Okul Bilgi Sistemleri</a></li>
+      <li><a href="https://www.okulyonetimsistemi.com/">Okul Yönetim Sistemi</a></li>
+      <li><a href="https://www.instagram.com/reel/DcWZPK-toZb/">@ogretmensitemiz Instagram reels (evrakburada tanıtımı)</a></li>
+    </ul>
+  </div>
+</div>

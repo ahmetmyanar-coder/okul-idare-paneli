@@ -1,0 +1,3036 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Okul İdare Paneli</title>
+<style>
+  :root {
+    --ink: #211c17; --ink-soft: #4a4238; --muted: #7d7365;
+    --paper: #f6f3ec; --surface: #ffffff; --surface-2: #efe9dd;
+    --line: #e2dac9; --line-strong: #cdc0a4;
+    --accent: #1f6b65; --accent-ink: #ffffff; --accent-soft: #dcece9;
+    --good: #2f7d4f; --good-soft: #e3f1e6;
+    --warn: #a5690a; --warn-soft: #f6ecd8;
+    --crit: #b3402c; --crit-soft: #f8e4de;
+    --shadow: 0 1px 2px rgba(33,28,23,.06), 0 8px 24px -12px rgba(33,28,23,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #ede7db; --ink-soft: #cdc4b3; --muted: #948a78;
+      --paper: #16140f; --surface: #201c16; --surface-2: #2a2519;
+      --line: #3a3323; --line-strong: #4d4530;
+      --accent: #57bdb2; --accent-ink: #0d1512; --accent-soft: #1e3532;
+      --good: #6fc48c; --good-soft: #1c3327;
+      --warn: #e0ac4c; --warn-soft: #3a2e17;
+      --crit: #e2897a; --crit-soft: #3a231e;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink); min-height: 100vh;
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 64px 24px 90px; }
+  .wrap.dash { max-width: 720px; }
+  .eyebrow { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin-bottom: 10px; }
+  h1 { font-size: 26px; margin: 0 0 8px; letter-spacing: -.02em; }
+  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 30px; }
+
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 24px; box-shadow: var(--shadow); }
+  .tabs { display: flex; gap: 4px; margin-bottom: 20px; background: var(--surface-2); border-radius: 10px; padding: 4px; }
+  .tab { flex: 1; text-align: center; padding: 8px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--muted); border: none; background: none; }
+  .tab.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+
+  label { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); margin: 14px 0 6px; }
+  label:first-of-type { margin-top: 0; }
+  input, select {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--paper); color: var(--ink); font-size: 14px; font-family: inherit;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+
+  button.primary {
+    margin-top: 20px; width: 100%; padding: 11px; border: none; border-radius: 8px;
+    background: var(--accent); color: var(--accent-ink); font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+  button.primary:disabled { opacity: .6; cursor: not-allowed; }
+  button.link { background: none; border: none; color: var(--accent); font-size: 12.5px; cursor: pointer; padding: 0; margin-top: 14px; }
+
+  .msg { font-size: 12.5px; padding: 10px 12px; border-radius: 8px; margin-top: 14px; }
+  .msg.err { background: var(--crit-soft); color: var(--crit); }
+  .msg.ok { background: var(--good-soft); color: var(--good); }
+
+  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+  .who { font-size: 13px; color: var(--muted); }
+  .who strong { color: var(--ink); }
+  .signout { font-size: 12.5px; color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .mod { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; box-shadow: var(--shadow); position: relative; }
+  .mod h3 { margin: 0 0 4px; font-size: 14.5px; }
+  .mod p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .soon { position: absolute; top: 14px; right: 14px; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: var(--warn-soft); color: var(--warn); }
+
+  .hidden { display: none !important; }
+  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+
+  .wrap.wide { max-width: 860px; }
+  .mod.clickable { cursor: pointer; }
+  .mod.clickable:hover { border-color: var(--accent); }
+  .navlink { background: none; border: none; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; padding: 0; margin-bottom: 16px; }
+  .subtabs { display: flex; gap: 6px; margin-bottom: 24px; }
+  .subtab { padding: 7px 14px; border-radius: 8px; font-size: 12.5px; font-weight: 600; cursor: pointer; border: 1px solid var(--line); background: var(--surface); color: var(--muted); }
+  .subtab.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.data th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  table.data td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .pill { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); margin: 1px 2px 1px 0; }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .row-actions button { font-size: 11.5px; background: none; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; cursor: pointer; color: var(--muted); margin-right: 4px; }
+  .check-row { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
+  .check-row input[type=checkbox] { width: auto; }
+  .check-row label { margin: 0; font-size: 13px; font-weight: 500; color: var(--ink); }
+  button.secondary { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .chip { font-size: 12px; padding: 4px 10px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; color: var(--ink-soft); }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .list-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .list-item:last-child { border-bottom: none; }
+  .table-wrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+const SUPABASE_URL = "https://kwowxdunvwsxwghbdmdk.supabase.co";
+const SUPABASE_KEY = "sb_publishable_59rmyjjFN1NmBr0aOhzPNA_igHohm0X";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const app = document.getElementById("app");
+
+const MODULES = [
+  { name: "Evrak Deposu", desc: "En sık kullanılan 10-15 tutanak/form, okul bilginle otomatik dolsun." },
+  { name: "Nöbet Programı", desc: "Otomatik + adil çizelge; yasaklı alan, sabitleme, WhatsApp bildirimi." },
+  { name: "Teftişe Hazırlık", desc: "Resmî madde + sahadan gelen pratik notlar." },
+  { name: "Aylık Yönetim Akışı", desc: "Ay ay yapılması gereken idari iş ve işlemler." },
+  { name: "Personel İşleri", desc: "Maaş değişikliği, terfi takip, devam çizelgesi — sadece bu cihazda saklanır." },
+  { name: "Mevzuata Sor", desc: "Teftişe Hazırlık ve Aylık Yönetim Akışı'ndaki doğrulanmış maddeler arasında ara." },
+  { name: "Ders Dağıtım Programı", desc: "Sınıf/öğretmen/ders saatlerinden çakışmasız, dengeli haftalık ders programı üretir." },
+  { name: "Sınav Kelebek", desc: "Aynı sınıftan öğrenciler yan yana oturmayacak şekilde sınav oturma planı üretir — sadece bu cihazda saklanır." },
+  { name: "Talep Takibi", desc: "Öğretmenlerden gelen talep/bildirimleri kaydet, durumunu takip et." },
+  { name: "Planlama İşleri", desc: "Kurul, komisyon ve kulüplerin üye listesi ve toplantı/faaliyet kayıtları." },
+];
+
+function renderAuth(mode = "login") {
+  app.innerHTML = `
+    <div class="wrap">
+      <div class="eyebrow">Okul İdare Paneli</div>
+      <h1>Hoş geldin</h1>
+      <div class="subtitle">Devam etmek için giriş yap ya da ücretsiz hesap oluştur.</div>
+      <div class="card">
+        <div class="tabs">
+          <button class="tab ${mode === "login" ? "active" : ""}" id="tab-login">Giriş yap</button>
+          <button class="tab ${mode === "signup" ? "active" : ""}" id="tab-signup">Üye ol</button>
+        </div>
+        <label>E-posta</label>
+        <input id="email" type="email" autocomplete="email" placeholder="ornek@meb.gov.tr">
+        <label>Şifre</label>
+        <input id="password" type="password" autocomplete="${mode === "login" ? "current-password" : "new-password"}" placeholder="en az 6 karakter">
+        <button class="primary" id="submit">${mode === "login" ? "Giriş yap" : "Hesap oluştur"}</button>
+        <div id="msg"></div>
+      </div>
+    </div>
+  `;
+  document.getElementById("tab-login").onclick = () => renderAuth("login");
+  document.getElementById("tab-signup").onclick = () => renderAuth("signup");
+  document.getElementById("submit").onclick = async () => {
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
+    const btn = document.getElementById("submit");
+    const msg = document.getElementById("msg");
+    msg.innerHTML = "";
+    if (!email || !password) {
+      msg.innerHTML = `<div class="msg err">E-posta ve şifre gerekli.</div>`;
+      return;
+    }
+    btn.disabled = true;
+    let result;
+    try {
+      result = mode === "login"
+        ? await sb.auth.signInWithPassword({ email, password })
+        : await sb.auth.signUp({ email, password });
+    } catch (e) {
+      btn.disabled = false;
+      msg.innerHTML = `<div class="msg err">Sunucuya ulaşılamadı (${e.message}). İnternet bağlantını kontrol et; bu sayfayı bir dosya yöneticisinden değil, bir bağlantı üzerinden açtığından emin ol.</div>`;
+      return;
+    }
+    btn.disabled = false;
+    const { data, error } = result;
+    if (error) {
+      const tr = error.message === "Email not confirmed"
+        ? "E-postana gelen onay bağlantısına tıklamadan giriş yapamazsın. Gelen kutunu (ve spam klasörünü) kontrol et."
+        : error.message;
+      msg.innerHTML = `<div class="msg err">${tr}</div>`;
+      return;
+    }
+    if (mode === "signup" && !data.session) {
+      msg.innerHTML = `<div class="msg ok">Hesap oluşturuldu. E-postana gelen onay bağlantısına tıkladıktan sonra giriş yapabilirsin (gelen kutunu ve spam klasörünü kontrol et).</div>`;
+      return;
+    }
+    boot();
+  };
+}
+
+function renderSchoolSetup(user) {
+  app.innerHTML = `
+    <div class="wrap">
+      <div class="eyebrow">Son adım</div>
+      <h1>Okul bilgisi</h1>
+      <div class="subtitle">Bu bilgiyi bir kez gir; tüm belgeler ve modüller bunu otomatik kullanacak.</div>
+      <div class="card">
+        <label>Okul adı</label>
+        <input id="s-name" placeholder="Zübeyde Hanım TOBB Anaokulu">
+        <label>İl</label>
+        <input id="s-il" placeholder="Balıkesir">
+        <label>İlçe</label>
+        <input id="s-ilce" placeholder="Merkez">
+        <label>Müdür adı</label>
+        <input id="s-mudur" placeholder="Ad Soyad">
+        <label>Okul türü</label>
+        <select id="s-turu">
+          <option value="okul_oncesi">Okul Öncesi / Anaokulu</option>
+          <option value="ilkokul">İlkokul</option>
+          <option value="ortaokul">Ortaokul</option>
+          <option value="lise">Lise</option>
+        </select>
+        <label>Rolün</label>
+        <select id="s-role">
+          <option value="mudur">Müdür</option>
+          <option value="mudur_yardimcisi">Müdür Yardımcısı</option>
+        </select>
+        <button class="primary" id="save">Kaydet ve devam et</button>
+        <div id="msg"></div>
+      </div>
+    </div>
+  `;
+  document.getElementById("save").onclick = async () => {
+    const name = document.getElementById("s-name").value.trim();
+    const il = document.getElementById("s-il").value.trim();
+    const ilce = document.getElementById("s-ilce").value.trim();
+    const mudur_adi = document.getElementById("s-mudur").value.trim();
+    const okul_turu = document.getElementById("s-turu").value;
+    const role = document.getElementById("s-role").value;
+    const btn = document.getElementById("save");
+    const msg = document.getElementById("msg");
+    if (!name || !il || !ilce) {
+      msg.innerHTML = `<div class="msg err">Okul adı, il ve ilçe zorunlu.</div>`;
+      return;
+    }
+    btn.disabled = true;
+    const { data: school, error: schoolErr } = await sb
+      .from("schools")
+      .insert({ name, il, ilce, mudur_adi, okul_turu, created_by: user.id })
+      .select()
+      .single();
+    if (schoolErr) {
+      btn.disabled = false;
+      msg.innerHTML = `<div class="msg err">${schoolErr.message}</div>`;
+      return;
+    }
+    const { error: profileErr } = await sb
+      .from("profiles")
+      .upsert({ id: user.id, full_name: mudur_adi, role, school_id: school.id });
+    btn.disabled = false;
+    if (profileErr) {
+      msg.innerHTML = `<div class="msg err">${profileErr.message}</div>`;
+      return;
+    }
+    boot();
+  };
+}
+
+function renderDashboard(profile, school) {
+  app.innerHTML = `
+    <div class="wrap dash">
+      <div class="topbar">
+        <div>
+          <div class="eyebrow">Okul İdare Paneli</div>
+          <div class="who"><strong>${esc(school.name)}</strong> · ${esc(school.il)}/${esc(school.ilce)}</div>
+        </div>
+        <button class="signout" id="signout">Çıkış yap</button>
+      </div>
+      <div class="grid">
+        ${MODULES.map(m => `
+          <div class="mod clickable" data-mod="${m.name}">
+            <h3>${m.name}</h3>
+            <p>${m.desc}</p>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+  document.getElementById("signout").onclick = async () => {
+    await sb.auth.signOut();
+    boot();
+  };
+  const nobetCard = document.querySelector('[data-mod="Nöbet Programı"]');
+  if (nobetCard) nobetCard.onclick = () => renderNobet(profile, school, "ayarlar");
+  const evrakCard = document.querySelector('[data-mod="Evrak Deposu"]');
+  if (evrakCard) evrakCard.onclick = () => renderEvrakModule(profile, school);
+  const teftisCard = document.querySelector('[data-mod="Teftişe Hazırlık"]');
+  if (teftisCard) teftisCard.onclick = () => renderTeftisModule(profile, school);
+  const aylikCard = document.querySelector('[data-mod="Aylık Yönetim Akışı"]');
+  if (aylikCard) aylikCard.onclick = () => renderAylikModule(profile, school);
+  const personelCard = document.querySelector('[data-mod="Personel İşleri"]');
+  if (personelCard) personelCard.onclick = () => renderPersonelModule(profile, school);
+  const mevzuatCard = document.querySelector('[data-mod="Mevzuata Sor"]');
+  if (mevzuatCard) mevzuatCard.onclick = () => renderMevzuatModule(profile, school);
+  const dersCard = document.querySelector('[data-mod="Ders Dağıtım Programı"]');
+  if (dersCard) dersCard.onclick = () => renderDersModule(profile, school, "ayarlar");
+  const kelebekCard = document.querySelector('[data-mod="Sınav Kelebek"]');
+  if (kelebekCard) kelebekCard.onclick = () => renderKelebekModule(profile, school);
+  const talepCard = document.querySelector('[data-mod="Talep Takibi"]');
+  if (talepCard) talepCard.onclick = () => renderTalepModule(profile, school);
+  const planlamaCard = document.querySelector('[data-mod="Planlama İşleri"]');
+  if (planlamaCard) planlamaCard.onclick = () => renderPlanlamaModule(profile, school);
+}
+
+function localStorageAvailable() {
+  try {
+    const testKey = "__ls_test__";
+    localStorage.setItem(testKey, "1");
+    localStorage.removeItem(testKey);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function localStorageBlockedNotice() {
+  return `
+    <div class="card" style="border-color:var(--crit);margin-bottom:16px">
+      <h3 style="margin-top:0;color:var(--crit)">⚠️ Bu tarayıcıda yerel depolama kapalı</h3>
+      <p style="margin:0">Bu modül veriyi tarayıcında (localStorage) tutar; şu an bu cihaz/tarayıcı bunu engelliyor, hiçbir kayıt saklanamaz. Muhtemel nedenler ve çözümleri:</p>
+      <ul style="margin:10px 0 0;padding-left:20px;font-size:13.5px;line-height:1.7">
+        <li><strong>Gizli/Private sekmedesin</strong> — normal bir sekmede aç.</li>
+        <li><strong>iPhone/iPad Safari:</strong> Ayarlar → Safari → aşağı kaydır → "Tüm Çerezleri Engelle" açıksa kapat (bu ayar localStorage'ı da engeller, sadece çerezleri değil).</li>
+        <li><strong>Mac Safari:</strong> Safari → Ayarlar → Gizlilik → "Tüm çerezleri engelle" işaretliyse kaldır; ya da Ayarlar → Web Siteleri → Çerezler'den bu siteye izin ver.</li>
+        <li><strong>Chrome/diğer:</strong> Ayarlar → Gizlilik ve güvenlik → Çerezler'de bu site için engelleme yoksa, tarama verilerini temizleyip tekrar dene.</li>
+      </ul>
+    </div>
+  `;
+}
+
+/* ============ PERSONEL İŞLERİ (yalnızca tarayıcıda — sunucuya gönderilmez) ============ */
+
+function personelKey(school) { return `personel_data_${school.id}`; }
+
+function loadPersonel(school) {
+  try {
+    const raw = localStorage.getItem(personelKey(school));
+    return raw ? JSON.parse(raw) : { staff: [], changes: [], attendance: [] };
+  } catch {
+    return { staff: [], changes: [], attendance: [] };
+  }
+}
+
+function savePersonel(school, data) {
+  try {
+    localStorage.setItem(personelKey(school), JSON.stringify(data));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const PERSONEL_SAVE_ERR = `<div class="msg err">Kaydedilemedi — tarayıcının yerel depolaması (localStorage) bu sayfada kapalı ya da dolu olabilir. Gizli/Private sekmede olabilirsin ya da tarayıcı ayarlarından site verilerine izin vermen gerekebilir.</div>`;
+
+function uid() {
+  return window.crypto?.randomUUID ? window.crypto.randomUUID() : String(Date.now()) + Math.random();
+}
+
+async function renderPersonelModule(profile, school) {
+  if (!localStorageAvailable()) {
+    app.innerHTML = `
+      <div class="wrap wide">
+        <button class="navlink" id="back-dash">← Panele dön</button>
+        <div class="eyebrow">Personel İşleri</div>
+        <h1>${esc(school.name)}</h1>
+        ${localStorageBlockedNotice()}
+      </div>
+    `;
+    document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+    return;
+  }
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Personel İşleri</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">🔒 Bu modüldeki veriler yalnızca bu tarayıcıda saklanır, sunucuya gönderilmez.</div>
+      <div class="subtabs">
+        <div class="subtab active" data-ptab="staff">Personel</div>
+        <div class="subtab" data-ptab="changes">Maaş &amp; Terfi</div>
+        <div class="subtab" data-ptab="attendance">Devam Çizelgesi</div>
+      </div>
+      <div id="personel-content"></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  function showTab(tab) {
+    document.querySelectorAll("[data-ptab]").forEach(el => el.classList.toggle("active", el.dataset.ptab === tab));
+    const content = document.getElementById("personel-content");
+    if (tab === "changes") renderPersonelChanges(school, content);
+    else if (tab === "attendance") renderPersonelAttendance(school, content);
+    else renderPersonelStaff(school, content);
+  }
+  document.querySelectorAll("[data-ptab]").forEach(el => el.onclick = () => showTab(el.dataset.ptab));
+  showTab("staff");
+}
+
+function renderPersonelStaff(school, content, editingId = null) {
+  const data = loadPersonel(school);
+  const editStaff = editingId ? data.staff.find(s => s.id === editingId) : null;
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">${editStaff ? "Personeli Düzenle" : "Yeni Personel Ekle"}</h3>
+      <label>Ad Soyad</label>
+      <input id="p-name" value="${editStaff ? esc(editStaff.full_name) : ""}" placeholder="Ad Soyad">
+      <label>Unvan / Branş</label>
+      <input id="p-title" value="${editStaff ? esc(editStaff.title || "") : ""}" placeholder="örn. Sınıf Öğretmeni, Hizmetli">
+      <button class="primary" id="p-save">${editStaff ? "Güncelle" : "Ekle"}</button>
+      ${editStaff ? `<button class="secondary" id="p-cancel" style="margin-top:8px;width:100%">İptal</button>` : ""}
+      <div id="p-msg"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Personel Listesi (${data.staff.length})</h3>
+      <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Ad</th><th>Unvan</th><th></th></tr></thead>
+        <tbody>
+          ${data.staff.map(s => `
+            <tr>
+              <td>${esc(s.full_name)}</td>
+              <td>${esc(s.title || "")}</td>
+              <td class="row-actions">
+                <button data-edit-staff="${s.id}">Düzenle</button>
+                <button data-del-staff="${s.id}">Sil</button>
+              </td>
+            </tr>
+          `).join("") || `<tr><td colspan="3" style="color:var(--muted)">Henüz personel eklenmedi.</td></tr>`}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  `;
+  document.getElementById("p-save").onclick = () => {
+    const full_name = document.getElementById("p-name").value.trim();
+    const title = document.getElementById("p-title").value.trim();
+    const msg = document.getElementById("p-msg");
+    if (!full_name) { msg.innerHTML = `<div class="msg err">Ad soyad gerekli.</div>`; return; }
+    if (editStaff) {
+      editStaff.full_name = full_name;
+      editStaff.title = title;
+    } else {
+      data.staff.push({ id: uid(), full_name, title });
+    }
+    if (!savePersonel(school, data)) { msg.innerHTML = PERSONEL_SAVE_ERR; return; }
+    renderPersonelStaff(school, content);
+  };
+  const cancelBtn = document.getElementById("p-cancel");
+  if (cancelBtn) cancelBtn.onclick = () => renderPersonelStaff(school, content);
+  content.querySelectorAll("[data-edit-staff]").forEach(b => b.onclick = () => renderPersonelStaff(school, content, b.dataset.editStaff));
+  content.querySelectorAll("[data-del-staff]").forEach(b => b.onclick = () => {
+    if (!confirm("Bu personeli silmek istediğine emin misin?")) return;
+    data.staff = data.staff.filter(s => s.id !== b.dataset.delStaff);
+    savePersonel(school, data);
+    renderPersonelStaff(school, content);
+  });
+}
+
+function renderPersonelChanges(school, content) {
+  const data = loadPersonel(school);
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Yeni Kayıt Ekle</h3>
+      ${!data.staff.length ? `<p style="color:var(--muted);font-size:13px">Önce Personel sekmesinden en az bir personel ekle.</p>` : `
+      <label>Personel</label>
+      <select id="c-staff">
+        ${data.staff.map(s => `<option value="${s.id}">${esc(s.full_name)}</option>`).join("")}
+      </select>
+      <label>Tür</label>
+      <select id="c-type">
+        <option value="maas">Maaş Değişikliği</option>
+        <option value="terfi">Terfi</option>
+      </select>
+      <label>Tarih</label>
+      <input id="c-date" type="date">
+      <label>Açıklama</label>
+      <textarea id="c-desc" rows="2" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px" placeholder="örn. Kademe ilerlemesi, 3. derece"></textarea>
+      <button class="primary" id="c-save">Ekle</button>
+      <div id="c-msg"></div>
+      `}
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Kayıtlar (${data.changes.length})</h3>
+      <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Tarih</th><th>Personel</th><th>Tür</th><th>Açıklama</th><th></th></tr></thead>
+        <tbody>
+          ${data.changes.slice().sort((a, b) => b.date.localeCompare(a.date)).map(c => {
+            const staff = data.staff.find(s => s.id === c.staff_id);
+            return `
+            <tr>
+              <td>${fmtDate(c.date)}</td>
+              <td>${esc(staff?.full_name || "(silinmiş personel)")}</td>
+              <td>${c.type === "terfi" ? '<span class="pill">Terfi</span>' : '<span class="pill warn">Maaş</span>'}</td>
+              <td>${esc(c.description || "")}</td>
+              <td class="row-actions"><button data-del-change="${c.id}">Sil</button></td>
+            </tr>
+          `;
+          }).join("") || `<tr><td colspan="5" style="color:var(--muted)">Henüz kayıt eklenmedi.</td></tr>`}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  `;
+  const saveBtn = document.getElementById("c-save");
+  if (saveBtn) saveBtn.onclick = () => {
+    const staff_id = document.getElementById("c-staff").value;
+    const type = document.getElementById("c-type").value;
+    const date = document.getElementById("c-date").value;
+    const description = document.getElementById("c-desc").value.trim();
+    const msg = document.getElementById("c-msg");
+    if (!date) { msg.innerHTML = `<div class="msg err">Tarih gerekli.</div>`; return; }
+    data.changes.push({ id: uid(), staff_id, type, date, description });
+    if (!savePersonel(school, data)) { msg.innerHTML = PERSONEL_SAVE_ERR; return; }
+    renderPersonelChanges(school, content);
+  };
+  content.querySelectorAll("[data-del-change]").forEach(b => b.onclick = () => {
+    data.changes = data.changes.filter(c => c.id !== b.dataset.delChange);
+    savePersonel(school, data);
+    renderPersonelChanges(school, content);
+  });
+}
+
+function renderPersonelAttendance(school, content) {
+  const data = loadPersonel(school);
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Yeni Kayıt Ekle</h3>
+      ${!data.staff.length ? `<p style="color:var(--muted);font-size:13px">Önce Personel sekmesinden en az bir personel ekle.</p>` : `
+      <label>Personel</label>
+      <select id="a-staff">
+        ${data.staff.map(s => `<option value="${s.id}">${esc(s.full_name)}</option>`).join("")}
+      </select>
+      <label>Tarih</label>
+      <input id="a-date" type="date">
+      <label>Durum</label>
+      <select id="a-status">
+        <option value="raporlu">Raporlu</option>
+        <option value="izinli">İzinli</option>
+        <option value="devamsiz">Devamsız</option>
+      </select>
+      <label>Not <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <input id="a-note" placeholder="opsiyonel not">
+      <button class="primary" id="a-save">Ekle</button>
+      <div id="a-msg"></div>
+      `}
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Kayıtlar (${data.attendance.length})</h3>
+      <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Tarih</th><th>Personel</th><th>Durum</th><th>Not</th><th></th></tr></thead>
+        <tbody>
+          ${data.attendance.slice().sort((a, b) => b.date.localeCompare(a.date)).map(a => {
+            const staff = data.staff.find(s => s.id === a.staff_id);
+            const statusLabel = { raporlu: "Raporlu", izinli: "İzinli", devamsiz: "Devamsız" }[a.status] || a.status;
+            return `
+            <tr>
+              <td>${fmtDate(a.date)}</td>
+              <td>${esc(staff?.full_name || "(silinmiş personel)")}</td>
+              <td><span class="pill warn">${statusLabel}</span></td>
+              <td>${esc(a.note || "")}</td>
+              <td class="row-actions"><button data-del-att="${a.id}">Sil</button></td>
+            </tr>
+          `;
+          }).join("") || `<tr><td colspan="5" style="color:var(--muted)">Henüz kayıt eklenmedi.</td></tr>`}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  `;
+  const saveBtn = document.getElementById("a-save");
+  if (saveBtn) saveBtn.onclick = () => {
+    const staff_id = document.getElementById("a-staff").value;
+    const date = document.getElementById("a-date").value;
+    const status = document.getElementById("a-status").value;
+    const note = document.getElementById("a-note").value.trim();
+    const msg = document.getElementById("a-msg");
+    if (!date) { msg.innerHTML = `<div class="msg err">Tarih gerekli.</div>`; return; }
+    data.attendance.push({ id: uid(), staff_id, date, status, note });
+    if (!savePersonel(school, data)) { msg.innerHTML = PERSONEL_SAVE_ERR; return; }
+    renderPersonelAttendance(school, content);
+  };
+  content.querySelectorAll("[data-del-att]").forEach(b => b.onclick = () => {
+    data.attendance = data.attendance.filter(a => a.id !== b.dataset.delAtt);
+    savePersonel(school, data);
+    renderPersonelAttendance(school, content);
+  });
+}
+
+/* ============ AYLIK YÖNETİM AKIŞI ============ */
+
+const MONTH_ORDER = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
+const MONTH_NAMES = { 1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan", 5: "Mayıs", 6: "Haziran", 7: "Temmuz", 8: "Ağustos", 9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık" };
+
+async function renderAylikModule(profile, school) {
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Aylık Yönetim Akışı</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Ay ay yapılması gereken idari iş ve işlemler.</div>
+      <div id="aylik-content"></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  await renderAylik(school, document.getElementById("aylik-content"));
+}
+
+async function renderAylik(school, content, editingId = null) {
+  const { data: tasks } = await sb.from("monthly_tasks").select("*").eq("school_id", school.id).order("sort_order");
+  const editTask = editingId ? (tasks || []).find(t => t.id === editingId) : null;
+  const byMonth = {};
+  (tasks || []).forEach(t => { (byMonth[t.month] ??= []).push(t); });
+  const total = (tasks || []).length;
+  const done = (tasks || []).filter(t => t.is_done).length;
+
+  content.innerHTML = `
+    ${total ? `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:16px">
+        <strong style="white-space:nowrap">${done} / ${total} görev</strong>
+        <div style="flex:1;height:8px;background:var(--surface-2);border-radius:99px;overflow:hidden">
+          <div style="height:100%;width:${total ? Math.round(done / total * 100) : 0}%;background:var(--good)"></div>
+        </div>
+      </div>
+    </div>` : ""}
+
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">${editTask ? "Görevi Düzenle" : "Yeni Görev Ekle"}</h3>
+      <label>Ay</label>
+      <select id="m-month">
+        ${MONTH_ORDER.map(m => `<option value="${m}" ${editTask?.month === m ? "selected" : ""}>${MONTH_NAMES[m]}</option>`).join("")}
+      </select>
+      <label>Görev başlığı</label>
+      <input id="m-title" value="${editTask?.title || ""}" placeholder="örn. Okul Aile Birliği genel kurulu">
+      <label>Açıklama <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <textarea id="m-desc" rows="2" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px">${editTask?.description || ""}</textarea>
+      <label>Resmî dayanak <span style="color:var(--muted);font-weight:400">(varsa, emin değilsen boş bırak, uydurma)</span></label>
+      <input id="m-dayanak" value="${editTask?.resmi_dayanak || ""}" placeholder="örn. İlgili yönetmelik, madde numarası">
+      <button class="primary" id="m-save">${editTask ? "Güncelle" : "Ekle"}</button>
+      ${editTask ? `<button class="secondary" id="m-cancel" style="margin-top:8px;width:100%">İptal</button>` : ""}
+      <div id="m-msg"></div>
+    </div>
+
+    ${MONTH_ORDER.filter(m => byMonth[m]?.length).map(m => `
+      <div class="card" style="margin-bottom:16px">
+        <h3 style="margin-top:0">${MONTH_NAMES[m]}</h3>
+        ${byMonth[m].map(t => `
+          <div style="padding:12px 0;border-bottom:1px solid var(--line)">
+            <div style="display:flex;gap:10px;align-items:flex-start">
+              <input type="checkbox" data-done="${t.id}" ${t.is_done ? "checked" : ""} style="width:auto;margin-top:3px">
+              <div style="flex:1">
+                <div style="font-weight:600;${t.is_done ? "text-decoration:line-through;color:var(--muted)" : ""}">${esc(t.title)}</div>
+                ${t.description ? `<div style="font-size:13px;color:var(--ink-soft);margin-top:4px">${esc(t.description)}</div>` : ""}
+                ${t.resmi_dayanak ? `<div style="font-size:11.5px;color:var(--accent);margin-top:4px">📖 ${esc(t.resmi_dayanak)}</div>` : ""}
+              </div>
+              <div class="row-actions">
+                <button data-edit-task="${t.id}">Düzenle</button>
+                <button data-del-task="${t.id}">Sil</button>
+              </div>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    `).join("") || `<p style="color:var(--muted)">Henüz görev eklenmedi.</p>`}
+  `;
+
+  document.getElementById("m-save").onclick = async () => {
+    const month = parseInt(document.getElementById("m-month").value);
+    const title = document.getElementById("m-title").value.trim();
+    const description = document.getElementById("m-desc").value.trim() || null;
+    const resmi_dayanak = document.getElementById("m-dayanak").value.trim() || null;
+    const msg = document.getElementById("m-msg");
+    if (!title) { msg.innerHTML = `<div class="msg err">Görev başlığı gerekli.</div>`; return; }
+    if (editTask) {
+      const { error } = await sb.from("monthly_tasks").update({ month, title, description, resmi_dayanak }).eq("id", editTask.id);
+      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+    } else {
+      const { error } = await sb.from("monthly_tasks").insert({ school_id: school.id, month, title, description, resmi_dayanak, sort_order: (tasks || []).length });
+      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+    }
+    await renderAylik(school, content);
+  };
+
+  const cancelBtn = document.getElementById("m-cancel");
+  if (cancelBtn) cancelBtn.onclick = () => renderAylik(school, content);
+
+  content.querySelectorAll("[data-done]").forEach(cb => cb.onchange = async () => {
+    await sb.from("monthly_tasks").update({ is_done: cb.checked }).eq("id", cb.dataset.done);
+    await renderAylik(school, content);
+  });
+  content.querySelectorAll("[data-edit-task]").forEach(b => b.onclick = () => renderAylik(school, content, b.dataset.editTask));
+  content.querySelectorAll("[data-del-task]").forEach(b => b.onclick = async () => {
+    if (!confirm("Bu görevi silmek istediğine emin misin?")) return;
+    await sb.from("monthly_tasks").delete().eq("id", b.dataset.delTask);
+    await renderAylik(school, content);
+  });
+}
+
+/* ============ TEFTİŞE HAZIRLIK ============ */
+
+const VERIFIED_SEED_ITEMS = [
+  {
+    category: "Nöbet Programı",
+    madde_metni: "Nöbet çizelgesinde hamile öğretmenlere, hamileliğin 24. haftasından doğum sonrası analık izni bitimini takip eden 1 yıl sonuna kadar nöbet görevi verilmemiş mi?",
+    resmi_dayanak: "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği, Madde 44/7",
+  },
+  {
+    category: "Nöbet Programı",
+    madde_metni: "Kıdem muafiyeti (kadında 20, erkekte 25 hizmet yılı) talep eden öğretmenlere, ihtiyaç olmadıkça nöbet verilmemiş; engelli/engelli yakını olan öğretmenlere nöbet verilmemiş (istemedikleri sürece) mi?",
+    resmi_dayanak: "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği, Madde 44/6 ve 44/11",
+  },
+  {
+    category: "Nöbet Programı",
+    madde_metni: "Nöbet süresi ilk ders başlamadan 30 dakika önce başlayıp son ders bitiminden 30 dakika sonra mı bitiyor (öğretmenler kurulu kararıyla kısaltılmışsa bu karar mevcut mu)?",
+    resmi_dayanak: "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği, Madde 44/8",
+  },
+  {
+    category: "İş Sağlığı ve Güvenliği",
+    madde_metni: "Okulda risk değerlendirme ekibi (ve çalışan temsilcisi) oluşturulmuş, önlenebilir/öngörülebilir riskler tespit edilip gerekli önlemler alınmış mı?",
+    resmi_dayanak: "6331 sayılı İş Sağlığı ve Güvenliği Kanunu; İş Sağlığı ve Güvenliği Risk Değerlendirmesi Yönetmeliği",
+  },
+  {
+    category: "İş Sağlığı ve Güvenliği",
+    madde_metni: "İlk yardım, tahliye ve yangınla mücadeleyi kapsayan acil durum planı hazırlanmış ve güncel mi?",
+    resmi_dayanak: "6331 sayılı İş Sağlığı ve Güvenliği Kanunu; İş Sağlığı ve Güvenliği Hizmetleri Yönetmeliği",
+  },
+  {
+    category: "Sivil Savunma / Afet ve Acil Durum Yönetimi",
+    madde_metni: "Öğrenci ve personel mevcudu 200'ü aşan lise ve dengi okullarda 7 servisli sivil savunma planı hazırlanmış mı?",
+    resmi_dayanak: "7126 sayılı Sivil Savunma Kanunu; Daire ve Müesseseler İçin Sivil Savunma İşleri Kılavuzu",
+  },
+  {
+    category: "Sivil Savunma / Afet ve Acil Durum Yönetimi",
+    madde_metni: "Okulun afet ve acil durum yönetimi eylem planı hazırlanmış; önemli bir değişiklik olmasa dahi yılda bir kez güncellenmiş mi?",
+    resmi_dayanak: "MEB Afet ve Acil Durum Yönetimi Genelgesi",
+  },
+  {
+    category: "Okul Güvenliği",
+    madde_metni: "Okul giriş-çıkış kontrolü yapılıyor, ziyaretçilere giriş-çıkış kartı veriliyor mu? Kamera/alarm sistemleri 24 saat faal mi?",
+    resmi_dayanak: "MEB Okul Güvenliği Genelgesi",
+  },
+  {
+    category: "Okul Güvenliği",
+    madde_metni: "\"Okul Güvenliği Yönetim Ekibi\" oluşturulmuş ve düzenli toplantı yapıyor mu? Dönem başı güvenlik tahkikatları tamamlanmış mı?",
+    resmi_dayanak: "MEB Okul Güvenliği Genelgesi",
+  },
+];
+
+async function renderTeftisModule(profile, school) {
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Teftişe Hazırlık</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Resmî mevzuat dayanağı + sahadan gelen pratik notlar. Sadece doğrulanmış kaynaklar eklenir.</div>
+      <div id="teftis-content"></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  await renderTeftis(school, document.getElementById("teftis-content"));
+}
+
+async function renderTeftis(school, content, editingId = null) {
+  const { data: items } = await sb.from("checklist_items").select("*").eq("school_id", school.id).order("category").order("sort_order");
+  const editItem = editingId ? (items || []).find(i => i.id === editingId) : null;
+  const done = (items || []).filter(i => i.is_done).length;
+  const total = (items || []).length;
+
+  const byCategory = {};
+  (items || []).forEach(i => { (byCategory[i.category] ??= []).push(i); });
+
+  const existingMadde = new Set((items || []).map(i => i.madde_metni));
+  const missingSeedItems = VERIFIED_SEED_ITEMS.filter(it => !existingMadde.has(it.madde_metni));
+
+  content.innerHTML = `
+    ${total ? `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:16px">
+        <strong style="white-space:nowrap">${done} / ${total} madde</strong>
+        <div style="flex:1;height:8px;background:var(--surface-2);border-radius:99px;overflow:hidden">
+          <div style="height:100%;width:${total ? Math.round(done / total * 100) : 0}%;background:var(--good)"></div>
+        </div>
+      </div>
+    </div>` : ""}
+
+    ${missingSeedItems.length ? `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Doğrulanmış örnek maddeler</h3>
+      <p style="color:var(--muted);font-size:12.5px">Araştırmayla doğrulanmış ${missingSeedItems.length} madde daha var (${[...new Set(missingSeedItems.map(i => i.category))].join(", ")}) — eklenebilir.</p>
+      <button class="secondary" id="seed-btn" style="width:100%">Bu ${missingSeedItems.length} maddeyi ekle</button>
+    </div>` : ""}
+
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">${editItem ? "Maddeyi Düzenle" : "Yeni Madde Ekle"}</h3>
+      <label>Kategori</label>
+      <input id="c-category" value="${editItem?.category || ""}" placeholder="örn. İş Sağlığı ve Güvenliği">
+      <label>Kontrol maddesi</label>
+      <textarea id="c-madde" rows="2" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px">${editItem?.madde_metni || ""}</textarea>
+      <label>Resmî dayanak <span style="color:var(--muted);font-weight:400">(emin değilsen boş bırak, uydurma)</span></label>
+      <input id="c-dayanak" value="${editItem?.resmi_dayanak || ""}" placeholder="örn. İlgili yönetmelik, madde numarası">
+      <label>Pratik not <span style="color:var(--muted);font-weight:400">(sahadan — asıl fark burada)</span></label>
+      <textarea id="c-not" rows="3" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px">${editItem?.pratik_not || ""}</textarea>
+      <button class="primary" id="c-save">${editItem ? "Güncelle" : "Ekle"}</button>
+      ${editItem ? `<button class="secondary" id="c-cancel" style="margin-top:8px;width:100%">İptal</button>` : ""}
+      <div id="c-msg"></div>
+    </div>
+
+    ${Object.keys(byCategory).length ? Object.entries(byCategory).map(([cat, catItems]) => `
+      <div class="card" style="margin-bottom:16px">
+        <h3 style="margin-top:0">${esc(cat)}</h3>
+        ${catItems.map(i => `
+          <div style="padding:12px 0;border-bottom:1px solid var(--line)">
+            <div style="display:flex;gap:10px;align-items:flex-start">
+              <input type="checkbox" data-done="${i.id}" ${i.is_done ? "checked" : ""} style="width:auto;margin-top:3px">
+              <div style="flex:1">
+                <div style="${i.is_done ? "text-decoration:line-through;color:var(--muted)" : ""}">${esc(i.madde_metni)}</div>
+                ${i.resmi_dayanak ? `<div style="font-size:11.5px;color:var(--accent);margin-top:4px">📖 ${esc(i.resmi_dayanak)}</div>` : ""}
+                ${i.pratik_not ? `<div style="font-size:12.5px;color:var(--ink-soft);margin-top:6px;padding:8px 10px;background:var(--surface-2);border-radius:8px">💡 ${esc(i.pratik_not)}</div>` : ""}
+              </div>
+              <div class="row-actions">
+                <button data-edit-item="${i.id}">Düzenle</button>
+                <button data-del-item="${i.id}">Sil</button>
+              </div>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    `).join("") : `<p style="color:var(--muted)">Henüz madde eklenmedi.</p>`}
+  `;
+
+  const seedBtn = document.getElementById("seed-btn");
+  if (seedBtn) seedBtn.onclick = async () => {
+    await sb.from("checklist_items").insert(missingSeedItems.map((it, idx) => ({ school_id: school.id, ...it, sort_order: total + idx })));
+    await renderTeftis(school, content);
+  };
+
+  document.getElementById("c-save").onclick = async () => {
+    const category = document.getElementById("c-category").value.trim();
+    const madde_metni = document.getElementById("c-madde").value.trim();
+    const resmi_dayanak = document.getElementById("c-dayanak").value.trim() || null;
+    const pratik_not = document.getElementById("c-not").value.trim() || null;
+    const msg = document.getElementById("c-msg");
+    if (!category || !madde_metni) { msg.innerHTML = `<div class="msg err">Kategori ve madde metni gerekli.</div>`; return; }
+    if (editItem) {
+      const { error } = await sb.from("checklist_items").update({ category, madde_metni, resmi_dayanak, pratik_not }).eq("id", editItem.id);
+      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+    } else {
+      const { error } = await sb.from("checklist_items").insert({ school_id: school.id, category, madde_metni, resmi_dayanak, pratik_not, sort_order: (items || []).length });
+      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+    }
+    await renderTeftis(school, content);
+  };
+
+  const cancelBtn = document.getElementById("c-cancel");
+  if (cancelBtn) cancelBtn.onclick = () => renderTeftis(school, content);
+
+  content.querySelectorAll("[data-done]").forEach(cb => cb.onchange = async () => {
+    await sb.from("checklist_items").update({ is_done: cb.checked }).eq("id", cb.dataset.done);
+    await renderTeftis(school, content);
+  });
+  content.querySelectorAll("[data-edit-item]").forEach(b => b.onclick = () => renderTeftis(school, content, b.dataset.editItem));
+  content.querySelectorAll("[data-del-item]").forEach(b => b.onclick = async () => {
+    if (!confirm("Bu maddeyi silmek istediğine emin misin?")) return;
+    await sb.from("checklist_items").delete().eq("id", b.dataset.delItem);
+    await renderTeftis(school, content);
+  });
+}
+
+/* ============ EVRAK DEPOSU ============ */
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function waPhone(raw) {
+  let digits = String(raw ?? "").replace(/\D/g, "");
+  if (!digits) return null;
+  if (digits.startsWith("0")) digits = "90" + digits.slice(1);
+  else if (!digits.startsWith("90")) digits = "90" + digits;
+  return digits;
+}
+
+function waLink(phone, message) {
+  const p = waPhone(phone);
+  if (!p) return null;
+  return `https://wa.me/${p}?text=${encodeURIComponent(message)}`;
+}
+
+function turkceEk(kelime, incelEk, kalinEk, kaynastirmaGerekliMi = false) {
+  const s = String(kelime ?? "").trim();
+  if (!s) return `'${incelEk}`;
+  const unluler = "aeıioöuü";
+  const kalinUnluler = "aıou";
+  let sonUnlu = null;
+  for (let i = s.length - 1; i >= 0; i--) {
+    const c = s[i].toLocaleLowerCase("tr-TR");
+    if (unluler.includes(c)) { sonUnlu = c; break; }
+  }
+  const ek = sonUnlu && kalinUnluler.includes(sonUnlu) ? kalinEk : incelEk;
+  const sonHarf = s.slice(-1).toLocaleLowerCase("tr-TR");
+  const buffer = kaynastirmaGerekliMi && unluler.includes(sonHarf) ? "y" : "";
+  return `'${buffer}${ek}`;
+}
+
+function fmtDate(iso) {
+  if (!iso) return "…/…/……";
+  const [y, m, d] = iso.split("-");
+  return `${d}.${m}.${y}`;
+}
+
+function linesToList(text) {
+  return (text || "").split("\n").map(s => s.trim()).filter(Boolean).map(s => `<li>${esc(s)}</li>`).join("");
+}
+
+function docWrapper(school, bodyHtml) {
+  return `
+    <div style="font-family: 'Times New Roman', serif; max-width: 700px; margin: 0 auto; padding: 40px; background:#fff; color:#111; line-height:1.7; font-size:14px">
+      <div style="text-align:center; margin-bottom:24px">
+        <div style="font-size:12px">T.C.</div>
+        <div style="font-size:13px;font-weight:bold">${esc(school.il).toUpperCase()} VALİLİĞİ</div>
+        <div style="font-size:13px;font-weight:bold">${esc(school.name).toUpperCase()}</div>
+      </div>
+      ${bodyHtml}
+    </div>
+  `;
+}
+
+const EVRAK_TEMPLATES = [
+  {
+    key: "teblig",
+    title: "Tebliğ-Tebellüğ Belgesi",
+    desc: "İki nüsha, imza blokları hazır resmî tebliğ belgesi.",
+    fields: [
+      { id: "personel_adi", label: "Tebellüğ eden (personel adı)", type: "text" },
+      { id: "konu", label: "Tebliğ konusu", type: "text" },
+      { id: "tarih", label: "Tarih", type: "date" },
+    ],
+    render: (d, school) => `
+      <p style="text-align:right">${esc(school.il)}, ${fmtDate(d.tarih)}</p>
+      <h3 style="text-align:center;text-decoration:underline">TEBLİĞ-TEBELLÜĞ BELGESİ</h3>
+      <p><strong>Konu:</strong> ${esc(d.konu)}</p>
+      <p style="text-align:justify">Yukarıda belirtilen konuya ilişkin yazı/duyuru, aşağıda adı yazılı personele tebliğ edilmiş olup, kendisi tarafından okunarak bir örneği teslim alınmıştır.</p>
+      <table style="width:100%;margin-top:50px;border-collapse:collapse"><tr>
+        <td style="width:50%;vertical-align:top"><strong>Tebliğ Eden</strong><br><br><br><br>${esc(school.mudur_adi || "……………………")}<br>Okul Müdürü</td>
+        <td style="width:50%;vertical-align:top"><strong>Tebellüğ Eden</strong><br><br><br><br>${esc(d.personel_adi)}</td>
+      </tr></table>
+    `,
+  },
+  {
+    key: "kurul",
+    title: "Öğretmenler Kurulu Toplantı Tutanağı",
+    desc: "Gündem maddelerini girin, toplantı tutanağı hazır gelsin.",
+    fields: [
+      { id: "toplanti_no", label: "Toplantı No", type: "text" },
+      { id: "toplanti_tarihi", label: "Tarih", type: "date" },
+      { id: "gundem", label: "Gündem maddeleri (her satıra bir madde)", type: "textarea" },
+    ],
+    render: (d, school) => `
+      <p style="text-align:right">${esc(school.il)}, ${fmtDate(d.toplanti_tarihi)}</p>
+      <h3 style="text-align:center;text-decoration:underline">ÖĞRETMENLER KURULU TOPLANTI TUTANAĞI</h3>
+      <p><strong>Toplantı No:</strong> ${esc(d.toplanti_no)} &nbsp;&nbsp; <strong>Tarih:</strong> ${fmtDate(d.toplanti_tarihi)}</p>
+      <p><strong>Gündem Maddeleri:</strong></p>
+      <ol style="text-align:justify">${linesToList(d.gundem)}</ol>
+      <p style="margin-top:30px">Yukarıdaki gündem maddeleri öğretmenler kurulunda görüşülmüş, alınan kararlar tutanak altına alınmıştır.</p>
+      <table style="width:100%;margin-top:50px"><tr>
+        <td style="text-align:center"><strong>${esc(school.mudur_adi || "……………………")}</strong><br>Okul Müdürü</td>
+      </tr></table>
+    `,
+  },
+  {
+    key: "gorev",
+    title: "Müdür Yardımcısı Görev Dağılımı",
+    desc: "Görev maddelerini girin, resmî görev dağılımı yazısı üretin.",
+    fields: [
+      { id: "md_yrd_adi", label: "Müdür yardımcısı adı", type: "text" },
+      { id: "tarih", label: "Tarih", type: "date" },
+      { id: "gorevler", label: "Görevler (her satıra bir madde)", type: "textarea" },
+    ],
+    render: (d, school) => `
+      <p style="text-align:right">${esc(school.il)}, ${fmtDate(d.tarih)}</p>
+      <h3 style="text-align:center;text-decoration:underline">GÖREV DAĞILIMI YAZISI</h3>
+      <p><strong>Sayın:</strong> ${esc(d.md_yrd_adi)}</p>
+      <p style="text-align:justify">Okulumuzun idari işlerinin düzenli yürütülmesi amacıyla, aşağıda belirtilen görevlerin tarafınızca yerine getirilmesi hususunu bilgilerinize sunarım.</p>
+      <ol style="text-align:justify">${linesToList(d.gorevler)}</ol>
+      <table style="width:100%;margin-top:50px"><tr>
+        <td style="text-align:center"><strong>${esc(school.mudur_adi || "……………………")}</strong><br>Okul Müdürü</td>
+      </tr></table>
+    `,
+  },
+  {
+    key: "talimatname",
+    title: "Nöbetçi Öğretmen Talimatnamesi",
+    desc: "Talimat maddelerini girin, okulunuza özel nöbetçi öğretmen talimatnamesi oluşturun.",
+    fields: [
+      { id: "donem_adi", label: "Dönem adı", type: "text" },
+      { id: "tarih", label: "Tarih", type: "date" },
+      { id: "maddeler", label: "Talimat maddeleri (her satıra bir madde)", type: "textarea" },
+    ],
+    render: (d, school) => `
+      <p style="text-align:right">${esc(school.il)}, ${fmtDate(d.tarih)}</p>
+      <h3 style="text-align:center;text-decoration:underline">NÖBETÇİ ÖĞRETMEN GÖREV TALİMATNAMESİ</h3>
+      <p><strong>Dönem:</strong> ${esc(d.donem_adi)}</p>
+      <p style="text-align:justify">Nöbetçi öğretmenler, nöbet süresince aşağıda belirtilen hususlara uymakla yükümlüdür:</p>
+      <ol style="text-align:justify">${linesToList(d.maddeler)}</ol>
+      <p style="margin-top:20px">İş bu talimatname öğretmenler kurulunda görüşülerek yürürlüğe girmiştir.</p>
+      <table style="width:100%;margin-top:40px"><tr>
+        <td style="text-align:center"><strong>${esc(school.mudur_adi || "……………………")}</strong><br>Okul Müdürü</td>
+      </tr></table>
+    `,
+  },
+  {
+    key: "devir",
+    title: "Müdür Devir-Teslim Tutanağı",
+    desc: "Devirde nelerin teslim alınacağı, hazır tutanak.",
+    fields: [
+      { id: "giden_mudur", label: "Devreden müdür", type: "text" },
+      { id: "gelen_mudur", label: "Devralan müdür", type: "text" },
+      { id: "devir_tarihi", label: "Devir tarihi", type: "date" },
+      { id: "kalemler", label: "Devredilen hususlar (her satıra bir madde)", type: "textarea" },
+    ],
+    render: (d, school) => `
+      <p style="text-align:right">${esc(school.il)}, ${fmtDate(d.devir_tarihi)}</p>
+      <h3 style="text-align:center;text-decoration:underline">MÜDÜR DEVİR-TESLİM TUTANAĞI</h3>
+      <p style="text-align:justify">${esc(school.name)} Müdürlüğü görevi, ${fmtDate(d.devir_tarihi)} tarihi itibarıyla ${esc(d.giden_mudur)}${turkceEk(d.giden_mudur, "den", "dan")} ${esc(d.gelen_mudur)}${turkceEk(d.gelen_mudur, "e", "a", true)} aşağıda belirtilen hususlar çerçevesinde devredilmiştir.</p>
+      <p><strong>Devredilen Hususlar:</strong></p>
+      <ol style="text-align:justify">${linesToList(d.kalemler)}</ol>
+      <table style="width:100%;margin-top:50px"><tr>
+        <td style="width:50%;text-align:center"><strong>Devreden</strong><br><br><br>${esc(d.giden_mudur)}</td>
+        <td style="width:50%;text-align:center"><strong>Devralan</strong><br><br><br>${esc(d.gelen_mudur)}</td>
+      </tr></table>
+    `,
+  },
+];
+
+async function renderEvrakModule(profile, school) {
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Evrak Deposu</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Okul bilginle otomatik dolan resmî belgeler.</div>
+      <div id="evrak-content"></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  renderEvrak(school, document.getElementById("evrak-content"));
+}
+
+function renderEvrak(school, content) {
+  content.innerHTML = `
+    <div class="grid">
+      ${EVRAK_TEMPLATES.map(t => `
+        <div class="mod clickable" data-doc="${t.key}">
+          <h3>${t.title}</h3>
+          <p>${t.desc}</p>
+        </div>
+      `).join("")}
+    </div>
+    <div id="doc-form" style="margin-top:20px"></div>
+  `;
+  content.querySelectorAll("[data-doc]").forEach(el => {
+    el.onclick = () => renderDocForm(school, el.dataset.doc);
+  });
+}
+
+function renderDocForm(school, key) {
+  const tpl = EVRAK_TEMPLATES.find(t => t.key === key);
+  const box = document.getElementById("doc-form");
+  box.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0">${tpl.title}</h3>
+      ${tpl.fields.map(f => `
+        <label>${f.label}</label>
+        ${f.type === "textarea"
+          ? `<textarea id="f-${f.id}" rows="4" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px"></textarea>`
+          : `<input id="f-${f.id}" type="${f.type}">`}
+      `).join("")}
+      <button class="primary" id="doc-gen">Belgeyi Oluştur</button>
+      <div id="doc-preview" style="margin-top:20px"></div>
+    </div>
+  `;
+  document.getElementById("doc-gen").onclick = () => {
+    const data = {};
+    tpl.fields.forEach(f => data[f.id] = document.getElementById("f-" + f.id).value);
+    const fullHtml = docWrapper(school, tpl.render(data, school));
+    const preview = document.getElementById("doc-preview");
+    preview.innerHTML = `
+      <div style="border:1px solid var(--line);border-radius:8px;overflow:hidden">
+        <iframe id="doc-frame" style="width:100%;height:500px;border:none;background:#fff"></iframe>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="secondary" id="doc-print" style="flex:1">Yazdır</button>
+        <button class="secondary" id="doc-download" style="flex:1">Word olarak indir</button>
+      </div>
+    `;
+    const frame = document.getElementById("doc-frame");
+    frame.srcdoc = fullHtml;
+    document.getElementById("doc-print").onclick = () => {
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+    };
+    document.getElementById("doc-download").onclick = () => {
+      const blob = new Blob(["﻿", fullHtml], { type: "application/msword" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${tpl.title}.doc`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    };
+  };
+}
+
+/* ============ NÖBET PROGRAMI ============ */
+
+function nobetHeader(school, activeTab) {
+  const tabs = [
+    { id: "ayarlar", label: "Ayarlar" },
+    { id: "ogretmenler", label: "Öğretmenler" },
+    { id: "donem", label: "Dönem & Çizelge" },
+    { id: "idareci", label: "İdareci Nöbeti" },
+  ];
+  return `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Nöbet Programı</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtabs">
+        ${tabs.map(t => `<div class="subtab ${t.id === activeTab ? "active" : ""}" data-tab="${t.id}">${t.label}</div>`).join("")}
+      </div>
+      <div id="nobet-content"></div>
+    </div>
+  `;
+}
+
+async function renderNobet(profile, school, tab) {
+  app.innerHTML = nobetHeader(school, tab);
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  document.querySelectorAll("[data-tab]").forEach(el => {
+    el.onclick = () => renderNobet(profile, school, el.dataset.tab);
+  });
+  const content = document.getElementById("nobet-content");
+  content.innerHTML = `<div class="card">Yükleniyor…</div>`;
+  if (tab === "ogretmenler") await renderOgretmenler(profile, school, content);
+  else if (tab === "donem") await renderDonem(profile, school, content);
+  else if (tab === "idareci") await renderIdareciNobeti(profile, school, content);
+  else await renderAyarlar(profile, school, content);
+}
+
+async function renderAyarlar(profile, school, content) {
+  const [{ data: slots }, { data: areas }] = await Promise.all([
+    sb.from("duty_time_slots").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("duty_areas").select("*").eq("school_id", school.id).order("sort_order"),
+  ]);
+  content.innerHTML = `
+    <div class="grid">
+      <div class="card">
+        <h3 style="margin-top:0">Zaman Dilimleri</h3>
+        <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Gün içinde nöbet tutulan dilimler (örn. Sabah Girişi, 1. Teneffüs, Öğle Arası).</p>
+        <div id="slot-list">
+          ${(slots || []).map(s => `<div class="list-item"><span>${esc(s.label)}</span><div class="row-actions"><button data-del-slot="${s.id}">Sil</button></div></div>`).join("") || `<p style="color:var(--muted);font-size:13px">Henüz eklenmedi.</p>`}
+        </div>
+        <label>Yeni zaman dilimi</label>
+        <input id="new-slot" placeholder="örn. 1. Teneffüs">
+        <button class="secondary" id="add-slot" style="margin-top:10px;width:100%">Ekle</button>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Alanlar</h3>
+        <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Nöbet tutulan sabit noktalar (örn. 1. Kat, Bahçe, Yemekhane).</p>
+        <div id="area-list">
+          ${(areas || []).map(a => `<div class="list-item"><span>${esc(a.label)}</span><div class="row-actions"><button data-del-area="${a.id}">Sil</button></div></div>`).join("") || `<p style="color:var(--muted);font-size:13px">Henüz eklenmedi.</p>`}
+        </div>
+        <label>Yeni alan</label>
+        <input id="new-area" placeholder="örn. Bahçe">
+        <button class="secondary" id="add-area" style="margin-top:10px;width:100%">Ekle</button>
+      </div>
+    </div>
+  `;
+  document.getElementById("add-slot").onclick = async () => {
+    const label = document.getElementById("new-slot").value.trim();
+    if (!label) return;
+    await sb.from("duty_time_slots").insert({ school_id: school.id, label, sort_order: (slots || []).length });
+    await renderNobet(profile, school, "ayarlar");
+  };
+  document.getElementById("add-area").onclick = async () => {
+    const label = document.getElementById("new-area").value.trim();
+    if (!label) return;
+    await sb.from("duty_areas").insert({ school_id: school.id, label, sort_order: (areas || []).length });
+    await renderNobet(profile, school, "ayarlar");
+  };
+  content.querySelectorAll("[data-del-slot]").forEach(b => b.onclick = async () => {
+    await sb.from("duty_time_slots").delete().eq("id", b.dataset.delSlot);
+    await renderNobet(profile, school, "ayarlar");
+  });
+  content.querySelectorAll("[data-del-area]").forEach(b => b.onclick = async () => {
+    await sb.from("duty_areas").delete().eq("id", b.dataset.delArea);
+    await renderNobet(profile, school, "ayarlar");
+  });
+}
+
+function kidemYili(hireDate) {
+  if (!hireDate) return null;
+  const hire = new Date(hireDate + "T00:00:00");
+  const now = new Date();
+  let years = now.getFullYear() - hire.getFullYear();
+  const beforeAnniversary = (now.getMonth() < hire.getMonth()) || (now.getMonth() === hire.getMonth() && now.getDate() < hire.getDate());
+  if (beforeAnniversary) years--;
+  return Math.max(years, 0);
+}
+
+function kidemEsigiDoldu(t) {
+  const years = kidemYili(t.hire_date);
+  if (years === null) return false;
+  const threshold = t.gender === "kadin" ? 20 : t.gender === "erkek" ? 25 : null;
+  return threshold !== null && years >= threshold;
+}
+
+async function renderOgretmenler(profile, school, content, editingId = null) {
+  const [{ data: teachers }, { data: areas }, { data: blockedAll }] = await Promise.all([
+    sb.from("teachers").select("*").eq("school_id", school.id).order("full_name"),
+    sb.from("duty_areas").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("teacher_blocked_areas").select("*"),
+  ]);
+  const blockedByTeacher = {};
+  (blockedAll || []).forEach(b => { (blockedByTeacher[b.teacher_id] ??= new Set()).add(b.duty_area_id); });
+  const areaLabelById = Object.fromEntries((areas || []).map(a => [a.id, a.label]));
+  const editTeacher = editingId ? (teachers || []).find(t => t.id === editingId) : null;
+
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">${editTeacher ? "Öğretmeni Düzenle" : "Yeni Öğretmen Ekle"}</h3>
+      <label>Ad Soyad</label>
+      <input id="t-name" value="${editTeacher?.full_name || ""}" placeholder="Ad Soyad">
+      <label>Branş</label>
+      <input id="t-branch" value="${editTeacher?.branch || ""}" placeholder="örn. Okul Öncesi">
+      <label>Telefon <span style="color:var(--muted);font-weight:400">(WhatsApp bildirimi için, opsiyonel)</span></label>
+      <input id="t-phone" value="${editTeacher?.phone || ""}" placeholder="0532 000 00 00">
+      <label>Haftalık nöbet kotası</label>
+      <input id="t-quota" type="number" min="0" value="${editTeacher?.weekly_duty_quota ?? 2}">
+      <div class="check-row"><input type="checkbox" id="t-idareci" ${editTeacher?.is_idareci ? "checked" : ""}><label for="t-idareci">Müdür yardımcısı (idareci)</label></div>
+      <label>Cinsiyet <span style="color:var(--muted);font-weight:400">(kıdem muafiyeti hesabı için — Madde 44/6)</span></label>
+      <select id="t-gender">
+        <option value="">Belirtilmedi</option>
+        <option value="kadin" ${editTeacher?.gender === "kadin" ? "selected" : ""}>Kadın</option>
+        <option value="erkek" ${editTeacher?.gender === "erkek" ? "selected" : ""}>Erkek</option>
+      </select>
+      <label>İşe başlama tarihi</label>
+      <input id="t-hire" type="date" value="${editTeacher?.hire_date || ""}">
+      <div id="t-kidem-hint" style="font-size:11.5px;color:var(--muted);margin:-8px 0 12px"></div>
+      <div class="check-row"><input type="checkbox" id="t-seniority" ${editTeacher?.seniority_waiver_requested ? "checked" : ""}><label for="t-seniority">Kıdem muafiyeti talep etti (kadın 20 / erkek 25 yıl doldu, istemiyor)</label></div>
+      <label>Hamilelik muafiyeti bitiş tarihi <span style="color:var(--muted);font-weight:400">(boş bırak, yoksa)</span></label>
+      <input id="t-pregnancy" type="date" value="${editTeacher?.pregnancy_exempt_until || ""}">
+      <div class="check-row"><input type="checkbox" id="t-disability" ${editTeacher?.disability_exempt ? "checked" : ""}><label for="t-disability">Engelli / engelli çocuğu var / bakmakla yükümlü engelli birey var</label></div>
+      <div class="check-row"><input type="checkbox" id="t-disability-wants" ${editTeacher?.disability_wants_duty ? "checked" : ""}><label for="t-disability-wants">Muaf olsa da nöbet tutmak istiyor (gün tercihi öncelikli)</label></div>
+      <label>Yasaklı alanlar <span style="color:var(--muted);font-weight:400">(bu öğretmen buraya yazılmasın)</span></label>
+      <div class="chips" id="t-blocked">
+        ${(areas || []).map(a => `<span class="chip ${editTeacher && blockedByTeacher[editTeacher.id]?.has(a.id) ? "on" : ""}" data-area="${a.id}">${esc(a.label)}</span>`).join("") || `<span style="color:var(--muted);font-size:12.5px">Önce Ayarlar'dan alan ekle.</span>`}
+      </div>
+      <button class="primary" id="t-save">${editTeacher ? "Güncelle" : "Ekle"}</button>
+      ${editTeacher ? `<button class="secondary" id="t-cancel" style="margin-top:8px;width:100%">İptal</button>` : ""}
+      <div id="t-msg"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Öğretmen Havuzu (${(teachers || []).length})</h3>
+      <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Ad</th><th>Rol</th><th>Kota</th><th>Muafiyet</th><th></th></tr></thead>
+        <tbody>
+          ${(teachers || []).map(t => `
+            <tr>
+              <td>${esc(t.full_name)}${t.branch ? `<div style="color:var(--muted);font-size:11.5px">${esc(t.branch)}</div>` : ""}${t.hire_date ? `<div style="color:var(--muted);font-size:11.5px">${kidemYili(t.hire_date)} yıl kıdem${kidemEsigiDoldu(t) && !t.seniority_waiver_requested ? ' · <span style="color:var(--warn)">eşiği doldu</span>' : ""}</div>` : ""}</td>
+              <td>${t.is_idareci ? '<span class="pill">İdareci</span>' : 'Öğretmen'}</td>
+              <td>${t.weekly_duty_quota}/hafta</td>
+              <td>
+                ${t.seniority_waiver_requested ? '<span class="pill warn">Kıdem</span>' : ""}
+                ${t.pregnancy_exempt_until ? '<span class="pill warn">Hamilelik</span>' : ""}
+                ${t.disability_exempt ? '<span class="pill warn">Engellilik</span>' : ""}
+              </td>
+              <td class="row-actions">
+                <button data-edit="${t.id}">Düzenle</button>
+                <button data-del="${t.id}">Sil</button>
+              </td>
+            </tr>
+          `).join("") || `<tr><td colspan="5" style="color:var(--muted)">Henüz öğretmen eklenmedi.</td></tr>`}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  `;
+
+  content.querySelectorAll("#t-blocked .chip").forEach(chip => {
+    chip.onclick = () => chip.classList.toggle("on");
+  });
+
+  function updateKidemHint() {
+    const hire = document.getElementById("t-hire").value;
+    const gender = document.getElementById("t-gender").value;
+    const hintEl = document.getElementById("t-kidem-hint");
+    if (!hire) { hintEl.textContent = ""; return; }
+    const years = kidemYili(hire);
+    const threshold = gender === "kadin" ? 20 : gender === "erkek" ? 25 : null;
+    if (threshold === null) {
+      hintEl.textContent = `Kıdem: ${years} yıl (eşik için cinsiyet seçilmeli — kadın 20 / erkek 25 yıl)`;
+    } else if (years >= threshold) {
+      hintEl.innerHTML = `Kıdem: ${years} yıl — <strong style="color:var(--accent)">${threshold} yıl eşiğini doldurdu</strong>, talep ederse muafiyet uygulanabilir (Madde 44/6).`;
+    } else {
+      hintEl.textContent = `Kıdem: ${years} yıl (eşik: ${threshold} yıl — henüz doldurmadı)`;
+    }
+  }
+  updateKidemHint();
+  document.getElementById("t-hire").oninput = updateKidemHint;
+  document.getElementById("t-gender").onchange = updateKidemHint;
+
+  document.getElementById("t-save").onclick = async () => {
+    const full_name = document.getElementById("t-name").value.trim();
+    const msg = document.getElementById("t-msg");
+    if (!full_name) { msg.innerHTML = `<div class="msg err">Ad soyad gerekli.</div>`; return; }
+    const payload = {
+      school_id: school.id,
+      full_name,
+      branch: document.getElementById("t-branch").value.trim() || null,
+      phone: document.getElementById("t-phone").value.trim() || null,
+      weekly_duty_quota: parseInt(document.getElementById("t-quota").value) || 2,
+      is_idareci: document.getElementById("t-idareci").checked,
+      gender: document.getElementById("t-gender").value || null,
+      hire_date: document.getElementById("t-hire").value || null,
+      seniority_waiver_requested: document.getElementById("t-seniority").checked,
+      pregnancy_exempt_until: document.getElementById("t-pregnancy").value || null,
+      disability_exempt: document.getElementById("t-disability").checked,
+      disability_wants_duty: document.getElementById("t-disability-wants").checked,
+    };
+    let teacherId = editTeacher?.id;
+    if (teacherId) {
+      const { error } = await sb.from("teachers").update(payload).eq("id", teacherId);
+      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+    } else {
+      const { data, error } = await sb.from("teachers").insert(payload).select().single();
+      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+      teacherId = data.id;
+    }
+    const selectedAreas = Array.from(content.querySelectorAll("#t-blocked .chip.on")).map(c => c.dataset.area);
+    await sb.from("teacher_blocked_areas").delete().eq("teacher_id", teacherId);
+    if (selectedAreas.length) {
+      await sb.from("teacher_blocked_areas").insert(selectedAreas.map(area_id => ({ teacher_id: teacherId, duty_area_id: area_id, area: areaLabelById[area_id] || "" })));
+    }
+    await renderNobet(profile, school, "ogretmenler");
+  };
+
+  const cancelBtn = document.getElementById("t-cancel");
+  if (cancelBtn) cancelBtn.onclick = () => renderNobet(profile, school, "ogretmenler");
+
+  content.querySelectorAll("[data-edit]").forEach(b => b.onclick = async () => {
+    await renderOgretmenler(profile, school, content, b.dataset.edit);
+  });
+  content.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    if (!confirm("Bu öğretmeni silmek istediğine emin misin?")) return;
+    await sb.from("teachers").delete().eq("id", b.dataset.del);
+    await renderNobet(profile, school, "ogretmenler");
+  });
+}
+
+async function renderDonem(profile, school, content, activePeriodId = null) {
+  const { data: periods } = await sb.from("duty_periods").select("*").eq("school_id", school.id).order("starts_on", { ascending: false });
+  const period = activePeriodId ? (periods || []).find(p => p.id === activePeriodId) : (periods || [])[0];
+
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Yeni Dönem</h3>
+      <label>Başlık</label>
+      <input id="p-title" placeholder="örn. 2026-2027 Güz Dönemi">
+      <label>Başlangıç</label>
+      <input id="p-start" type="date">
+      <label>Bitiş</label>
+      <input id="p-end" type="date">
+      <label>Tatil / idari izin günleri <span style="color:var(--muted);font-weight:400">(virgülle ayır, örn. 2026-10-29,2026-11-24)</span></label>
+      <input id="p-holidays" placeholder="YYYY-AA-GG,YYYY-AA-GG">
+      <button class="primary" id="p-save">Dönem Oluştur</button>
+      <div id="p-msg"></div>
+    </div>
+    ${(periods || []).length ? `
+      <div class="card" style="margin-bottom:16px">
+        <h3 style="margin-top:0">Dönemler</h3>
+        <div class="subtabs" style="flex-wrap:wrap">
+          ${periods.map(p => `<div class="subtab ${period?.id === p.id ? "active" : ""}" data-period="${p.id}">${esc(p.title)}</div>`).join("")}
+        </div>
+      </div>
+    ` : ""}
+    ${period ? `<div id="schedule-area"></div>` : `<p style="color:var(--muted)">Önce bir dönem oluştur.</p>`}
+  `;
+
+  document.getElementById("p-save").onclick = async () => {
+    const title = document.getElementById("p-title").value.trim();
+    const starts_on = document.getElementById("p-start").value;
+    const ends_on = document.getElementById("p-end").value;
+    const holidayRaw = document.getElementById("p-holidays").value.trim();
+    const msg = document.getElementById("p-msg");
+    if (!title || !starts_on || !ends_on) { msg.innerHTML = `<div class="msg err">Başlık, başlangıç ve bitiş gerekli.</div>`; return; }
+    const holiday_dates = holidayRaw ? holidayRaw.split(",").map(s => s.trim()).filter(Boolean) : [];
+    const { data, error } = await sb.from("duty_periods").insert({ school_id: school.id, title, starts_on, ends_on, holiday_dates }).select().single();
+    if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+    await renderDonem(profile, school, content, data.id);
+  };
+
+  content.querySelectorAll("[data-period]").forEach(el => {
+    el.onclick = () => renderDonem(profile, school, content, el.dataset.period);
+  });
+
+  if (period) await renderSchedule(profile, school, period, document.getElementById("schedule-area"));
+}
+
+async function renderSchedule(profile, school, period, area, devretId = null, genResult = null) {
+  const { data: assignments } = await sb
+    .from("duty_assignments")
+    .select("*, teachers!duty_assignments_teacher_id_fkey(full_name, phone), duty_time_slots(label), duty_areas(label)")
+    .eq("duty_period_id", period.id)
+    .order("duty_date");
+
+  const summary = {};
+  const teacherInfo = {};
+  (assignments || []).forEach(a => {
+    const name = a.teachers?.full_name || "?";
+    summary[name] = (summary[name] || 0) + 1;
+    (teacherInfo[name] ??= { phone: a.teachers?.phone || null, items: [] }).items.push({
+      date: a.duty_date, slot: a.duty_time_slots?.label || "-", area: a.duty_areas?.label || a.area,
+    });
+  });
+  const summaryRows = Object.entries(summary).sort((a, b) => b[1] - a[1]);
+
+  const byDate = {};
+  (assignments || []).forEach(a => { (byDate[a.duty_date] ??= []).push(a); });
+  const dates = Object.keys(byDate).sort();
+
+  const devretAssignment = devretId ? (assignments || []).find(a => a.id === devretId) : null;
+  let devretPanelHtml = "";
+  let suggestion = null;
+  let eligiblePool = [];
+  if (devretAssignment) {
+    const result = await suggestSubstitute(school, assignments, devretAssignment);
+    suggestion = result.top;
+    eligiblePool = result.pool;
+    devretPanelHtml = `
+      <div class="card" style="margin-bottom:16px;border-color:var(--accent)">
+        <h3 style="margin-top:0">Nöbet Devri — ${devretAssignment.duty_date} · ${devretAssignment.duty_time_slots?.label || ""} · ${esc(devretAssignment.duty_areas?.label || devretAssignment.area)}</h3>
+        <p style="color:var(--muted);font-size:13px;margin-top:-6px">Şu an nöbetçi: <strong>${esc(devretAssignment.teachers?.full_name || "—")}</strong></p>
+        <label>Sebep</label>
+        <select id="devret-reason">
+          <option value="Raporlu">Raporlu</option>
+          <option value="İzinli">İzinli</option>
+          <option value="Diğer">Diğer</option>
+        </select>
+        ${suggestion
+          ? `<div class="msg ok" style="margin-top:10px">Öneri: <strong>${esc(suggestion.full_name)}</strong> — bu dönemde en az nöbeti olan uygun öğretmen (${suggestion.count} nöbet).</div>`
+          : `<div class="msg err" style="margin-top:10px">Bu nöbete uygun/muaf olmayan başka öğretmen bulunamadı — gerekirse elle seç.</div>`}
+        <label>Farklı öğretmen seç <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+        <select id="devret-alt">
+          <option value="">${suggestion ? "— önerilen kullanılsın —" : "— seç —"}</option>
+          ${eligiblePool.map(t => `<option value="${t.id}">${esc(t.full_name)} (${t.count} nöbet)</option>`).join("")}
+        </select>
+        <div style="display:flex;gap:10px;margin-top:12px">
+          <button class="primary" id="devret-confirm" style="margin:0;width:auto;padding:10px 18px" ${!suggestion && !eligiblePool.length ? "disabled" : ""}>Devri Onayla</button>
+          <button class="secondary" id="devret-cancel" style="margin:0;width:auto;padding:10px 18px">İptal</button>
+        </div>
+        <div id="devret-msg"></div>
+      </div>
+    `;
+  }
+
+  const warningHtml = genResult && genResult.totalUnfilled > 0 ? `
+    <div class="card" style="margin-bottom:16px;border-color:var(--warn)">
+      <h3 style="margin-top:0">⚠️ Eksik Kapsama</h3>
+      <p style="margin:0">${genResult.created}/${genResult.totalSlots} nöbet noktası dolduruldu — <strong>${genResult.totalUnfilled} nöbet noktası öğretmen/kota yetersizliği nedeniyle boş kaldı.</strong></p>
+      ${genResult.fullyEmptyDays.length ? `<p style="color:var(--crit);margin:8px 0 0">Bu günler HİÇ nöbetçi ataması almadı: ${genResult.fullyEmptyDays.join(", ")}</p>` : ""}
+      <p style="font-size:12px;color:var(--muted);margin:8px 0 0">Çözüm için: zaman dilimi/alan sayısını azalt, öğretmen haftalık kotalarını artır ya da öğretmen sayısını gözden geçir.</p>
+    </div>
+  ` : "";
+
+  area.innerHTML = `
+    ${devretPanelHtml}
+    ${warningHtml}
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <div>
+          <h3 style="margin:0">${esc(period.title)}</h3>
+          <p style="color:var(--muted);font-size:12.5px;margin:4px 0 0">${period.starts_on} — ${period.ends_on}${period.holiday_dates?.length ? ` · ${period.holiday_dates.length} tatil günü hariç` : ""}</p>
+        </div>
+        <button class="primary" id="gen-btn" style="margin:0;width:auto;padding:10px 18px">${assignments?.length ? "Yeniden Oluştur" : "Çizelge Oluştur"}</button>
+      </div>
+      <p style="color:var(--muted);font-size:11.5px;margin:6px 0 0">Yeniden oluşturma, "Devret" ile sabitlenmiş atamaları korur.</p>
+      <div id="gen-msg"></div>
+    </div>
+    ${summaryRows.length ? `
+      <div class="card" style="margin-bottom:16px">
+        <h3 style="margin-top:0">Kim Kaç Nöbet Tuttu</h3>
+        ${summaryRows.map(([name, count]) => {
+          const info = teacherInfo[name];
+          const message = `Merhaba ${name}, ${period.title} nöbet çizelgeniz:\n${info.items.slice().sort((a, b) => a.date.localeCompare(b.date)).map(i => `- ${fmtDate(i.date)} ${i.slot} (${i.area})`).join("\n")}\n\nİyi çalışmalar.\n${school.name}`;
+          const link = waLink(info.phone, message);
+          return `<div class="list-item"><span>${esc(name)}</span><span style="display:flex;align-items:center;gap:10px"><strong>${count}</strong>${link ? `<a href="${link}" target="_blank" rel="noopener" class="pill" style="text-decoration:none">📲 WhatsApp</a>` : `<span style="font-size:10.5px;color:var(--muted)">tel. yok</span>`}</span></div>`;
+        }).join("")}
+      </div>
+    ` : ""}
+    ${dates.length ? `
+      <div class="card">
+        <h3 style="margin-top:0">Çizelge</h3>
+        <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Tarih</th><th>Zaman Dilimi</th><th>Alan</th><th>Öğretmen</th><th></th></tr></thead>
+          <tbody>
+            ${dates.map(d => byDate[d].map((a, i) => `
+              <tr>
+                <td>${i === 0 ? d : ""}</td>
+                <td>${a.duty_time_slots?.label || "-"}</td>
+                <td>${esc(a.duty_areas?.label || a.area)}</td>
+                <td>${esc(a.teachers?.full_name || "—")} ${a.is_pinned ? '<span class="pill">📌</span>' : ""} ${a.substituted_from ? `<span class="pill" title="Devir sebebi: ${esc(a.substitution_reason || "")}">🔁</span>` : ""}</td>
+                <td class="row-actions"><button data-devret="${a.id}">Devret</button></td>
+              </tr>
+            `).join("")).join("")}
+          </tbody>
+        </table>
+        </div>
+      </div>
+    ` : `<p style="color:var(--muted)">Bu dönem için henüz çizelge oluşturulmadı.</p>`}
+  `;
+
+  document.getElementById("gen-btn").onclick = async () => {
+    const btn = document.getElementById("gen-btn");
+    const msg = document.getElementById("gen-msg");
+    btn.disabled = true;
+    msg.innerHTML = `<div class="msg ok">Oluşturuluyor…</div>`;
+    let result = null;
+    try {
+      result = await generateSchedule(school, period);
+    } catch (e) {
+      msg.innerHTML = `<div class="msg err">${e.message}</div>`;
+      btn.disabled = false;
+      return;
+    }
+    btn.disabled = false;
+    await renderSchedule(profile, school, period, area, null, result);
+  };
+
+  area.querySelectorAll("[data-devret]").forEach(btn => {
+    btn.onclick = () => renderSchedule(profile, school, period, area, btn.dataset.devret);
+  });
+
+  if (devretAssignment) {
+    document.getElementById("devret-cancel").onclick = () => renderSchedule(profile, school, period, area);
+    document.getElementById("devret-confirm").onclick = async () => {
+      const reason = document.getElementById("devret-reason").value;
+      const altId = document.getElementById("devret-alt").value;
+      const newTeacherId = altId || suggestion?.id;
+      const msg = document.getElementById("devret-msg");
+      if (!newTeacherId) { msg.innerHTML = `<div class="msg err">Bir öğretmen seç.</div>`; return; }
+      const { error } = await sb.from("duty_assignments").update({
+        teacher_id: newTeacherId,
+        substituted_from: devretAssignment.teacher_id,
+        substitution_reason: reason,
+        substituted_at: new Date().toISOString(),
+        is_pinned: true,
+      }).eq("id", devretAssignment.id);
+      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+      await renderSchedule(profile, school, period, area);
+    };
+  }
+}
+
+async function suggestSubstitute(school, assignments, target) {
+  const { data: teachers } = await sb.from("teachers").select("*").eq("school_id", school.id);
+  const { data: blocked } = await sb.from("teacher_blocked_areas").select("*").in("teacher_id", (teachers || []).map(t => t.id).length ? (teachers || []).map(t => t.id) : ["00000000-0000-0000-0000-000000000000"]);
+  const blockedByTeacher = {};
+  (blocked || []).forEach(b => { (blockedByTeacher[b.teacher_id] ??= new Set()).add(b.duty_area_id); });
+
+  function isExempt(t, date) {
+    if (t.pregnancy_exempt_until && date <= t.pregnancy_exempt_until) return true;
+    if (t.disability_exempt && !t.disability_wants_duty) return true;
+    if (t.seniority_waiver_requested) return true;
+    return false;
+  }
+
+  const countByTeacher = {};
+  const weekCountByTeacher = {};
+  const dayAssignedTeacher = {};
+  (assignments || []).forEach(a => {
+    if (!a.teacher_id || a.id === target.id) return;
+    countByTeacher[a.teacher_id] = (countByTeacher[a.teacher_id] || 0) + 1;
+    const wk = a.teacher_id + "|" + weekKeyOf(a.duty_date);
+    weekCountByTeacher[wk] = (weekCountByTeacher[wk] || 0) + 1;
+    (dayAssignedTeacher[a.duty_date] ??= new Set()).add(a.teacher_id);
+  });
+
+  const pool = (teachers || []).filter(t => {
+    if (t.id === target.teacher_id) return false;
+    if (isExempt(t, target.duty_date)) return false;
+    if (blockedByTeacher[t.id]?.has(target.duty_area_id)) return false;
+    const wk = weekCountByTeacher[t.id + "|" + weekKeyOf(target.duty_date)] || 0;
+    if (wk >= (t.weekly_duty_quota || 2)) return false;
+    return true;
+  });
+  const notWorkingThatDay = pool.filter(t => !(dayAssignedTeacher[target.duty_date]?.has(t.id)));
+  const candidates = notWorkingThatDay.length ? notWorkingThatDay : pool;
+
+  const ranked = candidates
+    .map(t => ({ id: t.id, full_name: t.full_name, count: countByTeacher[t.id] || 0 }))
+    .sort((a, b) => a.count - b.count);
+
+  return { top: ranked[0] || null, pool: ranked };
+}
+
+function toLocalISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function weekKeyOf(dateStr) {
+  const dt = new Date(dateStr + "T00:00:00");
+  const day = dt.getDay() || 7;
+  const monday = new Date(dt);
+  monday.setDate(dt.getDate() - day + 1);
+  return toLocalISO(monday);
+}
+
+async function generateSchedule(school, period) {
+  await sb.from("duty_assignments").delete().eq("duty_period_id", period.id).eq("is_pinned", false);
+
+  const [{ data: teachers }, { data: slots }, { data: areas }, { data: existing }] = await Promise.all([
+    sb.from("teachers").select("*").eq("school_id", school.id),
+    sb.from("duty_time_slots").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("duty_areas").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("duty_assignments").select("*").eq("duty_period_id", period.id),
+  ]);
+  const { data: blocked } = await sb.from("teacher_blocked_areas").select("*").in("teacher_id", (teachers || []).map(t => t.id).length ? (teachers || []).map(t => t.id) : ["00000000-0000-0000-0000-000000000000"]);
+
+  if (!teachers?.length) throw new Error("Önce Öğretmenler sekmesinden en az bir öğretmen ekle.");
+  if (!slots?.length) throw new Error("Önce Ayarlar sekmesinden en az bir zaman dilimi ekle.");
+  if (!areas?.length) throw new Error("Önce Ayarlar sekmesinden en az bir alan ekle.");
+
+  const blockedByTeacher = {};
+  (blocked || []).forEach(b => { (blockedByTeacher[b.teacher_id] ??= new Set()).add(b.duty_area_id); });
+
+  const pinned = (existing || []).filter(a => a.is_pinned);
+  const pinnedKeys = new Set(pinned.map(a => `${a.duty_date}|${a.time_slot_id}|${a.duty_area_id}`));
+
+  function isExempt(t, date) {
+    if (t.pregnancy_exempt_until && date <= t.pregnancy_exempt_until) return true;
+    if (t.disability_exempt && !t.disability_wants_duty) return true;
+    if (t.seniority_waiver_requested) return true;
+    return false;
+  }
+
+  const holidaySet = new Set(period.holiday_dates || []);
+  const days = [];
+  let d = new Date(period.starts_on + "T00:00:00");
+  const end = new Date(period.ends_on + "T00:00:00");
+  while (d <= end) {
+    const iso = toLocalISO(d);
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6 && !holidaySet.has(iso)) days.push(iso);
+    d.setDate(d.getDate() + 1);
+  }
+
+  const countByTeacher = {};
+  teachers.forEach(t => countByTeacher[t.id] = 0);
+  const weekCountByTeacher = {};
+  const dayAssignedTeacher = {};
+  pinned.forEach(a => {
+    if (!a.teacher_id) return;
+    countByTeacher[a.teacher_id] = (countByTeacher[a.teacher_id] || 0) + 1;
+    const wk = a.teacher_id + "|" + weekKeyOf(a.duty_date);
+    weekCountByTeacher[wk] = (weekCountByTeacher[wk] || 0) + 1;
+    (dayAssignedTeacher[a.duty_date] ??= new Set()).add(a.teacher_id);
+  });
+
+  const newRows = [];
+  const unfilledByDate = {};
+  for (const date of days) {
+    for (const slot of slots) {
+      for (const ar of areas) {
+        const key = `${date}|${slot.id}|${ar.id}`;
+        if (pinnedKeys.has(key)) continue;
+
+        let pool = teachers.filter(t => {
+          if (isExempt(t, date)) return false;
+          if (blockedByTeacher[t.id]?.has(ar.id)) return false;
+          const wk = weekCountByTeacher[t.id + "|" + weekKeyOf(date)] || 0;
+          if (wk >= (t.weekly_duty_quota || 2)) return false;
+          return true;
+        });
+        const notWorkingToday = pool.filter(t => !(dayAssignedTeacher[date]?.has(t.id)));
+        const candidates = notWorkingToday.length ? notWorkingToday : pool;
+        if (!candidates.length) { unfilledByDate[date] = (unfilledByDate[date] || 0) + 1; continue; }
+
+        candidates.sort((a, b) => (countByTeacher[a.id] || 0) - (countByTeacher[b.id] || 0));
+        const chosen = candidates[0];
+
+        newRows.push({ duty_period_id: period.id, teacher_id: chosen.id, duty_date: date, area: ar.label, duty_area_id: ar.id, time_slot_id: slot.id, is_pinned: false });
+        countByTeacher[chosen.id] = (countByTeacher[chosen.id] || 0) + 1;
+        const wk = chosen.id + "|" + weekKeyOf(date);
+        weekCountByTeacher[wk] = (weekCountByTeacher[wk] || 0) + 1;
+        (dayAssignedTeacher[date] ??= new Set()).add(chosen.id);
+      }
+    }
+  }
+
+  if (newRows.length) {
+    const { error } = await sb.from("duty_assignments").insert(newRows);
+    if (error) throw error;
+  }
+  const totalSlots = days.length * slots.length * areas.length;
+  const totalUnfilled = Object.values(unfilledByDate).reduce((s, n) => s + n, 0);
+  const fullyEmptyDays = days.filter(d => (unfilledByDate[d] || 0) === slots.length * areas.length && !pinned.some(p => p.duty_date === d));
+  return { created: newRows.length, totalSlots, totalUnfilled, unfilledByDate, fullyEmptyDays };
+}
+
+/**
+ * İdareci (müdür yardımcısı) nöbeti — öğretmen nöbet havuzundan bağımsız, adalet algoritması
+ * uygulanmaz. Mevzuatta birden fazla müdür yardımcısı arasında paylaşıma dair açık hüküm yok;
+ * müdür kime hangi tarih aralığını (gün gün ya da haftalık) vereceğine kendi takdirinde karar
+ * verir — bu yüzden burada sadece esnek bir tarih aralığı + idareci ataması (serbest CRUD) var,
+ * otomatik dağıtım yok.
+ */
+async function renderIdareciNobeti(profile, school, content, editingId = null) {
+  const [{ data: idareciler }, { data: assignments }] = await Promise.all([
+    sb.from("teachers").select("*").eq("school_id", school.id).eq("is_idareci", true).order("full_name"),
+    sb.from("idareci_duty_assignments").select("*, teachers(full_name, phone)").eq("school_id", school.id).order("starts_on", { ascending: false }),
+  ]);
+
+  if (!idareciler?.length) {
+    content.innerHTML = `<p style="color:var(--muted)">Henüz "Müdür yardımcısı (idareci)" olarak işaretlenmiş bir öğretmen yok — Öğretmenler sekmesinden bir öğretmeni idareci olarak işaretle.</p>`;
+    return;
+  }
+
+  const editAssign = editingId ? (assignments || []).find(a => a.id === editingId) : null;
+  const summary = {};
+  (assignments || []).forEach(a => {
+    const name = a.teachers?.full_name || "?";
+    const days = Math.round((new Date(a.ends_on) - new Date(a.starts_on)) / 86400000) + 1;
+    summary[name] = (summary[name] || 0) + days;
+  });
+
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">${editAssign ? "Nöbeti Düzenle" : "Yeni İdareci Nöbeti"}</h3>
+      <p style="color:var(--muted);font-size:12.5px;margin-top:-4px">Mevzuatta müdür yardımcıları arasında paylaşıma dair açık hüküm yok — kim hangi tarihte nöbetçi olacağına idare karar verir. Tek gün için başlangıç/bitişi aynı seç, hafta için bir hafta aralığı gir.</p>
+      <label>İdareci</label>
+      <select id="i-teacher">${idareciler.map(t => `<option value="${t.id}" ${editAssign?.teacher_id === t.id ? "selected" : ""}>${esc(t.full_name)}</option>`).join("")}</select>
+      <label>Başlangıç</label>
+      <input id="i-start" type="date" value="${editAssign?.starts_on || ""}">
+      <label>Bitiş</label>
+      <input id="i-end" type="date" value="${editAssign?.ends_on || ""}">
+      <label>Not <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <input id="i-note" value="${editAssign ? esc(editAssign.note || "") : ""}" placeholder="örn. izinli idareci yerine">
+      <button class="primary" id="i-save">${editAssign ? "Güncelle" : "Ekle"}</button>
+      ${editAssign ? `<button class="secondary" id="i-cancel" style="margin-top:8px;width:100%">İptal</button>` : ""}
+      <div id="i-msg"></div>
+    </div>
+    ${Object.keys(summary).length ? `
+      <div class="card" style="margin-bottom:16px">
+        <h3 style="margin-top:0">Kim Kaç Gün İdareci Nöbeti Tuttu</h3>
+        ${Object.entries(summary).sort((a, b) => b[1] - a[1]).map(([name, days]) => `<div class="list-item"><span>${esc(name)}</span><strong>${days} gün</strong></div>`).join("")}
+      </div>
+    ` : ""}
+    <div class="card">
+      <h3 style="margin-top:0">Nöbet Kayıtları</h3>
+      <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Tarih Aralığı</th><th>İdareci</th><th>Not</th><th></th></tr></thead>
+        <tbody>
+          ${(assignments || []).map(a => {
+            const single = a.starts_on === a.ends_on;
+            const range = single ? fmtDate(a.starts_on) : `${fmtDate(a.starts_on)} — ${fmtDate(a.ends_on)}`;
+            const message = `Merhaba ${a.teachers?.full_name || ""}, ${range} tarihleri arasında idareci nöbetçisisiniz.${a.note ? `\nNot: ${a.note}` : ""}\n\nİyi çalışmalar.\n${school.name}`;
+            const link = waLink(a.teachers?.phone, message);
+            return `
+            <tr>
+              <td>${esc(range)}</td>
+              <td>${esc(a.teachers?.full_name || "(silinmiş öğretmen)")}</td>
+              <td>${esc(a.note || "")}</td>
+              <td class="row-actions">
+                ${link ? `<a href="${link}" target="_blank" rel="noopener">📲</a>` : ""}
+                <button data-edit-idareci="${a.id}">Düzenle</button>
+                <button data-del-idareci="${a.id}">Sil</button>
+              </td>
+            </tr>
+          `;
+          }).join("") || `<tr><td colspan="4" style="color:var(--muted)">Henüz kayıt eklenmedi.</td></tr>`}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("i-save").onclick = async () => {
+    const teacher_id = document.getElementById("i-teacher").value;
+    const starts_on = document.getElementById("i-start").value;
+    const ends_on = document.getElementById("i-end").value;
+    const note = document.getElementById("i-note").value.trim() || null;
+    const msg = document.getElementById("i-msg");
+    if (!starts_on || !ends_on) { msg.innerHTML = `<div class="msg err">Başlangıç ve bitiş tarihi gerekli.</div>`; return; }
+    if (ends_on < starts_on) { msg.innerHTML = `<div class="msg err">Bitiş, başlangıçtan önce olamaz.</div>`; return; }
+    if (editAssign) {
+      const { error } = await sb.from("idareci_duty_assignments").update({ teacher_id, starts_on, ends_on, note }).eq("id", editAssign.id);
+      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+    } else {
+      const { error } = await sb.from("idareci_duty_assignments").insert({ school_id: school.id, teacher_id, starts_on, ends_on, note });
+      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+    }
+    await renderIdareciNobeti(profile, school, content);
+  };
+  const cancelBtn = document.getElementById("i-cancel");
+  if (cancelBtn) cancelBtn.onclick = () => renderIdareciNobeti(profile, school, content);
+  content.querySelectorAll("[data-edit-idareci]").forEach(b => b.onclick = () => renderIdareciNobeti(profile, school, content, b.dataset.editIdareci));
+  content.querySelectorAll("[data-del-idareci]").forEach(b => b.onclick = async () => {
+    if (!confirm("Bu nöbet kaydını silmek istediğine emin misin?")) return;
+    await sb.from("idareci_duty_assignments").delete().eq("id", b.dataset.delIdareci);
+    await renderIdareciNobeti(profile, school, content);
+  });
+}
+
+/* ============ MEVZUATA SOR (v1 — sadece doğrulanmış kendi verinde arama, AI/LLM yok) ============ */
+
+async function renderMevzuatModule(profile, school) {
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Mevzuata Sor</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Teftişe Hazırlık ve Aylık Yönetim Akışı'na girdiğin doğrulanmış maddeler arasında arama yapar. Bir yapay zekâ değil — sadece kendi onayladığın veride arar, uydurma cevap üretmez. Sonuç yoksa "bulunamadı" der.</div>
+      <div id="mevzuat-content"></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  await renderMevzuat(school, document.getElementById("mevzuat-content"));
+}
+
+async function renderMevzuat(school, content) {
+  const { count: totalCount } = await sb.from("checklist_items").select("id", { count: "exact", head: true }).eq("school_id", school.id);
+  const { count: totalTasks } = await sb.from("monthly_tasks").select("id", { count: "exact", head: true }).eq("school_id", school.id);
+  const hasCorpus = (totalCount || 0) + (totalTasks || 0) > 0;
+
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <label>Ara</label>
+      <input id="mv-q" placeholder="örn. hamilelik, kıdem, tahliye tatbikatı, devir teslim">
+    </div>
+    <div id="mv-results"></div>
+  `;
+
+  const resultsEl = document.getElementById("mv-results");
+  if (!hasCorpus) {
+    resultsEl.innerHTML = `<p style="color:var(--muted)">Henüz aranacak madde yok — önce Teftişe Hazırlık ya da Aylık Yönetim Akışı'na madde/görev ekle.</p>`;
+  }
+
+  let debounceTimer = null;
+  async function runSearch(q) {
+    const query = q.trim();
+    if (!query) { resultsEl.innerHTML = hasCorpus ? "" : resultsEl.innerHTML; return; }
+    resultsEl.innerHTML = `<p style="color:var(--muted)">Aranıyor…</p>`;
+    const { data, error } = await sb.rpc("search_mevzuat", { p_query: query });
+    if (error) {
+      resultsEl.innerHTML = `<div class="msg err">${esc(error.message)}</div>`;
+      return;
+    }
+    resultsEl.innerHTML = (data && data.length)
+      ? data.map(r => `
+        <div class="card" style="margin-bottom:10px">
+          <span class="pill">${esc(r.source)}</span> ${r.category ? `<span class="pill">${esc(r.category)}</span>` : ""}
+          <div style="margin-top:8px;font-weight:600">${esc(r.content)}</div>
+          ${r.dayanak ? `<div style="font-size:11.5px;color:var(--accent);margin-top:6px">📖 ${esc(r.dayanak)}</div>` : ""}
+          ${r.note ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">💡 ${esc(r.note)}</div>` : ""}
+        </div>
+      `).join("")
+      : `<p style="color:var(--muted)">Eşleşme bulunamadı. Bu, elimizde bu konuda doğrulanmış bir kayıt olmadığı anlamına gelir — uydurmak yerine boş sonuç gösteriyoruz. Teftişe Hazırlık/Aylık Yönetim Akışı'na doğrulanmış kaynakla eklemeyi düşün.</p>`;
+  }
+
+  document.getElementById("mv-q").oninput = (e) => {
+    clearTimeout(debounceTimer);
+    const q = e.target.value;
+    debounceTimer = setTimeout(() => runSearch(q), 250);
+  };
+}
+
+/* ============ DERS DAĞITIM PROGRAMI ============ */
+
+const DAY_NAMES_DERS = { 1: "Pazartesi", 2: "Salı", 3: "Çarşamba", 4: "Perşembe", 5: "Cuma" };
+const DERS_DAYS = [1, 2, 3, 4, 5];
+const DERS_MAX_PER_DAY = 2;
+
+const OKUL_TURU_LABELS = { okul_oncesi: "Okul Öncesi / Anaokulu", ilkokul: "İlkokul", ortaokul: "Ortaokul", lise: "Lise" };
+
+const DEFAULT_SUBJECTS_BY_LEVEL = {
+  okul_oncesi: [
+    ["Türkçe Dil Etkinliği", false], ["Matematik Etkinliği", false], ["Fen ve Doğa Etkinliği", false],
+    ["Sanat Etkinliği", false], ["Müzik Etkinliği", false], ["Oyun ve Hareket Etkinliği", false], ["İngilizce", false],
+  ],
+  ilkokul: [
+    ["Türkçe", true], ["Matematik", true], ["Hayat Bilgisi", false], ["Fen Bilimleri", false],
+    ["Sosyal Bilgiler", false], ["İngilizce", false], ["Din Kültürü ve Ahlak Bilgisi", false],
+    ["Beden Eğitimi ve Oyun", false], ["Görsel Sanatlar", false], ["Müzik", false],
+  ],
+  ortaokul: [
+    ["Türkçe", true], ["Matematik", true], ["Fen Bilimleri", true], ["Sosyal Bilgiler", false],
+    ["İngilizce", false], ["Din Kültürü ve Ahlak Bilgisi", false], ["Beden Eğitimi ve Spor", false],
+    ["Görsel Sanatlar", false], ["Müzik", false], ["Teknoloji ve Tasarım", false], ["Bilişim Teknolojileri ve Yazılım", false],
+  ],
+  lise: [
+    ["Türk Dili ve Edebiyatı", true], ["Matematik", true], ["Fizik", true], ["Kimya", true], ["Biyoloji", true],
+    ["Tarih", false], ["Coğrafya", false], ["Felsefe", false], ["Yabancı Dil (İngilizce)", false],
+    ["Din Kültürü ve Ahlak Bilgisi", false], ["Beden Eğitimi ve Spor", false], ["Görsel Sanatlar / Müzik", false],
+  ],
+};
+
+function dersHeader(school, activeTab) {
+  const tabs = [
+    { id: "ayarlar", label: "Ayarlar" },
+    { id: "atamalar", label: "Atamalar" },
+    { id: "program", label: "Program" },
+  ];
+  return `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Ders Dağıtım Programı</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Sınıf, ders ve öğretmen saatlerinden çakışmasız, dengeli haftalık ders programı üretir. Her kademede çalışır: anaokulu/ilkokulda bir sınıf öğretmeni çoğu dersi tek başına verirse, o öğretmeni birden çok derse yüksek saatle ata; ortaokul/lisede her ders ayrı bir branş öğretmenine atanır — sistem ikisini de aynı şekilde çözer.</div>
+      <div class="subtabs">
+        ${tabs.map(t => `<div class="subtab ${t.id === activeTab ? "active" : ""}" data-tab="${t.id}">${t.label}</div>`).join("")}
+      </div>
+      <div id="ders-content"></div>
+    </div>
+  `;
+}
+
+async function renderDersModule(profile, school, tab) {
+  app.innerHTML = dersHeader(school, tab);
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  document.querySelectorAll("[data-tab]").forEach(el => {
+    el.onclick = () => renderDersModule(profile, school, el.dataset.tab);
+  });
+  const content = document.getElementById("ders-content");
+  content.innerHTML = `<div class="card">Yükleniyor…</div>`;
+  if (tab === "atamalar") await renderDersAtamalar(profile, school, content);
+  else if (tab === "program") await renderDersProgram(profile, school, content);
+  else await renderDersAyarlar(profile, school, content);
+}
+
+async function renderDersAyarlar(profile, school, content) {
+  const [{ data: subjects }, { data: classes }, { data: periods }] = await Promise.all([
+    sb.from("subjects").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("classes").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("lesson_periods").select("*").eq("school_id", school.id).order("sort_order"),
+  ]);
+
+  const levelDefaults = DEFAULT_SUBJECTS_BY_LEVEL[school.okul_turu] || [];
+  const existingNames = new Set((subjects || []).map(s => s.name));
+  const missingDefaults = levelDefaults.filter(([name]) => !existingNames.has(name));
+
+  content.innerHTML = `
+    <div class="grid">
+      <div class="card">
+        <h3 style="margin-top:0">Dersler</h3>
+        ${missingDefaults.length ? `
+          <p style="color:var(--muted);font-size:12.5px">${esc(OKUL_TURU_LABELS[school.okul_turu] || "")} için önerilen ${missingDefaults.length} ders var, tek tıkla ekleyebilirsin (istediğini sonra silebilir/değiştirebilirsin).</p>
+          <button class="secondary" id="seed-subjects" style="margin-bottom:14px;width:100%">${esc(OKUL_TURU_LABELS[school.okul_turu] || "Önerilen")} ders listesini ekle</button>
+        ` : ""}
+        <div id="subject-list">
+          ${(subjects || []).map(s => `<div class="list-item"><span>${esc(s.name)}${s.is_heavy ? ' <span class="pill warn">ağır</span>' : ""}</span><div class="row-actions"><button data-del-subject="${s.id}">Sil</button></div></div>`).join("") || `<p style="color:var(--muted);font-size:13px">Henüz eklenmedi.</p>`}
+        </div>
+        <label>Yeni ders</label>
+        <input id="new-subject" placeholder="örn. Matematik">
+        <div class="check-row"><input type="checkbox" id="new-subject-heavy"><label for="new-subject-heavy">Ağır ders (sabah saatine öncelik)</label></div>
+        <button class="secondary" id="add-subject" style="margin-top:10px;width:100%">Ekle</button>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Sınıflar</h3>
+        <div id="class-list">
+          ${(classes || []).map(c => `<div class="list-item"><span>${esc(c.name)}</span><div class="row-actions"><button data-del-class="${c.id}">Sil</button></div></div>`).join("") || `<p style="color:var(--muted);font-size:13px">Henüz eklenmedi.</p>`}
+        </div>
+        <label>Yeni sınıf</label>
+        <input id="new-class" placeholder="örn. 5-A">
+        <button class="secondary" id="add-class" style="margin-top:10px;width:100%">Ekle</button>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Ders Saatleri</h3>
+        <div id="period-list">
+          ${(periods || []).map(p => `<div class="list-item"><span>${esc(p.label)}</span><div class="row-actions"><button data-del-period="${p.id}">Sil</button></div></div>`).join("") || `<p style="color:var(--muted);font-size:13px">Henüz eklenmedi.</p>`}
+        </div>
+        <label>Yeni ders saati</label>
+        <input id="new-period" placeholder="örn. 1. Ders">
+        <button class="secondary" id="add-period" style="margin-top:10px;width:100%">Ekle</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("add-subject").onclick = async () => {
+    const name = document.getElementById("new-subject").value.trim();
+    if (!name) return;
+    const is_heavy = document.getElementById("new-subject-heavy").checked;
+    await sb.from("subjects").insert({ school_id: school.id, name, is_heavy, sort_order: (subjects || []).length });
+    await renderDersModule(profile, school, "ayarlar");
+  };
+  const seedBtn = document.getElementById("seed-subjects");
+  if (seedBtn) seedBtn.onclick = async () => {
+    await sb.from("subjects").insert(missingDefaults.map(([name, is_heavy], idx) => ({ school_id: school.id, name, is_heavy, sort_order: (subjects || []).length + idx })));
+    await renderDersModule(profile, school, "ayarlar");
+  };
+  document.getElementById("add-class").onclick = async () => {
+    const name = document.getElementById("new-class").value.trim();
+    if (!name) return;
+    await sb.from("classes").insert({ school_id: school.id, name, sort_order: (classes || []).length });
+    await renderDersModule(profile, school, "ayarlar");
+  };
+  document.getElementById("add-period").onclick = async () => {
+    const label = document.getElementById("new-period").value.trim();
+    if (!label) return;
+    await sb.from("lesson_periods").insert({ school_id: school.id, label, sort_order: (periods || []).length });
+    await renderDersModule(profile, school, "ayarlar");
+  };
+  content.querySelectorAll("[data-del-subject]").forEach(b => b.onclick = async () => {
+    await sb.from("subjects").delete().eq("id", b.dataset.delSubject);
+    await renderDersModule(profile, school, "ayarlar");
+  });
+  content.querySelectorAll("[data-del-class]").forEach(b => b.onclick = async () => {
+    await sb.from("classes").delete().eq("id", b.dataset.delClass);
+    await renderDersModule(profile, school, "ayarlar");
+  });
+  content.querySelectorAll("[data-del-period]").forEach(b => b.onclick = async () => {
+    await sb.from("lesson_periods").delete().eq("id", b.dataset.delPeriod);
+    await renderDersModule(profile, school, "ayarlar");
+  });
+}
+
+async function renderDersAtamalar(profile, school, content) {
+  const [{ data: assigns }, { data: classes }, { data: subjects }, { data: teachers }] = await Promise.all([
+    sb.from("class_subject_hours").select("*, classes(name), subjects(name), teachers(full_name)").eq("school_id", school.id),
+    sb.from("classes").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("subjects").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("teachers").select("*").eq("school_id", school.id).order("full_name"),
+  ]);
+
+  if (!classes?.length || !subjects?.length || !teachers?.length) {
+    content.innerHTML = `<p style="color:var(--muted)">Önce Ayarlar'dan en az bir sınıf ve ders ekle; öğretmen yoksa Nöbet Programı &gt; Öğretmenler'den ekle.</p>`;
+    return;
+  }
+
+  const byClass = {};
+  (assigns || []).forEach(a => { (byClass[a.class_id] ??= []).push(a); });
+
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Yeni Atama</h3>
+      <label>Sınıf</label>
+      <select id="a-class">${classes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select>
+      <label>Ders</label>
+      <select id="a-subject">${subjects.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select>
+      <label>Öğretmen</label>
+      <select id="a-teacher">${teachers.map(t => `<option value="${t.id}">${esc(t.full_name)}</option>`).join("")}</select>
+      <label>Haftalık saat</label>
+      <input id="a-hours" type="number" min="1" value="2">
+      <button class="primary" id="a-save">Ekle</button>
+      <div id="a-msg"></div>
+    </div>
+    ${classes.map(c => `
+      <div class="card" style="margin-bottom:16px">
+        <h3 style="margin-top:0">${esc(c.name)} <span style="color:var(--muted);font-weight:400;font-size:12.5px">(${(byClass[c.id] || []).reduce((s, a) => s + a.weekly_hours, 0)} saat/hafta)</span></h3>
+        ${(byClass[c.id] || []).length ? `
+          <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Ders</th><th>Öğretmen</th><th>Saat</th><th></th></tr></thead>
+            <tbody>
+              ${byClass[c.id].map(a => `<tr><td>${esc(a.subjects?.name)}</td><td>${esc(a.teachers?.full_name)}</td><td>${a.weekly_hours}</td><td class="row-actions"><button data-del-assign="${a.id}">Sil</button></td></tr>`).join("")}
+            </tbody>
+          </table>
+          </div>
+        ` : `<p style="color:var(--muted);font-size:13px">Bu sınıf için henüz atama yok.</p>`}
+      </div>
+    `).join("")}
+  `;
+
+  document.getElementById("a-save").onclick = async () => {
+    const class_id = document.getElementById("a-class").value;
+    const subject_id = document.getElementById("a-subject").value;
+    const teacher_id = document.getElementById("a-teacher").value;
+    const weekly_hours = parseInt(document.getElementById("a-hours").value) || 1;
+    const msg = document.getElementById("a-msg");
+    const { error } = await sb.from("class_subject_hours").insert({ school_id: school.id, class_id, subject_id, teacher_id, weekly_hours });
+    if (error) { msg.innerHTML = `<div class="msg err">${error.code === "23505" ? "Bu sınıf/ders/öğretmen kombinasyonu zaten eklenmiş — düzenlemek için önce sil." : error.message}</div>`; return; }
+    await renderDersModule(profile, school, "atamalar");
+  };
+  content.querySelectorAll("[data-del-assign]").forEach(b => b.onclick = async () => {
+    await sb.from("class_subject_hours").delete().eq("id", b.dataset.delAssign);
+    await renderDersModule(profile, school, "atamalar");
+  });
+}
+
+/**
+ * İki fazlı çizelgeleme motoru:
+ * Faz 1 — yapılandırma: en yüklü öğretmenden başlayarak, çoklu yumuşak-kısıt skoruna göre
+ *   en iyi uygun hücreye greedy yerleştirme (kısıt-yoğunluğu sıralı sezgisel).
+ * Faz 2 — simulated annealing: sabitlenmemiş atamalar üzerinde move/swap komşuluklarıyla
+ *   yerel arama, toplam ceza (öğretmen boşlukları + aynı gün ders tekrarı + sınıf günlük
+ *   yük dengesizliği + ağır ders/sabah tercihi) minimize edilene kadar iyileştirme.
+ * Sert kısıtlar (öğretmen/sınıf çakışması, günlük tekrar sınırı) her iki fazda da asla ihlal edilmez.
+ */
+function generateLessonSchedule(school, { classes, subjects, periods, hours, existing, teachers }) {
+  const days = DERS_DAYS;
+  const subjectById = Object.fromEntries(subjects.map(s => [s.id, s]));
+  const periodSortByIdx = {};
+  periods.forEach((p, idx) => periodSortByIdx[p.id] = idx);
+
+  const classOccupied = {};
+  const teacherOccupied = {};
+  const classDaySubjectCount = {};
+  const classDayCount = {};
+  const teacherDayPeriods = {};
+  const placed = [];
+  const unplaced = [];
+
+  function markOccupied(class_id, teacher_id, day, period_id, subject_id) {
+    classOccupied[`${class_id}|${day}|${period_id}`] = true;
+    teacherOccupied[`${teacher_id}|${day}|${period_id}`] = true;
+    classDaySubjectCount[`${class_id}|${day}|${subject_id}`] = (classDaySubjectCount[`${class_id}|${day}|${subject_id}`] || 0) + 1;
+    classDayCount[`${class_id}|${day}`] = (classDayCount[`${class_id}|${day}`] || 0) + 1;
+    (teacherDayPeriods[`${teacher_id}|${day}`] ??= new Set()).add(periodSortByIdx[period_id]);
+  }
+
+  (existing || []).filter(a => a.is_pinned).forEach(a => {
+    markOccupied(a.class_id, a.teacher_id, a.day_of_week, a.period_id, a.subject_id);
+    placed.push({ class_id: a.class_id, subject_id: a.subject_id, teacher_id: a.teacher_id, day_of_week: a.day_of_week, period_id: a.period_id, is_pinned: true, id: a.id });
+  });
+
+  const pinnedCountByReq = {};
+  (existing || []).filter(a => a.is_pinned).forEach(a => {
+    const key = `${a.class_id}|${a.subject_id}|${a.teacher_id}`;
+    pinnedCountByReq[key] = (pinnedCountByReq[key] || 0) + 1;
+  });
+
+  let units = [];
+  hours.forEach(h => {
+    const key = `${h.class_id}|${h.subject_id}|${h.teacher_id}`;
+    const remaining = Math.max(h.weekly_hours - (pinnedCountByReq[key] || 0), 0);
+    for (let i = 0; i < remaining; i++) units.push({ class_id: h.class_id, subject_id: h.subject_id, teacher_id: h.teacher_id });
+  });
+
+  const teacherLoad = {};
+  units.forEach(u => teacherLoad[u.teacher_id] = (teacherLoad[u.teacher_id] || 0) + 1);
+  units = units
+    .map(u => ({ u, r: Math.random() }))
+    .sort((a, b) => (teacherLoad[b.u.teacher_id] - teacherLoad[a.u.teacher_id]) || (a.r - b.r))
+    .map(x => x.u);
+
+  function candidateScore(class_id, teacher_id, subject_id, day, period_id) {
+    let score = 0;
+    const subj = subjectById[subject_id];
+    const pIdx = periodSortByIdx[period_id];
+    if (subj?.is_heavy) score += pIdx * 3;
+    score += (classDaySubjectCount[`${class_id}|${day}|${subject_id}`] || 0) * 8;
+    score += (classDayCount[`${class_id}|${day}`] || 0) * 2;
+    const existingPeriods = teacherDayPeriods[`${teacher_id}|${day}`];
+    if (existingPeriods && existingPeriods.size) {
+      const minDist = Math.min(...[...existingPeriods].map(idx => Math.abs(idx - pIdx)));
+      if (minDist > 1) score += minDist * 4;
+    }
+    return score;
+  }
+
+  for (const u of units) {
+    let best = null, bestScore = Infinity;
+    for (const day of days) {
+      if ((classDaySubjectCount[`${u.class_id}|${day}|${u.subject_id}`] || 0) >= DERS_MAX_PER_DAY) continue;
+      for (const p of periods) {
+        if (classOccupied[`${u.class_id}|${day}|${p.id}`] || teacherOccupied[`${u.teacher_id}|${day}|${p.id}`]) continue;
+        const s = candidateScore(u.class_id, u.teacher_id, u.subject_id, day, p.id);
+        if (s < bestScore) { bestScore = s; best = { day, period_id: p.id }; }
+      }
+    }
+    if (best) {
+      markOccupied(u.class_id, u.teacher_id, best.day, best.period_id, u.subject_id);
+      placed.push({ class_id: u.class_id, subject_id: u.subject_id, teacher_id: u.teacher_id, day_of_week: best.day, period_id: best.period_id, is_pinned: false });
+    } else {
+      unplaced.push(u);
+    }
+  }
+
+  function fullPenalty(schedule) {
+    let penalty = 0;
+    const perTeacherDay = {}, perClassDaySubject = {}, perClassDay = {};
+    schedule.forEach(a => {
+      const pIdx = periodSortByIdx[a.period_id];
+      (perTeacherDay[`${a.teacher_id}|${a.day_of_week}`] ??= []).push(pIdx);
+      const csKey = `${a.class_id}|${a.day_of_week}|${a.subject_id}`;
+      perClassDaySubject[csKey] = (perClassDaySubject[csKey] || 0) + 1;
+      const cdKey = `${a.class_id}|${a.day_of_week}`;
+      perClassDay[cdKey] = (perClassDay[cdKey] || 0) + 1;
+      if (subjectById[a.subject_id]?.is_heavy) penalty += pIdx * 3;
+    });
+    Object.values(perTeacherDay).forEach(arr => {
+      arr.sort((a, b) => a - b);
+      for (let i = 1; i < arr.length; i++) penalty += (arr[i] - arr[i - 1] - 1) * 4;
+    });
+    Object.values(perClassDaySubject).forEach(c => { if (c > 1) penalty += (c - 1) * 8; });
+    const classIds = [...new Set(schedule.map(a => a.class_id))];
+    classIds.forEach(cid => {
+      const counts = days.map(d => perClassDay[`${cid}|${d}`] || 0);
+      const mean = counts.reduce((s, c) => s + c, 0) / days.length;
+      const variance = counts.reduce((s, c) => s + (c - mean) ** 2, 0) / days.length;
+      penalty += variance * 2;
+    });
+    return penalty;
+  }
+
+  const movable = placed.filter(a => !a.is_pinned);
+  if (movable.length > 1) {
+    let current = placed.slice();
+    let currentPenalty = fullPenalty(current);
+    let best = current.slice();
+    let bestPenalty = currentPenalty;
+    let temperature = 10;
+    const iterations = Math.min(4000, movable.length * 60);
+    const cooling = 0.997;
+
+    function isFree(schedule, class_id, teacher_id, day, period_id, excludeIdx) {
+      for (let i = 0; i < schedule.length; i++) {
+        if (i === excludeIdx) continue;
+        const a = schedule[i];
+        if (a.day_of_week !== day || a.period_id !== period_id) continue;
+        if (a.class_id === class_id || a.teacher_id === teacher_id) return false;
+      }
+      return true;
+    }
+
+    for (let iter = 0; iter < iterations; iter++) {
+      const movableIdxs = current.map((a, i) => a.is_pinned ? -1 : i).filter(i => i >= 0);
+      if (!movableIdxs.length) break;
+      const i = movableIdxs[Math.floor(Math.random() * movableIdxs.length)];
+      const a = current[i];
+      let candidate = current.slice();
+      let valid = false;
+
+      if (Math.random() < 0.5) {
+        const day = days[Math.floor(Math.random() * days.length)];
+        const p = periods[Math.floor(Math.random() * periods.length)];
+        if (isFree(current, a.class_id, a.teacher_id, day, p.id, i)) {
+          const csCount = current.filter((x, xi) => xi !== i && x.class_id === a.class_id && x.day_of_week === day && x.subject_id === a.subject_id).length;
+          if (csCount < DERS_MAX_PER_DAY) {
+            candidate[i] = { ...a, day_of_week: day, period_id: p.id };
+            valid = true;
+          }
+        }
+      } else {
+        const j = movableIdxs[Math.floor(Math.random() * movableIdxs.length)];
+        if (j !== i) {
+          const b = current[j];
+          const aNew = { ...a, day_of_week: b.day_of_week, period_id: b.period_id };
+          const bNew = { ...b, day_of_week: a.day_of_week, period_id: a.period_id };
+          const others = current.filter((_, idx) => idx !== i && idx !== j);
+          const aOk = !others.some(x => x.day_of_week === aNew.day_of_week && x.period_id === aNew.period_id && (x.class_id === aNew.class_id || x.teacher_id === aNew.teacher_id));
+          const bOk = !others.some(x => x.day_of_week === bNew.day_of_week && x.period_id === bNew.period_id && (x.class_id === bNew.class_id || x.teacher_id === bNew.teacher_id));
+          const aCs = others.filter(x => x.class_id === aNew.class_id && x.day_of_week === aNew.day_of_week && x.subject_id === aNew.subject_id).length;
+          const bCs = others.filter(x => x.class_id === bNew.class_id && x.day_of_week === bNew.day_of_week && x.subject_id === bNew.subject_id).length;
+          if (aOk && bOk && aCs < DERS_MAX_PER_DAY && bCs < DERS_MAX_PER_DAY) {
+            candidate[i] = aNew;
+            candidate[j] = bNew;
+            valid = true;
+          }
+        }
+      }
+
+      if (!valid) { temperature *= cooling; continue; }
+
+      const candidatePenalty = fullPenalty(candidate);
+      const delta = candidatePenalty - currentPenalty;
+      if (delta < 0 || Math.random() < Math.exp(-delta / Math.max(temperature, 0.01))) {
+        current = candidate;
+        currentPenalty = candidatePenalty;
+        if (currentPenalty < bestPenalty) { best = current.slice(); bestPenalty = currentPenalty; }
+      }
+      temperature *= cooling;
+    }
+    return { placed: best, unplaced, score: Math.round(bestPenalty * 10) / 10 };
+  }
+
+  return { placed, unplaced, score: Math.round(fullPenalty(placed) * 10) / 10 };
+}
+
+async function renderDersProgram(profile, school, content, viewMode = "sinif", genResult = null) {
+  const [{ data: classes }, { data: subjects }, { data: periods }, { data: hours }, { data: teachers }, { data: existing }] = await Promise.all([
+    sb.from("classes").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("subjects").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("lesson_periods").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("class_subject_hours").select("*").eq("school_id", school.id),
+    sb.from("teachers").select("*").eq("school_id", school.id),
+    sb.from("lesson_assignments").select("*").eq("school_id", school.id),
+  ]);
+
+  if (!classes?.length || !periods?.length || !hours?.length) {
+    content.innerHTML = `<p style="color:var(--muted)">Program oluşturmadan önce Ayarlar'dan sınıf/ders saati ekle ve Atamalar'dan haftalık saatleri tanımla.</p>`;
+    return;
+  }
+
+  const teacherById = Object.fromEntries((teachers || []).map(t => [t.id, t]));
+  const subjectById = Object.fromEntries((subjects || []).map(s => [s.id, s]));
+  const classById = Object.fromEntries(classes.map(c => [c.id, c]));
+  const totalNeeded = hours.reduce((s, h) => s + h.weekly_hours, 0);
+
+  const warningHtml = genResult && genResult.unplaced.length ? `
+    <div class="card" style="margin-bottom:16px;border-color:var(--warn)">
+      <h3 style="margin-top:0">⚠️ Yerleştirilemeyen Dersler</h3>
+      <p style="margin:0">${genResult.unplaced.length} ders saati, çakışma/kapasite yetersizliği nedeniyle programa yerleştirilemedi:</p>
+      <ul style="margin:8px 0 0;padding-left:20px;font-size:13px">
+        ${genResult.unplaced.map(u => `<li>${esc(classById[u.class_id]?.name || "?")} — ${esc(subjectById[u.subject_id]?.name || "?")} (${esc(teacherById[u.teacher_id]?.full_name || "?")})</li>`).join("")}
+      </ul>
+      <p style="font-size:12px;color:var(--muted);margin:8px 0 0">Çözüm için: haftalık ders saati sayısını azalt, ders saati (periods) sayısını artır ya da çakışan atamaları gözden geçir.</p>
+    </div>
+  ` : "";
+
+  const byClassCell = {}, byTeacherCell = {};
+  (existing || []).forEach(a => {
+    (byClassCell[a.class_id] ??= {})[`${a.day_of_week}|${a.period_id}`] = a;
+    (byTeacherCell[a.teacher_id] ??= {})[`${a.day_of_week}|${a.period_id}`] = a;
+  });
+
+  function renderEntityGrid(entities, cellMap, labelFn, cellContentFn, editable) {
+    return entities.map(e => `
+      <div class="card" style="margin-bottom:16px">
+        <h3 style="margin-top:0">${esc(labelFn(e))}</h3>
+        <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th></th>${DERS_DAYS.map(d => `<th>${DAY_NAMES_DERS[d]}</th>`).join("")}</tr></thead>
+          <tbody>
+            ${periods.map(p => `
+              <tr>
+                <td style="white-space:nowrap"><strong>${esc(p.label)}</strong></td>
+                ${DERS_DAYS.map(d => {
+                  const a = (cellMap[e.id] || {})[`${d}|${p.id}`];
+                  if (!a) return `<td></td>`;
+                  const pinBtn = editable ? `<button data-toggle-pin="${a.id}" title="${a.is_pinned ? "Sabitlemeyi kaldır" : "Sabitle — Yeniden Oluştur bu dersi değiştirmesin"}" style="border:none;background:none;cursor:pointer;padding:0;font-size:11px;margin-left:4px">${a.is_pinned ? "📌" : "📍"}</button>` : (a.is_pinned ? " 📌" : "");
+                  return `<td>${esc(subjectById[a.subject_id]?.name || "?")}${pinBtn}<div style="font-size:10.5px;color:var(--muted)">${cellContentFn(a)}</div></td>`;
+                }).join("")}
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+        </div>
+      </div>
+    `).join("");
+  }
+
+  const sinifHtml = renderEntityGrid(classes, byClassCell, c => c.name, a => esc(teacherById[a.teacher_id]?.full_name || "?"), true);
+  const ogretmenHtml = renderEntityGrid(teachers || [], byTeacherCell, t => t.full_name, a => esc(classById[a.class_id]?.name || "?"), false);
+
+  content.innerHTML = `
+    ${warningHtml}
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <div>
+          <h3 style="margin:0">Haftalık Ders Programı</h3>
+          <p style="color:var(--muted);font-size:12.5px;margin:4px 0 0">${totalNeeded} saat/hafta talep · ${(existing || []).length} saat yerleştirilmiş${genResult ? ` · optimizasyon skoru: ${genResult.score} (düşük daha iyi)` : ""}</p>
+        </div>
+        <button class="primary" id="gen-ders-btn" style="margin:0;width:auto;padding:10px 18px">${existing?.length ? "Yeniden Oluştur" : "Program Oluştur"}</button>
+      </div>
+      <p style="color:var(--muted);font-size:11.5px;margin:6px 0 0">Yeniden oluşturma, sabitlenmiş dersleri korur. Optimizasyon: yapılandırma + simulated annealing yerel arama.</p>
+      <div id="gen-ders-msg"></div>
+    </div>
+    ${existing?.length ? `
+      <div class="subtabs" style="margin-bottom:16px">
+        <div class="subtab ${viewMode === "sinif" ? "active" : ""}" data-view="sinif">Sınıf Bazlı</div>
+        <div class="subtab ${viewMode === "ogretmen" ? "active" : ""}" data-view="ogretmen">Öğretmen Bazlı</div>
+      </div>
+      ${viewMode === "ogretmen" ? ogretmenHtml : sinifHtml}
+    ` : `<p style="color:var(--muted)">Henüz program oluşturulmadı.</p>`}
+  `;
+
+  content.querySelectorAll("[data-view]").forEach(el => el.onclick = () => renderDersProgram(profile, school, content, el.dataset.view, genResult));
+
+  content.querySelectorAll("[data-toggle-pin]").forEach(btn => btn.onclick = async () => {
+    const id = btn.dataset.togglePin;
+    const current = (existing || []).find(a => a.id === id);
+    await sb.from("lesson_assignments").update({ is_pinned: !current?.is_pinned }).eq("id", id);
+    await renderDersProgram(profile, school, content, viewMode, genResult);
+  });
+
+  document.getElementById("gen-ders-btn").onclick = async () => {
+    const btn = document.getElementById("gen-ders-btn");
+    const msg = document.getElementById("gen-ders-msg");
+    btn.disabled = true;
+    msg.innerHTML = `<div class="msg ok">Program oluşturuluyor (optimizasyon çalışıyor)…</div>`;
+    await new Promise(r => setTimeout(r, 30));
+    let result = null;
+    try {
+      await sb.from("lesson_assignments").delete().eq("school_id", school.id).eq("is_pinned", false);
+      const { data: freshExisting } = await sb.from("lesson_assignments").select("*").eq("school_id", school.id);
+      result = generateLessonSchedule(school, { classes, subjects, periods, hours, existing: freshExisting, teachers: teachers || [] });
+      const toInsert = result.placed.filter(p => !p.is_pinned).map(p => ({
+        school_id: school.id, class_id: p.class_id, subject_id: p.subject_id, teacher_id: p.teacher_id,
+        day_of_week: p.day_of_week, period_id: p.period_id, is_pinned: false,
+      }));
+      if (toInsert.length) {
+        const { error } = await sb.from("lesson_assignments").insert(toInsert);
+        if (error) throw error;
+      }
+    } catch (e) {
+      msg.innerHTML = `<div class="msg err">${e.message}</div>`;
+      btn.disabled = false;
+      return;
+    }
+    btn.disabled = false;
+    await renderDersProgram(profile, school, content, viewMode, result);
+  };
+}
+
+/* ============ SINAV KELEBEK (yalnızca tarayıcıda — öğrenci isimleri kişisel veri) ============ */
+
+function kelebekKey(school) { return `kelebek_data_${school.id}`; }
+
+function loadKelebek(school) {
+  try {
+    const raw = localStorage.getItem(kelebekKey(school));
+    return raw ? JSON.parse(raw) : { exams: [] };
+  } catch {
+    return { exams: [] };
+  }
+}
+
+function saveKelebek(school, data) {
+  try {
+    localStorage.setItem(kelebekKey(school), JSON.stringify(data));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function splitLines(text) {
+  return (text || "").split("\n").map(s => s.trim()).filter(Boolean);
+}
+
+function shuffleArr(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/**
+ * Kelebek oturma düzeni: aynı gruptan (sınıf/şube) öğrenciler yatayda/dikeyde bitişik
+ * oturmasın. Grupları round-robin iç içe geçirip yılan (snake) sırayla yerleştirir, sonra
+ * kalan bitişik ihlallerini rastgele takas ile onarır (onarım sadece ihlali azaltıyorsa kalıcı
+ * olur). Tam çözüm imkansızsa (bir grup diğerlerine göre aşırı kalabalıksa) kalan ihlaller
+ * sessizce gizlenmez, açıkça raporlanır.
+ */
+function generateKelebekSeating(groups, rows, cols) {
+  const totalSeats = rows * cols;
+  const totalStudents = groups.reduce((s, g) => s + g.students.length, 0);
+  if (totalStudents > totalSeats) {
+    throw new Error(`${totalStudents} öğrenci için sadece ${totalSeats} sıra var — sıra/sütun sayısını artır ya da öğrenci sayısını azalt.`);
+  }
+
+  // 8 yönlü (çapraz dahil) komşulukta bir grup, kendi içinde hiç bitişik olmadan en fazla
+  // ⌈satır/2⌉×⌈sütun/2⌉ üyeye sahip olabilir (grid'i 2×2 bloklara ayırınca her blokta en fazla
+  // 1 üye kalabilir, çünkü bir bloktaki 4 hücre birbirine kral-hamlesiyle komşudur). Bu matematiksel
+  // bir üst sınır — aşılırsa hiçbir algoritma sıfır ihlal üretemez, önceden açıkça bildirilir.
+  const maxIsolatedGroupSize = Math.ceil(rows / 2) * Math.ceil(cols / 2);
+  const oversizedGroups = groups.filter(g => g.students.length > maxIsolatedGroupSize);
+
+  const seatOrder = [];
+  for (let r = 0; r < rows; r++) {
+    const cs = [...Array(cols).keys()];
+    if (r % 2 === 1) cs.reverse();
+    cs.forEach(c => seatOrder.push({ row: r, col: c }));
+  }
+
+  const queues = groups
+    .map(g => ({ label: g.label, list: shuffleArr(g.students) }))
+    .sort((a, b) => b.list.length - a.list.length);
+  const interleaved = [];
+  let remaining = true;
+  while (remaining) {
+    remaining = false;
+    for (const q of queues) {
+      if (q.list.length) {
+        interleaved.push({ name: q.list.shift(), label: q.label });
+        remaining = true;
+      }
+    }
+  }
+
+  // Öğrenci sayısı sıra sayısından azsa, dolu sıraları grid'in bir köşesinde sıkıştırmak yerine
+  // eşit aralıklarla (stride) tüm grid'e yayıyoruz — sıkışık bir bölge, çapraz komşuluk kısıtı
+  // altında gereksiz yere fazla ihlal üretir; yayılmış bir dağılım doğal olarak daha az çakışır.
+  const chosenIndices = interleaved.map((_, i) => Math.floor((i * seatOrder.length) / interleaved.length));
+  const usedSeatIdx = new Set(chosenIndices);
+  const seating = chosenIndices.map((idx, i) => ({ ...seatOrder[idx], ...interleaved[i] }));
+  const emptySeats = seatOrder.filter((_, idx) => !usedSeatIdx.has(idx));
+
+  function seatAt(r, c) { return seating.find(s => s.row === r && s.col === c); }
+  function neighborsOf(seat) {
+    return [
+      [seat.row - 1, seat.col], [seat.row + 1, seat.col], [seat.row, seat.col - 1], [seat.row, seat.col + 1],
+      [seat.row - 1, seat.col - 1], [seat.row - 1, seat.col + 1], [seat.row + 1, seat.col - 1], [seat.row + 1, seat.col + 1],
+    ].map(([r, c]) => seatAt(r, c)).filter(Boolean);
+  }
+  function countViolations() {
+    let n = 0;
+    seating.forEach(s => { neighborsOf(s).forEach(nb => { if (nb !== s && nb.label === s.label) n++; }); });
+    return n;
+  }
+
+  function swap(a, b) {
+    const tmpName = a.name, tmpLabel = a.label;
+    a.name = b.name; a.label = b.label;
+    b.name = tmpName; b.label = tmpLabel;
+  }
+
+  let current = countViolations();
+  let bestSnapshot = seating.map(s => ({ name: s.name, label: s.label }));
+  let bestViolations = current;
+  let temperature = 4;
+  const iterations = Math.min(6000, seating.length * 150);
+  const cooling = 0.998;
+
+  for (let iter = 0; iter < iterations && bestViolations > 0; iter++) {
+    const violatingSeats = seating.filter(s => neighborsOf(s).some(nb => nb !== s && nb.label === s.label));
+    if (!violatingSeats.length) break;
+    const a = violatingSeats[Math.floor(Math.random() * violatingSeats.length)];
+    const b = seating[Math.floor(Math.random() * seating.length)];
+    if (a === b || a.label === b.label) { temperature *= cooling; continue; }
+
+    swap(a, b);
+    const next = countViolations();
+    const delta = next - current;
+    if (delta <= 0 || Math.random() < Math.exp(-delta / Math.max(temperature, 0.01))) {
+      current = next;
+      if (current < bestViolations) {
+        bestViolations = current;
+        bestSnapshot = seating.map(s => ({ name: s.name, label: s.label }));
+      }
+    } else {
+      swap(a, b); // revert
+    }
+    temperature *= cooling;
+  }
+
+  seating.forEach((s, i) => { s.name = bestSnapshot[i].name; s.label = bestSnapshot[i].label; });
+
+  const violations = [];
+  seating.forEach(s => {
+    neighborsOf(s).forEach(nb => {
+      if (nb !== s && nb.label === s.label && s.row * cols + s.col < nb.row * cols + nb.col) {
+        violations.push({ a: s, b: nb });
+      }
+    });
+  });
+
+  return { seating, emptySeats, violations, oversizedGroups, maxIsolatedGroupSize };
+}
+
+function kelebekDocHtml(school, exam) {
+  const grid = [];
+  for (let r = 0; r < exam.rows; r++) {
+    grid.push(exam.seating.filter(s => s.row === r).sort((a, b) => a.col - b.col));
+  }
+  return docWrapper(school, `
+    <h3 style="text-align:center">SINAV OTURMA PLANI</h3>
+    <p style="text-align:center;margin-top:-6px">${esc(exam.name)}${exam.date ? ` — ${fmtDate(exam.date)}` : ""}</p>
+    <table style="width:100%;border-collapse:collapse;margin-top:16px">
+      ${grid.map(row => `
+        <tr>
+          ${row.map(s => `<td style="border:1px solid #999;padding:8px;text-align:center;font-size:12px;width:${100 / exam.cols}%">${esc(s.name)}<div style="font-size:10px;color:#555">${esc(s.label)}</div></td>`).join("")}
+        </tr>
+      `).join("")}
+    </table>
+  `);
+}
+
+async function renderKelebekModule(profile, school) {
+  if (!localStorageAvailable()) {
+    app.innerHTML = `
+      <div class="wrap wide">
+        <button class="navlink" id="back-dash">← Panele dön</button>
+        <div class="eyebrow">Sınav Kelebek</div>
+        <h1>${esc(school.name)}</h1>
+        ${localStorageBlockedNotice()}
+      </div>
+    `;
+    document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+    return;
+  }
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Sınav Kelebek</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">🔒 Öğrenci isimleri yalnızca bu tarayıcıda saklanır, sunucuya gönderilmez. Aynı gruptan (sınıf/şube) öğrenciler yan yana, art arda ya da çapraz komşu olmayacak şekilde dağıtılır (8 yönlü kontrol).</div>
+      <div id="kelebek-content"></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  await renderKelebek(school, document.getElementById("kelebek-content"));
+}
+
+function renderSeatingResult(school, exam) {
+  const grid = [];
+  for (let r = 0; r < exam.rows; r++) {
+    grid.push(exam.seating.filter(s => s.row === r).sort((a, b) => a.col - b.col));
+  }
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">${esc(exam.name)}</h3>
+      <p style="color:var(--muted);font-size:12.5px;margin-top:-6px">${exam.seating.length} öğrenci yerleşti${exam.date ? ` · ${fmtDate(exam.date)}` : ""}${exam.rows * exam.cols > exam.seating.length ? ` · ${exam.rows * exam.cols - exam.seating.length} sıra boş` : ""}</p>
+      ${exam.oversizedGroups?.length ? `<div class="msg err">⚠️ Matematiksel olarak imkansız: ${exam.oversizedGroups.map(g => `"${esc(g.label)}" (${g.count} öğrenci)`).join(", ")} bu sıra/sütun boyutunda (çapraz komşuluk dahil) en fazla ${exam.maxIsolatedGroupSize} öğrenciye kadar hiç bitişiksiz ayrılabilir. Sıra/sütun sayısını artır ya da bu grubu ayrı bir oturuma böl.</div>` : ""}
+      ${exam.remainingViolations > 0 ? `<div class="msg err">⚠️ ${exam.remainingViolations} yerde aynı gruptan öğrenciler bitişik kalmak zorunda kaldı${exam.oversizedGroups?.length ? "" : " — grup boyutları arasındaki dengesizlik nedeniyle tam kelebek düzeni mümkün olmadı. Sıra/sütun sayısını artırmak yardımcı olabilir."}</div>` : `<div class="msg ok">Hiçbir aynı-grup öğrenci bitişik değil (yatay/dikey/çapraz).</div>`}
+      <div class="table-wrap" style="margin-top:14px">
+        <table class="data">
+          <tbody>
+            ${grid.map(row => `
+              <tr>
+                ${row.map(s => `<td style="text-align:center">${esc(s.name)}<div style="font-size:10.5px;color:var(--muted)">${esc(s.label)}</div></td>`).join("")}
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="secondary" id="k-print" style="flex:1">Yazdır</button>
+        <button class="secondary" id="k-download" style="flex:1">Word olarak indir</button>
+      </div>
+      <iframe id="k-frame" style="display:none"></iframe>
+    </div>
+  `;
+}
+
+async function renderKelebek(school, content, draftGroups = null, lastExam = null) {
+  const data = loadKelebek(school);
+  if (!draftGroups) draftGroups = [{ label: "", text: "" }, { label: "", text: "" }];
+
+  function readDraftFromDom() {
+    const labels = [...content.querySelectorAll(".k-group-label")];
+    const texts = [...content.querySelectorAll(".k-group-text")];
+    return labels.map((el, i) => ({ label: el.value, text: texts[i].value }));
+  }
+
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Yeni Sınav Oturma Planı</h3>
+      <label>Sınav adı</label>
+      <input id="k-name" placeholder="örn. 1. Dönem Ortak Sınavı">
+      <label>Tarih <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <input id="k-date" type="date">
+      <div style="display:flex;gap:12px">
+        <div style="flex:1"><label>Sıra sayısı</label><input id="k-rows" type="number" min="1" value="6"></div>
+        <div style="flex:1"><label>Sütun sayısı</label><input id="k-cols" type="number" min="1" value="6"></div>
+      </div>
+      <label style="margin-top:14px;display:block">Sınıf grupları <span style="color:var(--muted);font-weight:400">(her grup ayrı bir sınıf/şube — aynı gruptakiler yan yana/art arda oturmaz)</span></label>
+      <div id="k-groups">
+        ${draftGroups.map((g, i) => `
+          <div class="card" style="margin:10px 0;background:var(--surface-2)">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <label style="margin:0">Grup ${i + 1}</label>
+              ${draftGroups.length > 1 ? `<button class="secondary" data-remove-group="${i}" style="width:auto;padding:4px 10px;font-size:12px;margin:0">Kaldır</button>` : ""}
+            </div>
+            <input class="k-group-label" data-idx="${i}" value="${esc(g.label)}" placeholder="örn. 8-A">
+            <label style="font-size:12px">Öğrenci listesi <span style="color:var(--muted);font-weight:400">(her satıra bir isim)</span></label>
+            <textarea class="k-group-text" data-idx="${i}" rows="4" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px">${esc(g.text)}</textarea>
+          </div>
+        `).join("")}
+      </div>
+      <button class="secondary" id="k-add-group" style="margin-top:8px;width:100%">+ Grup Ekle</button>
+      <button class="primary" id="k-generate" style="margin-top:14px">Oturma Planını Oluştur</button>
+      <div id="k-msg"></div>
+    </div>
+    ${lastExam ? renderSeatingResult(school, lastExam) : ""}
+    ${data.exams.length ? `
+      <div class="card">
+        <h3 style="margin-top:0">Kayıtlı Sınavlar</h3>
+        ${data.exams.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map(e => `
+          <div class="list-item">
+            <span>${esc(e.name)}${e.date ? ` · ${fmtDate(e.date)}` : ""}</span>
+            <div class="row-actions">
+              <button data-view-exam="${e.id}">Görüntüle</button>
+              <button data-del-exam="${e.id}">Sil</button>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    ` : ""}
+  `;
+
+  document.getElementById("k-add-group").onclick = () => {
+    const current = readDraftFromDom();
+    current.push({ label: "", text: "" });
+    renderKelebek(school, content, current, lastExam);
+  };
+  content.querySelectorAll("[data-remove-group]").forEach(b => b.onclick = () => {
+    const current = readDraftFromDom();
+    current.splice(parseInt(b.dataset.removeGroup), 1);
+    renderKelebek(school, content, current.length ? current : [{ label: "", text: "" }], lastExam);
+  });
+
+  document.getElementById("k-generate").onclick = () => {
+    const name = document.getElementById("k-name").value.trim();
+    const date = document.getElementById("k-date").value;
+    const rows = parseInt(document.getElementById("k-rows").value) || 0;
+    const cols = parseInt(document.getElementById("k-cols").value) || 0;
+    const msg = document.getElementById("k-msg");
+    const rawGroups = readDraftFromDom()
+      .map(g => ({ label: g.label.trim(), students: splitLines(g.text) }))
+      .filter(g => g.label && g.students.length);
+    if (!name) { msg.innerHTML = `<div class="msg err">Sınav adı gerekli.</div>`; return; }
+    if (!rows || !cols) { msg.innerHTML = `<div class="msg err">Sıra ve sütun sayısı gerekli.</div>`; return; }
+    if (rawGroups.length < 2) { msg.innerHTML = `<div class="msg err">En az 2 sınıf grubu ve öğrenci listesi gerekli (kelebek düzeni için).</div>`; return; }
+    let result;
+    try {
+      result = generateKelebekSeating(rawGroups, rows, cols);
+    } catch (e) {
+      msg.innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
+      return;
+    }
+    const exam = {
+      id: uid(), name, date, rows, cols, seating: result.seating,
+      remainingViolations: result.violations.length,
+      oversizedGroups: result.oversizedGroups.map(g => ({ label: g.label, count: g.students.length })),
+      maxIsolatedGroupSize: result.maxIsolatedGroupSize,
+      createdAt: new Date().toISOString(),
+    };
+    data.exams.push(exam);
+    if (!saveKelebek(school, data)) { msg.innerHTML = PERSONEL_SAVE_ERR; return; }
+    renderKelebek(school, content, null, exam);
+  };
+
+  content.querySelectorAll("[data-view-exam]").forEach(b => b.onclick = () => {
+    const exam = data.exams.find(e => e.id === b.dataset.viewExam);
+    renderKelebek(school, content, null, exam);
+  });
+  content.querySelectorAll("[data-del-exam]").forEach(b => b.onclick = () => {
+    if (!confirm("Bu sınav oturma planını silmek istediğine emin misin?")) return;
+    data.exams = data.exams.filter(e => e.id !== b.dataset.delExam);
+    saveKelebek(school, data);
+    renderKelebek(school, content, draftGroups, null);
+  });
+
+  if (lastExam) {
+    const fullHtml = kelebekDocHtml(school, lastExam);
+    const frame = document.getElementById("k-frame");
+    document.getElementById("k-print").onclick = () => {
+      frame.srcdoc = fullHtml;
+      frame.onload = () => { frame.contentWindow.focus(); frame.contentWindow.print(); };
+    };
+    document.getElementById("k-download").onclick = () => {
+      const blob = new Blob(["﻿", fullHtml], { type: "application/msword" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${lastExam.name}.doc`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    };
+  }
+}
+
+/* ============ TALEP TAKİBİ ============ */
+
+const TALEP_STATUS_LABELS = { bekliyor: "Bekliyor", islemde: "İşlemde", tamamlandi: "Tamamlandı", reddedildi: "Reddedildi" };
+const TALEP_STATUS_ORDER = ["bekliyor", "islemde", "tamamlandi", "reddedildi"];
+
+async function renderTalepModule(profile, school) {
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Talep Takibi</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Öğretmenlerden (ya da diğer personelden) gelen talep/bildirimleri kaydet, durumunu takip et.</div>
+      <div id="talep-content"></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  await renderTalep(school, document.getElementById("talep-content"));
+}
+
+async function renderTalep(school, content, filterStatus = "hepsi") {
+  const { data: requests } = await sb.from("requests").select("*").eq("school_id", school.id).order("created_at", { ascending: false });
+
+  const counts = { bekliyor: 0, islemde: 0, tamamlandi: 0, reddedildi: 0 };
+  (requests || []).forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+
+  const filtered = filterStatus === "hepsi" ? (requests || []) : (requests || []).filter(r => r.status === filterStatus);
+
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Yeni Talep</h3>
+      <label>Talep eden</label>
+      <input id="r-name" placeholder="örn. Ayşe Öğretmen, 5-A Sınıfı">
+      <label>Kategori</label>
+      <select id="r-category">
+        <option value="Malzeme">Malzeme</option>
+        <option value="Bakım / Tamirat">Bakım / Tamirat</option>
+        <option value="İzin">İzin</option>
+        <option value="Diğer">Diğer</option>
+      </select>
+      <label>Açıklama</label>
+      <textarea id="r-desc" rows="3" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px" placeholder="Talebin ayrıntısı"></textarea>
+      <button class="primary" id="r-save">Ekle</button>
+      <div id="r-msg"></div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="subtabs" style="flex-wrap:wrap">
+        <div class="subtab ${filterStatus === "hepsi" ? "active" : ""}" data-filter="hepsi">Tümü (${(requests || []).length})</div>
+        ${TALEP_STATUS_ORDER.map(s => `<div class="subtab ${filterStatus === s ? "active" : ""}" data-filter="${s}">${TALEP_STATUS_LABELS[s]} (${counts[s]})</div>`).join("")}
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Talepler</h3>
+      ${filtered.length ? filtered.map(r => `
+        <div class="card" style="margin-bottom:10px;background:var(--surface-2)">
+          <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;flex-wrap:wrap">
+            <div>
+              <strong>${esc(r.requester_name)}</strong> ${r.category ? `<span class="pill">${esc(r.category)}</span>` : ""}
+              <div style="font-size:13px;margin-top:4px">${esc(r.description)}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px">${fmtDate(r.created_at.slice(0, 10))}</div>
+            </div>
+            <select data-status-for="${r.id}" style="width:auto">
+              ${TALEP_STATUS_ORDER.map(s => `<option value="${s}" ${r.status === s ? "selected" : ""}>${TALEP_STATUS_LABELS[s]}</option>`).join("")}
+            </select>
+          </div>
+          <label style="font-size:12px;margin-top:8px">Not <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+          <input data-note-for="${r.id}" value="${esc(r.note || "")}" placeholder="örn. sipariş verildi, 2 hafta sürecek">
+          <div class="row-actions" style="margin-top:6px"><button data-del-request="${r.id}">Sil</button></div>
+        </div>
+      `).join("") : `<p style="color:var(--muted)">Bu filtrede talep yok.</p>`}
+    </div>
+  `;
+
+  content.querySelectorAll("[data-filter]").forEach(el => el.onclick = () => renderTalep(school, content, el.dataset.filter));
+
+  document.getElementById("r-save").onclick = async () => {
+    const requester_name = document.getElementById("r-name").value.trim();
+    const category = document.getElementById("r-category").value;
+    const description = document.getElementById("r-desc").value.trim();
+    const msg = document.getElementById("r-msg");
+    if (!requester_name || !description) { msg.innerHTML = `<div class="msg err">Talep eden ve açıklama gerekli.</div>`; return; }
+    const { error } = await sb.from("requests").insert({ school_id: school.id, requester_name, category, description });
+    if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+    await renderTalep(school, content, filterStatus);
+  };
+
+  content.querySelectorAll("[data-status-for]").forEach(sel => sel.onchange = async () => {
+    const id = sel.dataset.statusFor;
+    const status = sel.value;
+    const resolved_at = (status === "tamamlandi" || status === "reddedildi") ? new Date().toISOString() : null;
+    await sb.from("requests").update({ status, resolved_at }).eq("id", id);
+    await renderTalep(school, content, filterStatus);
+  });
+  content.querySelectorAll("[data-note-for]").forEach(input => input.onchange = async () => {
+    await sb.from("requests").update({ note: input.value.trim() || null }).eq("id", input.dataset.noteFor);
+  });
+  content.querySelectorAll("[data-del-request]").forEach(b => b.onclick = async () => {
+    if (!confirm("Bu talebi silmek istediğine emin misin?")) return;
+    await sb.from("requests").delete().eq("id", b.dataset.delRequest);
+    await renderTalep(school, content, filterStatus);
+  });
+}
+
+/* ============ PLANLAMA İŞLERİ (kurul / komisyon / kulüp) ============ */
+
+async function renderPlanlamaModule(profile, school) {
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Planlama İşleri</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Kurul, komisyon ve kulüplerin üye listesi ve toplantı/faaliyet kayıtları.</div>
+      <div id="planlama-content"></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  await renderPlanlama(school, document.getElementById("planlama-content"));
+}
+
+async function renderPlanlama(school, content, activeId = null) {
+  const { data: committees } = await sb.from("committees").select("*").eq("school_id", school.id).order("name");
+  const active = activeId ? (committees || []).find(c => c.id === activeId) : null;
+
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Yeni Kurul / Komisyon / Kulüp</h3>
+      <label>Ad</label>
+      <input id="c-name" placeholder="örn. Okul Aile Birliği, Satın Alma Komisyonu, Satranç Kulübü">
+      <label>Tür <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <select id="c-type">
+        <option value="">Belirtilmedi</option>
+        <option value="Kurul">Kurul</option>
+        <option value="Komisyon">Komisyon</option>
+        <option value="Kulüp">Kulüp</option>
+      </select>
+      <label>Kuruluş tarihi <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <input id="c-date" type="date">
+      <button class="primary" id="c-save">Ekle</button>
+      <div id="c-msg"></div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Kurullar (${(committees || []).length})</h3>
+      ${(committees || []).length ? (committees || []).map(c => `
+        <div class="list-item ${activeId === c.id ? "active" : ""}" style="cursor:pointer" data-select-committee="${c.id}">
+          <span>${esc(c.name)} ${c.committee_type ? `<span class="pill">${esc(c.committee_type)}</span>` : ""}</span>
+          <div class="row-actions"><button data-del-committee="${c.id}">Sil</button></div>
+        </div>
+      `).join("") : `<p style="color:var(--muted);font-size:13px">Henüz eklenmedi.</p>`}
+    </div>
+    <div id="committee-detail"></div>
+  `;
+
+  document.getElementById("c-save").onclick = async () => {
+    const name = document.getElementById("c-name").value.trim();
+    const committee_type = document.getElementById("c-type").value || null;
+    const established_on = document.getElementById("c-date").value || null;
+    const msg = document.getElementById("c-msg");
+    if (!name) { msg.innerHTML = `<div class="msg err">Ad gerekli.</div>`; return; }
+    const { error } = await sb.from("committees").insert({ school_id: school.id, name, committee_type, established_on });
+    if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+    await renderPlanlama(school, content, activeId);
+  };
+
+  content.querySelectorAll("[data-select-committee]").forEach(el => el.onclick = async (e) => {
+    if (e.target.closest("[data-del-committee]")) return;
+    await renderPlanlama(school, content, el.dataset.selectCommittee);
+  });
+  content.querySelectorAll("[data-del-committee]").forEach(b => b.onclick = async (e) => {
+    e.stopPropagation();
+    if (!confirm("Bu kurulu (ve tüm üye/toplantı kayıtlarını) silmek istediğine emin misin?")) return;
+    await sb.from("committees").delete().eq("id", b.dataset.delCommittee);
+    await renderPlanlama(school, content, activeId === b.dataset.delCommittee ? null : activeId);
+  });
+
+  if (active) {
+    await renderCommitteeDetail(school, active, document.getElementById("committee-detail"));
+  }
+}
+
+async function renderCommitteeDetail(school, committee, el) {
+  const [{ data: members }, { data: meetings }] = await Promise.all([
+    sb.from("committee_members").select("*").eq("committee_id", committee.id).order("created_at"),
+    sb.from("committee_meetings").select("*").eq("committee_id", committee.id).order("meeting_date", { ascending: false }),
+  ]);
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:16px;border-color:var(--accent)">
+      <h3 style="margin-top:0">${esc(committee.name)}${committee.established_on ? ` <span style="color:var(--muted);font-weight:400;font-size:12.5px">— ${fmtDate(committee.established_on)} kuruldu</span>` : ""}</h3>
+      <div class="grid">
+        <div>
+          <h4>Üyeler (${(members || []).length})</h4>
+          ${(members || []).map(m => `<div class="list-item"><span>${esc(m.member_name)}${m.role ? ` <span class="pill">${esc(m.role)}</span>` : ""}</span><div class="row-actions"><button data-del-member="${m.id}">Sil</button></div></div>`).join("") || `<p style="color:var(--muted);font-size:13px">Henüz üye eklenmedi.</p>`}
+          <label style="margin-top:10px">Ad Soyad</label>
+          <input id="m-name" placeholder="Ad Soyad">
+          <label>Rol <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+          <input id="m-role" placeholder="örn. Başkan, Üye, Sekreter">
+          <button class="secondary" id="m-save" style="margin-top:8px;width:100%">Üye Ekle</button>
+        </div>
+        <div>
+          <h4>Toplantı / Faaliyet Kayıtları (${(meetings || []).length})</h4>
+          ${(meetings || []).map(mt => `
+            <div class="card" style="margin-bottom:8px;background:var(--surface-2)">
+              <strong>${fmtDate(mt.meeting_date)}</strong>
+              ${mt.agenda ? `<div style="font-size:12.5px;margin-top:4px">📋 ${esc(mt.agenda)}</div>` : ""}
+              ${mt.decisions ? `<div style="font-size:12.5px;color:var(--muted);margin-top:4px">${esc(mt.decisions)}</div>` : ""}
+              <div class="row-actions" style="margin-top:6px"><button data-del-meeting="${mt.id}">Sil</button></div>
+            </div>
+          `).join("") || `<p style="color:var(--muted);font-size:13px">Henüz kayıt yok.</p>`}
+          <label style="margin-top:10px">Tarih</label>
+          <input id="mt-date" type="date">
+          <label>Gündem <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+          <input id="mt-agenda" placeholder="örn. Yıllık bütçe görüşmesi">
+          <label>Kararlar / Notlar <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+          <textarea id="mt-decisions" rows="2" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px"></textarea>
+          <button class="secondary" id="mt-save" style="margin-top:8px;width:100%">Kayıt Ekle</button>
+        </div>
+      </div>
+      <div id="detail-msg"></div>
+    </div>
+  `;
+
+  document.getElementById("m-save").onclick = async () => {
+    const member_name = document.getElementById("m-name").value.trim();
+    const role = document.getElementById("m-role").value.trim() || null;
+    if (!member_name) return;
+    await sb.from("committee_members").insert({ school_id: school.id, committee_id: committee.id, member_name, role });
+    await renderCommitteeDetail(school, committee, el);
+  };
+  el.querySelectorAll("[data-del-member]").forEach(b => b.onclick = async () => {
+    await sb.from("committee_members").delete().eq("id", b.dataset.delMember);
+    await renderCommitteeDetail(school, committee, el);
+  });
+  document.getElementById("mt-save").onclick = async () => {
+    const meeting_date = document.getElementById("mt-date").value;
+    const agenda = document.getElementById("mt-agenda").value.trim() || null;
+    const decisions = document.getElementById("mt-decisions").value.trim() || null;
+    const msg = document.getElementById("detail-msg");
+    if (!meeting_date) { msg.innerHTML = `<div class="msg err">Tarih gerekli.</div>`; return; }
+    await sb.from("committee_meetings").insert({ school_id: school.id, committee_id: committee.id, meeting_date, agenda, decisions });
+    await renderCommitteeDetail(school, committee, el);
+  };
+  el.querySelectorAll("[data-del-meeting]").forEach(b => b.onclick = async () => {
+    await sb.from("committee_meetings").delete().eq("id", b.dataset.delMeeting);
+    await renderCommitteeDetail(school, committee, el);
+  });
+}
+
+async function boot() {
+  app.innerHTML = "";
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) {
+    renderAuth("login");
+    return;
+  }
+  const { data: profile } = await sb
+    .from("profiles")
+    .select("*, schools(*)")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (!profile || !profile.school_id) {
+    renderSchoolSetup(user);
+    return;
+  }
+  renderDashboard(profile, profile.schools);
+}
+
+boot();
+</script>
+</body>
+</html>
