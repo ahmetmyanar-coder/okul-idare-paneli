@@ -107,6 +107,7 @@
 <div id="app"></div>
 
 <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script>
 const SUPABASE_URL = "https://kwowxdunvwsxwghbdmdk.supabase.co";
 const SUPABASE_KEY = "sb_publishable_59rmyjjFN1NmBr0aOhzPNA_igHohm0X";
@@ -125,9 +126,14 @@ const MODULES = [
   { name: "Sınav Kelebek", desc: "Aynı sınıftan öğrenciler yan yana oturmayacak şekilde sınav oturma planı üretir — sadece bu cihazda saklanır." },
   { name: "Talep Takibi", desc: "Öğretmenlerden gelen talep/bildirimleri kaydet, durumunu takip et." },
   { name: "Planlama İşleri", desc: "Kurul, komisyon ve kulüplerin üye listesi ve toplantı/faaliyet kayıtları." },
+  { name: "LGS Koçluk", desc: "8. sınıf öğrenci havuzu, deneme sınavı takibi, ders bazlı zayıflık analizi." },
 ];
 
 function renderAuth(mode = "login") {
+  const urlJoin = new URLSearchParams(location.search).get("join");
+  if (urlJoin) localStorage.setItem("pendingJoinCode", urlJoin.trim().toUpperCase());
+  const pendingJoin = localStorage.getItem("pendingJoinCode") || "";
+
   app.innerHTML = `
     <div class="wrap">
       <div class="eyebrow">Okul İdare Paneli</div>
@@ -142,6 +148,10 @@ function renderAuth(mode = "login") {
         <input id="email" type="email" autocomplete="email" placeholder="ornek@meb.gov.tr">
         <label>Şifre</label>
         <input id="password" type="password" autocomplete="${mode === "login" ? "current-password" : "new-password"}" placeholder="en az 6 karakter">
+        ${mode === "signup" ? `
+          <label>Öğretmen davet kodu <span style="color:var(--muted);font-weight:400">(okul idarenden aldıysan gir; boş bırakırsan yeni bir okul hesabı açılır)</span></label>
+          <input id="join-code" value="${esc(pendingJoin)}" placeholder="örn. AB3K9XPZ" style="text-transform:uppercase">
+        ` : (pendingJoin ? `<div class="msg ok" style="margin-top:10px">Bekleyen bir öğretmen daveti var (kod: ${esc(pendingJoin)}). Giriş yaptığında otomatik tamamlanacak.</div>` : "")}
         <button class="primary" id="submit">${mode === "login" ? "Giriş yap" : "Hesap oluştur"}</button>
         <div id="msg"></div>
       </div>
@@ -152,6 +162,10 @@ function renderAuth(mode = "login") {
   document.getElementById("submit").onclick = async () => {
     const email = document.getElementById("email").value.trim();
     const password = document.getElementById("password").value;
+    const joinCodeInput = document.getElementById("join-code");
+    if (joinCodeInput && joinCodeInput.value.trim()) {
+      localStorage.setItem("pendingJoinCode", joinCodeInput.value.trim().toUpperCase());
+    }
     const btn = document.getElementById("submit");
     const msg = document.getElementById("msg");
     msg.innerHTML = "";
@@ -185,6 +199,50 @@ function renderAuth(mode = "login") {
     }
     boot();
   };
+}
+
+function renderJoinError(message) {
+  app.innerHTML = `
+    <div class="wrap">
+      <div class="eyebrow">Okul İdare Paneli</div>
+      <h1>Davet tamamlanamadı</h1>
+      <div class="card">
+        <div class="msg err">${esc(message)}</div>
+        <p style="color:var(--muted);font-size:13px;margin-top:10px">Okul idarenden yeni bir davet kodu iste, ya da farklı bir hesapla giriş yap.</p>
+        <button class="secondary" id="join-signout" style="width:100%">Çıkış yap</button>
+      </div>
+    </div>
+  `;
+  document.getElementById("join-signout").onclick = async () => {
+    localStorage.removeItem("pendingJoinCode");
+    await sb.auth.signOut();
+    boot();
+  };
+}
+
+function renderTeacherDashboard(profile, school) {
+  app.innerHTML = `
+    <div class="wrap dash">
+      <div class="topbar">
+        <div>
+          <div class="eyebrow">Okul İdare Paneli</div>
+          <div class="who"><strong>${esc(school.name)}</strong> · ${esc(profile.full_name || "Öğretmen")}</div>
+        </div>
+        <button class="signout" id="signout">Çıkış yap</button>
+      </div>
+      <div class="grid">
+        <div class="mod clickable" data-mod="LGS Koçluk">
+          <h3>LGS Koçluk</h3>
+          <p>Koçluk ettiğin 8. sınıf öğrencilerinin deneme takibi, zayıflık analizi ve haftalık görevleri.</p>
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById("signout").onclick = async () => {
+    await sb.auth.signOut();
+    boot();
+  };
+  document.querySelector('[data-mod="LGS Koçluk"]').onclick = () => renderLgsModule(profile, school, "ogrenciler");
 }
 
 function renderSchoolSetup(user) {
@@ -299,6 +357,8 @@ function renderDashboard(profile, school) {
   if (talepCard) talepCard.onclick = () => renderTalepModule(profile, school);
   const planlamaCard = document.querySelector('[data-mod="Planlama İşleri"]');
   if (planlamaCard) planlamaCard.onclick = () => renderPlanlamaModule(profile, school);
+  const lgsCard = document.querySelector('[data-mod="LGS Koçluk"]');
+  if (lgsCard) lgsCard.onclick = () => renderLgsModule(profile, school, "ogrenciler");
 }
 
 function localStorageAvailable() {
@@ -340,16 +400,24 @@ function loadPersonel(school) {
   }
 }
 
+let lastLocalStorageError = null;
+
 function savePersonel(school, data) {
   try {
     localStorage.setItem(personelKey(school), JSON.stringify(data));
     return true;
-  } catch {
+  } catch (e) {
+    lastLocalStorageError = e;
     return false;
   }
 }
 
-const PERSONEL_SAVE_ERR = `<div class="msg err">Kaydedilemedi — tarayıcının yerel depolaması (localStorage) bu sayfada kapalı ya da dolu olabilir. Gizli/Private sekmede olabilirsin ya da tarayıcı ayarlarından site verilerine izin vermen gerekebilir.</div>`;
+function localStorageSaveErrHtml() {
+  const detail = lastLocalStorageError
+    ? `${lastLocalStorageError.name || "Error"}: ${lastLocalStorageError.message || "(mesaj yok)"}`
+    : "bilinmeyen hata (istisna nesnesi yakalanamadı)";
+  return `<div class="msg err">Kaydedilemedi — tarayıcının yerel depolaması (localStorage) bu sayfada kapalı ya da dolu olabilir. Gizli/Private sekmede olabilirsin ya da tarayıcı ayarlarından site verilerine izin vermen gerekebilir.<div style="margin-top:6px;font-size:11px;font-family:ui-monospace,monospace;opacity:0.75">Teknik detay: ${esc(detail)}</div></div>`;
+}
 
 function uid() {
   return window.crypto?.randomUUID ? window.crypto.randomUUID() : String(Date.now()) + Math.random();
@@ -440,7 +508,7 @@ function renderPersonelStaff(school, content, editingId = null) {
     } else {
       data.staff.push({ id: uid(), full_name, title });
     }
-    if (!savePersonel(school, data)) { msg.innerHTML = PERSONEL_SAVE_ERR; return; }
+    if (!savePersonel(school, data)) { msg.innerHTML = localStorageSaveErrHtml(); return; }
     renderPersonelStaff(school, content);
   };
   const cancelBtn = document.getElementById("p-cancel");
@@ -509,7 +577,7 @@ function renderPersonelChanges(school, content) {
     const msg = document.getElementById("c-msg");
     if (!date) { msg.innerHTML = `<div class="msg err">Tarih gerekli.</div>`; return; }
     data.changes.push({ id: uid(), staff_id, type, date, description });
-    if (!savePersonel(school, data)) { msg.innerHTML = PERSONEL_SAVE_ERR; return; }
+    if (!savePersonel(school, data)) { msg.innerHTML = localStorageSaveErrHtml(); return; }
     renderPersonelChanges(school, content);
   };
   content.querySelectorAll("[data-del-change]").forEach(b => b.onclick = () => {
@@ -576,7 +644,7 @@ function renderPersonelAttendance(school, content) {
     const msg = document.getElementById("a-msg");
     if (!date) { msg.innerHTML = `<div class="msg err">Tarih gerekli.</div>`; return; }
     data.attendance.push({ id: uid(), staff_id, date, status, note });
-    if (!savePersonel(school, data)) { msg.innerHTML = PERSONEL_SAVE_ERR; return; }
+    if (!savePersonel(school, data)) { msg.innerHTML = localStorageSaveErrHtml(); return; }
     renderPersonelAttendance(school, content);
   };
   content.querySelectorAll("[data-del-att]").forEach(b => b.onclick = () => {
@@ -1266,7 +1334,7 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
       <h3 style="margin-top:0">Öğretmen Havuzu (${(teachers || []).length})</h3>
       <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>Ad</th><th>Rol</th><th>Kota</th><th>Muafiyet</th><th></th></tr></thead>
+        <thead><tr><th>Ad</th><th>Rol</th><th>Kota</th><th>Muafiyet</th><th>Panel Hesabı</th><th></th></tr></thead>
         <tbody>
           ${(teachers || []).map(t => `
             <tr>
@@ -1278,12 +1346,24 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
                 ${t.pregnancy_exempt_until ? '<span class="pill warn">Hamilelik</span>' : ""}
                 ${t.disability_exempt ? '<span class="pill warn">Engellilik</span>' : ""}
               </td>
+              <td style="min-width:180px">
+                ${t.user_id
+                  ? `<span style="color:var(--ok, #2e7d32)">✅ Hesap bağlı</span>`
+                  : t.invite_code
+                    ? `<div style="font-size:11.5px">
+                        <div>Kod: <strong style="font-family:ui-monospace,monospace">${esc(t.invite_code)}</strong></div>
+                        <input readonly value="${esc(location.origin + location.pathname)}?join=${esc(t.invite_code)}" style="font-size:10.5px;padding:4px;margin:4px 0" onclick="this.select()">
+                        <button data-gen-code="${t.id}" style="margin-top:2px">Yeni kod</button>
+                       </div>`
+                    : `<button data-gen-code="${t.id}">Davet Kodu Oluştur</button>`
+                }
+              </td>
               <td class="row-actions">
                 <button data-edit="${t.id}">Düzenle</button>
                 <button data-del="${t.id}">Sil</button>
               </td>
             </tr>
-          `).join("") || `<tr><td colspan="5" style="color:var(--muted)">Henüz öğretmen eklenmedi.</td></tr>`}
+          `).join("") || `<tr><td colspan="6" style="color:var(--muted)">Henüz öğretmen eklenmedi.</td></tr>`}
         </tbody>
       </table>
       </div>
@@ -1359,6 +1439,18 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
     await sb.from("teachers").delete().eq("id", b.dataset.del);
     await renderNobet(profile, school, "ogretmenler");
   });
+  content.querySelectorAll("[data-gen-code]").forEach(b => b.onclick = async () => {
+    const code = randomInviteCode();
+    await sb.from("teachers").update({ invite_code: code }).eq("id", b.dataset.genCode);
+    await renderNobet(profile, school, "ogretmenler");
+  });
+}
+
+function randomInviteCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
 }
 
 async function renderDonem(profile, school, content, activePeriodId = null) {
@@ -2428,7 +2520,8 @@ function saveKelebek(school, data) {
   try {
     localStorage.setItem(kelebekKey(school), JSON.stringify(data));
     return true;
-  } catch {
+  } catch (e) {
+    lastLocalStorageError = e;
     return false;
   }
 }
@@ -2728,7 +2821,7 @@ async function renderKelebek(school, content, draftGroups = null, lastExam = nul
       createdAt: new Date().toISOString(),
     };
     data.exams.push(exam);
-    if (!saveKelebek(school, data)) { msg.innerHTML = PERSONEL_SAVE_ERR; return; }
+    if (!saveKelebek(school, data)) { msg.innerHTML = localStorageSaveErrHtml(); return; }
     renderKelebek(school, content, null, exam);
   };
 
@@ -3010,6 +3103,1035 @@ async function renderCommitteeDetail(school, committee, el) {
   });
 }
 
+/* ============ LGS KOÇLUK & TAKİP ============ */
+
+function lgsHeader(profile, school, activeTab) {
+  const tabs = [
+    { id: "ogrenciler", label: "Öğrenciler" },
+    { id: "dersler", label: "Dersler" },
+    { id: "denemeler", label: "Denemeler" },
+    { id: "analiz", label: "Zayıflık Analizi" },
+    { id: "gorevler", label: "Haftalık Görevler" },
+    { id: "veli", label: "Veli Bilgilendirme" },
+    { id: "kayitlar", label: "Kayıt Geçmişi" },
+    ...(profile.role !== "ogretmen" ? [{ id: "ozet", label: "Müdür Özeti" }] : []),
+  ];
+  return `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">LGS Koçluk</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtabs">
+        ${tabs.map(t => `<div class="subtab ${t.id === activeTab ? "active" : ""}" data-tab="${t.id}">${t.label}</div>`).join("")}
+      </div>
+      <div id="lgs-content"></div>
+    </div>
+  `;
+}
+
+async function renderLgsModule(profile, school, tab) {
+  app.innerHTML = lgsHeader(profile, school, tab);
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  document.querySelectorAll("[data-tab]").forEach(el => {
+    el.onclick = () => renderLgsModule(profile, school, el.dataset.tab);
+  });
+  const content = document.getElementById("lgs-content");
+  content.innerHTML = `<div class="card">Yükleniyor…</div>`;
+  if (tab === "dersler") await renderLgsDersler(profile, school, content);
+  else if (tab === "denemeler") await renderLgsDenemeler(profile, school, content);
+  else if (tab === "analiz") await renderLgsAnaliz(profile, school, content);
+  else if (tab === "gorevler") await renderLgsGorevler(profile, school, content);
+  else if (tab === "veli") await renderLgsVeli(profile, school, content);
+  else if (tab === "ozet") await renderLgsOzet(profile, school, content);
+  else if (tab === "kayitlar") await renderLgsKayitlar(profile, school, content);
+  else await renderLgsOgrenciler(profile, school, content);
+}
+
+async function renderLgsOgrenciler(profile, school, content, editingId = null) {
+  const isIdareci = profile.role !== "ogretmen";
+  const [{ data: students }, { data: classes }, { data: teachers }] = await Promise.all([
+    sb.from("lgs_students").select("*").eq("school_id", school.id).order("full_name"),
+    sb.from("classes").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("teachers").select("*").eq("school_id", school.id).order("full_name"),
+  ]);
+  const classById = Object.fromEntries((classes || []).map(c => [c.id, c.name]));
+  const teacherById = Object.fromEntries((teachers || []).map(t => [t.id, t.full_name]));
+  const editStudent = editingId ? (students || []).find(s => s.id === editingId) : null;
+
+  content.innerHTML = `
+    ${(isIdareci || editStudent) ? `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">${editStudent ? "Öğrenciyi Düzenle" : "Yeni Öğrenci Ekle"}</h3>
+      <label>Ad Soyad</label>
+      <input id="s-name" value="${esc(editStudent?.full_name || "")}" placeholder="Ad Soyad" ${isIdareci ? "" : "disabled"}>
+      <label>Öğrenci No <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <input id="s-no" value="${esc(editStudent?.ogrenci_no || "")}" placeholder="örn. 245" ${isIdareci ? "" : "disabled"}>
+      <label>Şube</label>
+      <select id="s-class">
+        <option value="">Seçilmedi</option>
+        ${(classes || []).map(c => `<option value="${c.id}" ${editStudent?.class_id === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+      </select>
+      ${!classes?.length ? `<p style="color:var(--muted);font-size:12px;margin-top:-6px">Şube listesi boş — Ders Dağıtım Programı → Ayarlar'dan şube ekleyebilirsin, ya da boş bırak.</p>` : ""}
+      ${isIdareci ? `
+      <label>Koç öğretmen <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <select id="s-coach">
+        <option value="">Atanmadı</option>
+        ${(teachers || []).map(t => `<option value="${t.id}" ${editStudent?.coach_teacher_id === t.id ? "selected" : ""}>${esc(t.full_name)}</option>`).join("")}
+      </select>
+      ` : ""}
+      <label>Veli adı <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <input id="s-veli-adi" value="${esc(editStudent?.veli_adi || "")}" placeholder="Ad Soyad">
+      <label>Veli telefonu <span style="color:var(--muted);font-weight:400">(WhatsApp bildirimi için, opsiyonel)</span></label>
+      <input id="s-veli-tel" value="${esc(editStudent?.veli_telefon || "")}" placeholder="0532 000 00 00">
+      <label>Hedef puan <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <input id="s-hedef-puan" type="number" step="0.01" value="${editStudent?.hedef_puan ?? ""}" placeholder="örn. 450">
+      <label>Hedef okul <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <input id="s-hedef-okul" value="${esc(editStudent?.hedef_okul || "")}" placeholder="örn. Fen Lisesi">
+      <button class="primary" id="s-save">${editStudent ? "Güncelle" : "Ekle"}</button>
+      ${editStudent ? `<button class="secondary" id="s-cancel" style="margin-top:8px;width:100%">İptal</button>` : ""}
+      <div id="s-msg"></div>
+    </div>
+    ` : ""}
+    <div class="card">
+      <h3 style="margin-top:0">${isIdareci ? "8. Sınıf Öğrenci Havuzu" : "Koçluk Ettiğin Öğrenciler"} (${(students || []).length})</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ad Soyad</th><th>Şube</th>${isIdareci ? "<th>Koç</th>" : ""}<th>Hedef Puan</th><th></th></tr></thead>
+          <tbody>
+            ${(students || []).map(s => `
+              <tr>
+                <td>${esc(s.full_name)}${s.ogrenci_no ? ` <span style="color:var(--muted);font-size:11.5px">#${esc(s.ogrenci_no)}</span>` : ""}</td>
+                <td>${s.class_id && classById[s.class_id] ? esc(classById[s.class_id]) : "—"}</td>
+                ${isIdareci ? `<td>${s.coach_teacher_id && teacherById[s.coach_teacher_id] ? esc(teacherById[s.coach_teacher_id]) : "—"}</td>` : ""}
+                <td>${s.hedef_puan ? esc(String(s.hedef_puan)) : "—"}</td>
+                <td class="row-actions"><button data-edit="${s.id}">Düzenle</button>${isIdareci ? `<button data-del="${s.id}">Sil</button>` : ""}</td>
+              </tr>
+            `).join("") || `<tr><td colspan="${isIdareci ? 5 : 4}" style="color:var(--muted)">${isIdareci ? "Henüz öğrenci eklenmedi." : "Sana atanmış öğrenci yok — okul idaresiyle konuş."}</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  const saveBtn = document.getElementById("s-save");
+  if (saveBtn) saveBtn.onclick = async () => {
+    const msg = document.getElementById("s-msg");
+    const payload = {
+      class_id: document.getElementById("s-class").value || null,
+      veli_adi: document.getElementById("s-veli-adi").value.trim() || null,
+      veli_telefon: document.getElementById("s-veli-tel").value.trim() || null,
+      hedef_puan: document.getElementById("s-hedef-puan").value ? Number(document.getElementById("s-hedef-puan").value) : null,
+      hedef_okul: document.getElementById("s-hedef-okul").value.trim() || null,
+    };
+    if (isIdareci) {
+      const full_name = document.getElementById("s-name").value.trim();
+      if (!full_name) { msg.innerHTML = `<div class="msg err">Ad Soyad zorunlu.</div>`; return; }
+      payload.school_id = school.id;
+      payload.full_name = full_name;
+      payload.ogrenci_no = document.getElementById("s-no").value.trim() || null;
+      payload.coach_teacher_id = document.getElementById("s-coach").value || null;
+    }
+    const { error } = editStudent
+      ? await sb.from("lgs_students").update(payload).eq("id", editStudent.id)
+      : await sb.from("lgs_students").insert({ ...payload, sort_order: (students || []).length });
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    await renderLgsOgrenciler(profile, school, content);
+  };
+  const cancelBtn = document.getElementById("s-cancel");
+  if (cancelBtn) cancelBtn.onclick = () => renderLgsOgrenciler(profile, school, content);
+  content.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => renderLgsOgrenciler(profile, school, content, b.dataset.edit));
+  content.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    await sb.from("lgs_students").delete().eq("id", b.dataset.del);
+    await renderLgsOgrenciler(profile, school, content);
+  });
+}
+
+async function renderLgsDersler(profile, school, content, activeSubjectId = null) {
+  const { data: subjects } = await sb.from("lgs_subjects").select("*").eq("school_id", school.id).order("sort_order");
+  const STANDARD_LGS_SUBJECTS = [
+    { name: "Türkçe", question_count: 20 },
+    { name: "Matematik", question_count: 20 },
+    { name: "Fen Bilimleri", question_count: 20 },
+    { name: "T.C. İnkılap Tarihi ve Atatürkçülük", question_count: 10 },
+    { name: "Din Kültürü ve Ahlak Bilgisi", question_count: 10 },
+    { name: "İngilizce", question_count: 10 },
+  ];
+  const isIdareci = profile.role !== "ogretmen";
+  content.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0">LGS Dersleri</h3>
+      <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Deneme sonuçları bu derslere göre girilir. Soru sayısı, zayıflık analizinde dersin ağırlığını belirler — MEB'in güncel LGS formatı değişirse buradan elle düzeltilebilir.</p>
+      ${isIdareci && !subjects?.length ? `<button class="secondary" id="seed-subjects" style="width:100%;margin-bottom:12px">Standart LGS derslerini ekle (Türkçe 20 · Matematik 20 · Fen 20 · İnkılap 10 · Din Kültürü 10 · İngilizce 10)</button>` : ""}
+      <div id="subj-list">
+        ${(subjects || []).map(s => `<div class="list-item"><span>${esc(s.name)} <span style="color:var(--muted)">(${s.question_count} soru)</span></span>${isIdareci ? `<div class="row-actions"><button data-del-subj="${s.id}">Sil</button></div>` : ""}</div>`).join("") || `<p style="color:var(--muted);font-size:13px">Henüz ders eklenmedi.</p>`}
+      </div>
+      ${isIdareci ? `
+      <label>Yeni ders</label>
+      <input id="new-subj-name" placeholder="örn. Sosyal Bilgiler">
+      <label>Soru sayısı</label>
+      <input id="new-subj-count" type="number" min="1" value="10">
+      <button class="secondary" id="add-subj" style="margin-top:10px;width:100%">Ekle</button>
+      <div id="subj-msg"></div>
+      ` : ""}
+    </div>
+    ${subjects?.length ? `
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin-top:0">Konular</h3>
+      <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Deneme sonucunda yanlış çıkan soruları belirli bir konuya bağlamak istersen, önce o dersin konularını burada tanımla — opsiyoneldir, tanımlamazsan sistem ders bazlı çalışmaya devam eder.</p>
+      <label>Ders</label>
+      <select id="topic-subj-select">
+        ${subjects.map(s => `<option value="${s.id}" ${activeSubjectId === s.id || (!activeSubjectId && s === subjects[0]) ? "selected" : ""}>${esc(s.name)}</option>`).join("")}
+      </select>
+      <div id="topic-list-wrap"></div>
+    </div>
+    ` : ""}
+  `;
+  const topicSelect = document.getElementById("topic-subj-select");
+  if (topicSelect) {
+    topicSelect.onchange = () => renderLgsDersler(profile, school, content, topicSelect.value);
+    await renderLgsTopicList(profile, school, document.getElementById("topic-list-wrap"), topicSelect.value, () => renderLgsDersler(profile, school, content, topicSelect.value));
+  }
+  if (!isIdareci) return;
+  const seedBtn = document.getElementById("seed-subjects");
+  if (seedBtn) seedBtn.onclick = async () => {
+    await sb.from("lgs_subjects").insert(STANDARD_LGS_SUBJECTS.map((s, i) => ({ school_id: school.id, name: s.name, question_count: s.question_count, sort_order: i })));
+    await renderLgsDersler(profile, school, content);
+  };
+  document.getElementById("add-subj").onclick = async () => {
+    const name = document.getElementById("new-subj-name").value.trim();
+    const count = Number(document.getElementById("new-subj-count").value);
+    const msg = document.getElementById("subj-msg");
+    if (!name || !count || count < 1) { msg.innerHTML = `<div class="msg err">Ders adı ve geçerli soru sayısı gerekli.</div>`; return; }
+    await sb.from("lgs_subjects").insert({ school_id: school.id, name, question_count: count, sort_order: (subjects || []).length });
+    await renderLgsDersler(profile, school, content);
+  };
+  content.querySelectorAll("[data-del-subj]").forEach(b => b.onclick = async () => {
+    await sb.from("lgs_subjects").delete().eq("id", b.dataset.delSubj);
+    await renderLgsDersler(profile, school, content);
+  });
+}
+
+async function renderLgsTopicList(profile, school, el, subjectId, onChange) {
+  const isIdareci = profile.role !== "ogretmen";
+  const { data: topics } = await sb.from("lgs_topics").select("*").eq("lgs_subject_id", subjectId).order("sort_order");
+  el.innerHTML = `
+    <div style="margin-top:10px">
+      ${(topics || []).map(t => `<div class="list-item"><span>${esc(t.name)}</span>${isIdareci ? `<div class="row-actions"><button data-del-topic="${t.id}">Sil</button></div>` : ""}</div>`).join("") || `<p style="color:var(--muted);font-size:13px">Bu ders için henüz konu eklenmedi.</p>`}
+      ${isIdareci ? `
+      <label>Yeni konu</label>
+      <input id="new-topic-name" placeholder="örn. Kesirler">
+      <button class="secondary" id="add-topic" style="margin-top:10px;width:100%">Ekle</button>
+      <div id="topic-msg"></div>
+      ` : ""}
+    </div>
+  `;
+  if (!isIdareci) return;
+  document.getElementById("add-topic").onclick = async () => {
+    const name = document.getElementById("new-topic-name").value.trim();
+    const msg = document.getElementById("topic-msg");
+    if (!name) { msg.innerHTML = `<div class="msg err">Konu adı gerekli.</div>`; return; }
+    await sb.from("lgs_topics").insert({ school_id: school.id, lgs_subject_id: subjectId, name, sort_order: (topics || []).length });
+    await onChange();
+  };
+  el.querySelectorAll("[data-del-topic]").forEach(b => b.onclick = async () => {
+    await sb.from("lgs_topics").delete().eq("id", b.dataset.delTopic);
+    await onChange();
+  });
+}
+
+async function renderLgsDenemeler(profile, school, content, activeExamId = null) {
+  const { data: exams } = await sb.from("lgs_mock_exams").select("*").eq("school_id", school.id).order("exam_date", { ascending: false });
+  const activeExam = activeExamId ? (exams || []).find(e => e.id === activeExamId) : null;
+  const isIdareci = profile.role !== "ogretmen";
+  content.innerHTML = `
+    ${isIdareci ? `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Yeni Deneme</h3>
+      <label>Başlık</label>
+      <input id="e-title" placeholder="örn. 3. Deneme - Ekim">
+      <label>Tarih</label>
+      <input id="e-date" type="date">
+      <label>Kaynak <span style="color:var(--muted);font-weight:400">(opsiyonel, sadece etiket — içerik entegrasyonu değil)</span></label>
+      <input id="e-kaynak" placeholder="örn. Okul içi">
+      <button class="secondary" id="e-save" style="width:100%">Ekle</button>
+      <div id="e-msg"></div>
+    </div>
+    ` : ""}
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Denemeler (${(exams || []).length})</h3>
+      <div id="exam-list">
+        ${(exams || []).map(e => `
+          <div class="list-item" style="cursor:pointer" data-open-exam="${e.id}">
+            <span>${esc(e.title)}${e.exam_date ? ` <span style="color:var(--muted)">· ${esc(e.exam_date)}</span>` : ""}</span>
+            ${isIdareci ? `<div class="row-actions"><button data-del-exam="${e.id}">Sil</button></div>` : ""}
+          </div>
+        `).join("") || `<p style="color:var(--muted);font-size:13px">Henüz deneme eklenmedi.</p>`}
+      </div>
+    </div>
+    <div id="exam-detail"></div>
+  `;
+  const eSaveBtn = document.getElementById("e-save");
+  if (eSaveBtn) eSaveBtn.onclick = async () => {
+    const title = document.getElementById("e-title").value.trim();
+    const msg = document.getElementById("e-msg");
+    if (!title) { msg.innerHTML = `<div class="msg err">Başlık zorunlu.</div>`; return; }
+    const { data: newExam, error } = await sb.from("lgs_mock_exams").insert({
+      school_id: school.id, title,
+      exam_date: document.getElementById("e-date").value || null,
+      kaynak: document.getElementById("e-kaynak").value.trim() || null,
+      sort_order: (exams || []).length,
+    }).select().single();
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    await renderLgsDenemeler(profile, school, content, newExam.id);
+  };
+  content.querySelectorAll("[data-open-exam]").forEach(el => el.onclick = () => renderLgsDenemeler(profile, school, content, el.dataset.openExam));
+  content.querySelectorAll("[data-del-exam]").forEach(b => b.onclick = async (ev) => {
+    ev.stopPropagation();
+    await sb.from("lgs_mock_exams").delete().eq("id", b.dataset.delExam);
+    await renderLgsDenemeler(profile, school, content);
+  });
+  if (activeExam) {
+    const detailEl = document.getElementById("exam-detail");
+    await renderLgsDenemeDetay(profile, school, detailEl, activeExam);
+  }
+}
+
+async function renderLgsDenemeDetay(profile, school, el, exam, editStudentId = null) {
+  const [{ data: students }, { data: subjects }, { data: results }, { data: topics }, { data: topicErrors }] = await Promise.all([
+    sb.from("lgs_students").select("*").eq("school_id", school.id).order("full_name"),
+    sb.from("lgs_subjects").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("lgs_mock_exam_results").select("*").eq("mock_exam_id", exam.id),
+    sb.from("lgs_topics").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("lgs_topic_errors").select("*").eq("mock_exam_id", exam.id),
+  ]);
+  if (!subjects?.length) {
+    el.innerHTML = `<div class="card"><p style="color:var(--muted)">Önce <strong>Dersler</strong> sekmesinden LGS derslerini tanımla.</p></div>`;
+    return;
+  }
+  if (!students?.length) {
+    el.innerHTML = `<div class="card"><p style="color:var(--muted)">Önce <strong>Öğrenciler</strong> sekmesinden öğrenci ekle.</p></div>`;
+    return;
+  }
+  const resultsByStudent = {};
+  (results || []).forEach(r => { (resultsByStudent[r.student_id] ??= {})[r.lgs_subject_id] = r; });
+  const netOf = r => r ? (r.correct_count - r.wrong_count / 4) : null;
+  const totalNet = sid => subjects.reduce((sum, s) => sum + (netOf(resultsByStudent[sid]?.[s.id]) || 0), 0);
+  const topicsBySubject = {};
+  (topics || []).forEach(t => (topicsBySubject[t.lgs_subject_id] ??= []).push(t));
+
+  const editStudent = editStudentId ? students.find(s => s.id === editStudentId) : null;
+  const editResults = editStudent ? (resultsByStudent[editStudent.id] || {}) : {};
+  const editTopicErrors = {};
+  if (editStudent) {
+    (topicErrors || []).filter(te => te.student_id === editStudent.id).forEach(te => editTopicErrors[te.lgs_topic_id] = te.error_count);
+  }
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">${esc(exam.title)} — Sonuç Gir</h3>
+      <label>Öğrenci</label>
+      <select id="r-student">
+        <option value="">Seç…</option>
+        ${students.map(s => `<option value="${s.id}" ${editStudent?.id === s.id ? "selected" : ""}>${esc(s.full_name)}${resultsByStudent[s.id] ? " ✓" : ""}</option>`).join("")}
+      </select>
+      <div id="r-subject-fields">
+        ${subjects.map(s => `
+          <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:8px;align-items:end;margin-bottom:8px">
+            <div style="font-size:13px;padding-bottom:8px">${esc(s.name)} <span style="color:var(--muted);font-size:11px">(${s.question_count})</span></div>
+            <div><label style="font-size:11px">Doğru</label><input type="number" min="0" max="${s.question_count}" data-subj="${s.id}" data-field="correct" value="${editResults[s.id]?.correct_count ?? ""}"></div>
+            <div><label style="font-size:11px">Yanlış</label><input type="number" min="0" max="${s.question_count}" data-subj="${s.id}" data-field="wrong" value="${editResults[s.id]?.wrong_count ?? ""}"></div>
+            <div><label style="font-size:11px">Boş</label><input type="number" min="0" max="${s.question_count}" data-subj="${s.id}" data-field="blank" value="${editResults[s.id]?.blank_count ?? ""}"></div>
+          </div>
+          ${editStudent && topicsBySubject[s.id]?.length ? `
+            <div style="margin:-4px 0 14px;padding:10px;background:var(--surface-2);border-radius:8px">
+              <div style="font-size:11px;color:var(--muted);margin-bottom:6px">${esc(s.name)} — hangi konulardan hata? <span style="font-weight:400">(opsiyonel)</span></div>
+              <div style="display:flex;flex-wrap:wrap;gap:10px">
+                ${topicsBySubject[s.id].map(t => `
+                  <div style="display:flex;align-items:center;gap:5px">
+                    <span style="font-size:11.5px">${esc(t.name)}</span>
+                    <input type="number" min="0" data-topic="${t.id}" data-topic-subj="${s.id}" value="${editTopicErrors[t.id] ?? ""}" style="width:52px;padding:4px">
+                  </div>
+                `).join("")}
+              </div>
+            </div>
+          ` : ""}
+        `).join("")}
+      </div>
+      <button class="primary" id="r-save" style="width:100%">Kaydet</button>
+      <div id="r-msg"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Sınıf Özeti</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Öğrenci</th>${subjects.map(s => `<th>${esc(s.name)}</th>`).join("")}<th>Toplam Net</th></tr></thead>
+          <tbody>
+            ${students.map(s => `
+              <tr>
+                <td style="cursor:pointer;text-decoration:underline" data-edit-student="${s.id}">${esc(s.full_name)}</td>
+                ${subjects.map(sub => {
+                  const n = netOf(resultsByStudent[s.id]?.[sub.id]);
+                  return `<td>${n === null ? "—" : n.toFixed(2)}</td>`;
+                }).join("")}
+                <td style="font-weight:600">${resultsByStudent[s.id] ? totalNet(s.id).toFixed(2) : "—"}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  document.getElementById("r-student").onchange = (ev) => {
+    renderLgsDenemeDetay(profile, school, el, exam, ev.target.value || null);
+  };
+  document.getElementById("r-save").onclick = async () => {
+    const studentId = document.getElementById("r-student").value;
+    const msg = document.getElementById("r-msg");
+    if (!studentId) { msg.innerHTML = `<div class="msg err">Önce öğrenci seç.</div>`; return; }
+    const rows = [];
+    for (const s of subjects) {
+      const c = Number(document.querySelector(`[data-subj="${s.id}"][data-field="correct"]`).value) || 0;
+      const w = Number(document.querySelector(`[data-subj="${s.id}"][data-field="wrong"]`).value) || 0;
+      const b = Number(document.querySelector(`[data-subj="${s.id}"][data-field="blank"]`).value) || 0;
+      if (c + w + b > s.question_count) {
+        msg.innerHTML = `<div class="msg err">${esc(s.name)}: doğru + yanlış + boş toplamı ${s.question_count}'i geçemez.</div>`;
+        return;
+      }
+      rows.push({ school_id: school.id, mock_exam_id: exam.id, student_id: studentId, lgs_subject_id: s.id, correct_count: c, wrong_count: w, blank_count: b });
+    }
+    const { error } = await sb.from("lgs_mock_exam_results").upsert(rows, { onConflict: "mock_exam_id,student_id,lgs_subject_id" });
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+
+    const topicUpserts = [];
+    const topicDeleteIds = [];
+    document.querySelectorAll("[data-topic]").forEach(inp => {
+      const val = Number(inp.value) || 0;
+      const topicId = inp.dataset.topic;
+      if (val > 0) {
+        topicUpserts.push({ school_id: school.id, mock_exam_id: exam.id, student_id: studentId, lgs_subject_id: inp.dataset.topicSubj, lgs_topic_id: topicId, error_count: val });
+      } else if (editTopicErrors[topicId] !== undefined) {
+        topicDeleteIds.push(topicId);
+      }
+    });
+    if (topicUpserts.length) await sb.from("lgs_topic_errors").upsert(topicUpserts, { onConflict: "mock_exam_id,student_id,lgs_topic_id" });
+    if (topicDeleteIds.length) await sb.from("lgs_topic_errors").delete().eq("mock_exam_id", exam.id).eq("student_id", studentId).in("lgs_topic_id", topicDeleteIds);
+
+    await renderLgsDenemeDetay(profile, school, el, exam, studentId);
+  };
+  el.querySelectorAll("[data-edit-student]").forEach(td => td.onclick = () => renderLgsDenemeDetay(profile, school, el, exam, td.dataset.editStudent));
+}
+
+function computeLgsWeakness(subjects, examsById, resultsForStudent) {
+  const totalQ = subjects.reduce((a, s) => a + s.question_count, 0);
+  const bySubject = {};
+  subjects.forEach(s => bySubject[s.id] = []);
+  resultsForStudent.forEach(r => {
+    const exam = examsById[r.mock_exam_id];
+    const subject = subjects.find(s => s.id === r.lgs_subject_id);
+    if (!exam || !subject) return;
+    bySubject[subject.id].push({
+      date: exam.exam_date || exam.created_at,
+      net: r.correct_count - r.wrong_count / 4,
+      q: subject.question_count,
+    });
+  });
+  return subjects.map(s => {
+    const arr = (bySubject[s.id] || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+    if (!arr.length) return { subject: s, hasData: false };
+    const weights = arr.map((_, i) => 1 / (i + 1));
+    const wsum = weights.reduce((a, b) => a + b, 0);
+    const perf = arr.reduce((acc, r, i) => acc + (weights[i] / wsum) * Math.max(0, r.net / r.q), 0);
+    const importance = s.question_count / totalQ;
+    return { subject: s, hasData: true, perf, weaknessScore: importance * (1 - perf), examCount: arr.length, lastNet: arr[0].net };
+  }).filter(r => r.hasData).sort((a, b) => b.weaknessScore - a.weaknessScore);
+}
+
+const LGS_CHART_PALETTE = ["#1f6b65", "#a5690a", "#b3402c", "#4a7fc4", "#8b5fbf", "#c4574a", "#3f9142", "#c48a2f"];
+
+function lgsChartColor(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#888";
+}
+
+function lgsChart(canvasId, config) {
+  if (!window.__lgsCharts) window.__lgsCharts = {};
+  if (window.__lgsCharts[canvasId]) window.__lgsCharts[canvasId].destroy();
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+  window.__lgsCharts[canvasId] = new Chart(ctx, config);
+}
+
+function computeLgsTopicWeakness(topics, examsById, topicErrorsForStudent) {
+  const byTopic = {};
+  topics.forEach(t => byTopic[t.id] = []);
+  topicErrorsForStudent.forEach(te => {
+    const exam = examsById[te.mock_exam_id];
+    if (!exam || !byTopic[te.lgs_topic_id]) return;
+    byTopic[te.lgs_topic_id].push({ date: exam.exam_date || exam.created_at, count: te.error_count });
+  });
+  return topics.map(t => {
+    const arr = (byTopic[t.id] || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+    if (!arr.length) return { topic: t, hasData: false };
+    const weights = arr.map((_, i) => 1 / (i + 1));
+    const wsum = weights.reduce((a, b) => a + b, 0);
+    const score = arr.reduce((acc, r, i) => acc + (weights[i] / wsum) * r.count, 0);
+    return { topic: t, hasData: true, score, totalErrors: arr.reduce((a, b) => a + b.count, 0) };
+  }).filter(r => r.hasData).sort((a, b) => b.score - a.score);
+}
+
+function lgsStudentTrendData(subjects, examsById, resultsForStudent) {
+  const examIds = [...new Set(resultsForStudent.map(r => r.mock_exam_id))];
+  const examsSorted = examIds.map(id => examsById[id]).filter(Boolean)
+    .sort((a, b) => new Date(a.exam_date || a.created_at) - new Date(b.exam_date || b.created_at));
+  const byExamSubject = {};
+  resultsForStudent.forEach(r => { (byExamSubject[r.mock_exam_id] ??= {})[r.lgs_subject_id] = r; });
+  return {
+    labels: examsSorted.map(e => e.title),
+    datasets: subjects.map((s, i) => ({
+      label: s.name,
+      data: examsSorted.map(e => {
+        const r = byExamSubject[e.id]?.[s.id];
+        return r ? +(r.correct_count - r.wrong_count / 4).toFixed(2) : null;
+      }),
+      borderColor: LGS_CHART_PALETTE[i % LGS_CHART_PALETTE.length],
+      backgroundColor: LGS_CHART_PALETTE[i % LGS_CHART_PALETTE.length],
+      spanGaps: true,
+      tension: 0.25,
+    })),
+  };
+}
+
+async function renderLgsAnaliz(profile, school, content, chartStudentId = null) {
+  const [{ data: students }, { data: subjects }, { data: exams }, { data: results }, { data: topics }, { data: topicErrors }] = await Promise.all([
+    sb.from("lgs_students").select("*").eq("school_id", school.id).order("full_name"),
+    sb.from("lgs_subjects").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("lgs_mock_exams").select("*").eq("school_id", school.id),
+    sb.from("lgs_mock_exam_results").select("*").eq("school_id", school.id),
+    sb.from("lgs_topics").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("lgs_topic_errors").select("*").eq("school_id", school.id),
+  ]);
+  if (!subjects?.length || !exams?.length || !results?.length) {
+    content.innerHTML = `<div class="card"><p style="color:var(--muted)">Analiz için önce Dersler tanımlanmalı ve en az bir denemeye sonuç girilmeli.</p></div>`;
+    return;
+  }
+  const examsById = Object.fromEntries(exams.map(e => [e.id, e]));
+  const resultsByStudent = {};
+  results.forEach(r => (resultsByStudent[r.student_id] ??= []).push(r));
+  const topicErrorsByStudent = {};
+  (topicErrors || []).forEach(te => (topicErrorsByStudent[te.student_id] ??= []).push(te));
+
+  const perStudent = students
+    .map(s => ({ student: s, rows: computeLgsWeakness(subjects, examsById, resultsByStudent[s.id] || []) }))
+    .filter(x => x.rows.length);
+
+  const perStudentTopics = students
+    .map(s => ({ student: s, rows: computeLgsTopicWeakness(topics || [], examsById, topicErrorsByStudent[s.id] || []) }))
+    .filter(x => x.rows.length);
+
+  const schoolAgg = {};
+  subjects.forEach(s => schoolAgg[s.id] = { subject: s, scores: [] });
+  perStudent.forEach(({ rows }) => rows.forEach(r => schoolAgg[r.subject.id].scores.push(r.weaknessScore)));
+  const schoolRows = Object.values(schoolAgg)
+    .filter(a => a.scores.length)
+    .map(a => ({ subject: a.subject, avg: a.scores.reduce((x, y) => x + y, 0) / a.scores.length, n: a.scores.length }))
+    .sort((a, b) => b.avg - a.avg);
+
+  const studentsWithData = students.filter(s => (resultsByStudent[s.id] || []).length);
+  const trendStudentId = chartStudentId || studentsWithData[0]?.id || null;
+
+  const isIdareci = profile.role !== "ogretmen";
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">${isIdareci ? "Okul Geneli" : "Öğrencilerin"} — En Öncelikli Dersler</h3>
+      <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Son denemelerdeki performans (yakın tarihli sonuçlar daha ağırlıklı sayılır) ile dersin LGS'deki soru ağırlığı birlikte hesaba katılır — düşük net'e sahip ama az soru gelen bir ders, yüksek soru sayılı bir dersin önüne geçemez.</p>
+      <div style="height:220px;margin-bottom:14px"><canvas id="lgs-school-chart"></canvas></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ders</th><th>Veri olan öğrenci</th><th>Öncelik skoru</th></tr></thead>
+          <tbody>
+            ${schoolRows.map(r => `<tr><td>${esc(r.subject.name)}</td><td>${r.n}/${students.length}</td><td>${(r.avg * 100).toFixed(0)}</td></tr>`).join("") || `<tr><td colspan="3" style="color:var(--muted)">Henüz veri yok.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Öğrenci Bazlı Öncelikler</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Öğrenci</th><th>Öncelikli çalışması gereken dersler</th></tr></thead>
+          <tbody>
+            ${perStudent.map(({ student, rows }) => `
+              <tr>
+                <td>${esc(student.full_name)}</td>
+                <td>${rows.slice(0, 3).map(r => `${esc(r.subject.name)} <span style="color:var(--muted);font-size:11px">(son net ${r.lastNet.toFixed(1)})</span>`).join(", ")}</td>
+              </tr>
+            `).join("") || `<tr><td colspan="2" style="color:var(--muted)">Henüz veri yok.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ${perStudentTopics.length ? `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Sık Tekrarlanan Hata Konuları</h3>
+      <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Denemelerde konu bazlı hata girilen öğrenciler için — hangi konuda tekrar eden hata var, önce oraya çalışılmalı.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Öğrenci</th><th>Öneri: önce bu konulara çalış</th></tr></thead>
+          <tbody>
+            ${perStudentTopics.map(({ student, rows }) => `
+              <tr>
+                <td>${esc(student.full_name)}</td>
+                <td>${rows.slice(0, 3).map(r => `${esc(r.topic.name)} <span style="color:var(--muted);font-size:11px">(${r.totalErrors} hata)</span>`).join(", ")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ` : ""}
+    <div class="card">
+      <h3 style="margin-top:0">Net Trendi</h3>
+      ${studentsWithData.length ? `
+      <label>Öğrenci</label>
+      <select id="trend-student-select">
+        ${studentsWithData.map(s => `<option value="${s.id}" ${trendStudentId === s.id ? "selected" : ""}>${esc(s.full_name)}</option>`).join("")}
+      </select>
+      <div style="height:260px;margin-top:10px"><canvas id="lgs-trend-chart"></canvas></div>
+      ` : `<p style="color:var(--muted);font-size:13px">Henüz grafik için yeterli veri yok.</p>`}
+    </div>
+  `;
+
+  lgsChart("lgs-school-chart", {
+    type: "bar",
+    data: {
+      labels: schoolRows.map(r => r.subject.name),
+      datasets: [{ label: "Öncelik skoru", data: schoolRows.map(r => +(r.avg * 100).toFixed(1)), backgroundColor: lgsChartColor("--accent") }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, max: 100 } },
+    },
+  });
+
+  const trendSelect = document.getElementById("trend-student-select");
+  if (trendSelect) {
+    trendSelect.onchange = () => renderLgsAnaliz(profile, school, content, trendSelect.value);
+    const trendData = lgsStudentTrendData(subjects, examsById, resultsByStudent[trendStudentId] || []);
+    lgsChart("lgs-trend-chart", {
+      type: "line",
+      data: trendData,
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
+      },
+    });
+  }
+}
+
+function mondayOfWeek(d) {
+  const date = new Date(d);
+  const day = date.getDay();
+  const diff = (day === 0 ? -6 : 1) - day;
+  date.setDate(date.getDate() + diff);
+  return date.toISOString().slice(0, 10);
+}
+
+async function renderLgsGorevler(profile, school, content, formStudentId = null) {
+  const [{ data: students }, { data: subjects }, { data: tasks }, { data: exams }, { data: results }, { data: topics }, { data: topicErrors }] = await Promise.all([
+    sb.from("lgs_students").select("*").eq("school_id", school.id).order("full_name"),
+    sb.from("lgs_subjects").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("lgs_study_tasks").select("*").eq("school_id", school.id).order("week_start", { ascending: false }),
+    sb.from("lgs_mock_exams").select("*").eq("school_id", school.id),
+    sb.from("lgs_mock_exam_results").select("*").eq("school_id", school.id),
+    sb.from("lgs_topics").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("lgs_topic_errors").select("*").eq("school_id", school.id),
+  ]);
+  if (!students?.length) {
+    content.innerHTML = `<div class="card"><p style="color:var(--muted)">Önce <strong>Öğrenciler</strong> sekmesinden öğrenci ekle.</p></div>`;
+    return;
+  }
+  const studentById = Object.fromEntries(students.map(s => [s.id, s]));
+  const subjectById = Object.fromEntries((subjects || []).map(s => [s.id, s]));
+  const examsById = Object.fromEntries((exams || []).map(e => [e.id, e]));
+  const resultsByStudent = {};
+  (results || []).forEach(r => (resultsByStudent[r.student_id] ??= []).push(r));
+  const topicErrorsByStudent = {};
+  (topicErrors || []).forEach(te => (topicErrorsByStudent[te.student_id] ??= []).push(te));
+
+  let suggestChips = "";
+  if (formStudentId && subjects?.length) {
+    const topicRows = computeLgsTopicWeakness(topics || [], examsById, topicErrorsByStudent[formStudentId] || []);
+    const subjRows = computeLgsWeakness(subjects, examsById, resultsByStudent[formStudentId] || []);
+    if (topicRows.length || subjRows.length) {
+      suggestChips = `
+        <label>Bu öğrencinin öncelikleri <span style="color:var(--muted);font-weight:400">(tıklayınca ders ve başlık otomatik dolar)</span></label>
+        <div class="chips" id="task-suggest-chips">
+          ${topicRows.slice(0, 3).map(r => `<span class="chip" data-suggest-subj="${r.topic.lgs_subject_id}" data-suggest-name="${esc(r.topic.name)}">${esc(r.topic.name)} <span style="opacity:.6">(${r.totalErrors} hata)</span></span>`).join("")}
+          ${subjRows.slice(0, 3).map(r => `<span class="chip" data-suggest-subj="${r.subject.id}" data-suggest-name="${esc(r.subject.name)}">${esc(r.subject.name)}</span>`).join("")}
+        </div>
+      `;
+    }
+  }
+
+  const statusLabel = { bekliyor: "⏳ Bekliyor", yapildi: "✅ Yapıldı", onaylandi: "🏆 Onaylandı" };
+  const counts = {};
+  students.forEach(s => counts[s.id] = { bekliyor: 0, yapildi: 0, onaylandi: 0 });
+  (tasks || []).forEach(t => { if (counts[t.student_id]) counts[t.student_id][t.status]++; });
+
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Yeni Görev Ata</h3>
+      <label>Öğrenci</label>
+      <select id="tk-student">
+        <option value="">Seç…</option>
+        ${students.map(s => `<option value="${s.id}" ${formStudentId === s.id ? "selected" : ""}>${esc(s.full_name)}</option>`).join("")}
+      </select>
+      ${suggestChips}
+      <label>Ders <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <select id="tk-subject">
+        <option value="">Belirtilmedi</option>
+        ${(subjects || []).map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}
+      </select>
+      <label>Görev</label>
+      <input id="tk-title" placeholder="örn. Kesirler konusu 20 soru çöz">
+      <label>Hafta başlangıcı</label>
+      <input id="tk-week" type="date" value="${mondayOfWeek(new Date())}">
+      <label>Not <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <input id="tk-note" placeholder="örn. Zor gelirse örnek video izlesin">
+      <button class="primary" id="tk-save" style="width:100%">Ata</button>
+      <div id="tk-msg"></div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Durum Özeti</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Öğrenci</th><th>⏳ Bekliyor</th><th>✅ Yapıldı</th><th>🏆 Onaylandı</th></tr></thead>
+          <tbody>
+            ${students.map(s => `<tr><td>${esc(s.full_name)}</td><td>${counts[s.id].bekliyor}</td><td>${counts[s.id].yapildi}</td><td>${counts[s.id].onaylandi}</td></tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Tüm Görevler (${(tasks || []).length})</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Öğrenci</th><th>Ders</th><th>Görev</th><th>Hafta</th><th>Durum</th><th></th></tr></thead>
+          <tbody>
+            ${(tasks || []).map(t => `
+              <tr>
+                <td>${studentById[t.student_id] ? esc(studentById[t.student_id].full_name) : "—"}</td>
+                <td>${t.lgs_subject_id && subjectById[t.lgs_subject_id] ? esc(subjectById[t.lgs_subject_id].name) : "—"}</td>
+                <td>${esc(t.title)}${t.note ? `<div style="color:var(--muted);font-size:11.5px">${esc(t.note)}</div>` : ""}</td>
+                <td>${t.week_start ? esc(t.week_start) : "—"}</td>
+                <td>${statusLabel[t.status] || t.status}</td>
+                <td class="row-actions">
+                  ${t.status === "bekliyor" ? `<button data-advance="${t.id}" data-to="yapildi">Yapıldı işaretle</button>` : ""}
+                  ${t.status === "yapildi" ? `<button data-advance="${t.id}" data-to="onaylandi">Onayla</button>` : ""}
+                  <button data-del-task="${t.id}">Sil</button>
+                </td>
+              </tr>
+            `).join("") || `<tr><td colspan="6" style="color:var(--muted)">Henüz görev atanmadı.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  document.getElementById("tk-student").onchange = (ev) => renderLgsGorevler(profile, school, content, ev.target.value || null);
+  content.querySelectorAll("[data-suggest-subj]").forEach(chip => chip.onclick = () => {
+    document.getElementById("tk-subject").value = chip.dataset.suggestSubj;
+    const titleEl = document.getElementById("tk-title");
+    if (!titleEl.value.trim()) titleEl.value = `${chip.dataset.suggestName} çalış`;
+  });
+  document.getElementById("tk-save").onclick = async () => {
+    const studentId = document.getElementById("tk-student").value;
+    const title = document.getElementById("tk-title").value.trim();
+    const msg = document.getElementById("tk-msg");
+    if (!studentId || !title) { msg.innerHTML = `<div class="msg err">Öğrenci ve görev alanı zorunlu.</div>`; return; }
+    const { error } = await sb.from("lgs_study_tasks").insert({
+      school_id: school.id,
+      student_id: studentId,
+      lgs_subject_id: document.getElementById("tk-subject").value || null,
+      title,
+      week_start: document.getElementById("tk-week").value || null,
+      note: document.getElementById("tk-note").value.trim() || null,
+    });
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    await renderLgsGorevler(profile, school, content, studentId);
+  };
+  content.querySelectorAll("[data-advance]").forEach(b => b.onclick = async () => {
+    await sb.from("lgs_study_tasks").update({ status: b.dataset.to }).eq("id", b.dataset.advance);
+    await renderLgsGorevler(profile, school, content, formStudentId);
+  });
+  content.querySelectorAll("[data-del-task]").forEach(b => b.onclick = async () => {
+    await sb.from("lgs_study_tasks").delete().eq("id", b.dataset.delTask);
+    await renderLgsGorevler(profile, school, content, formStudentId);
+  });
+}
+
+function lgsVeliMessage(school, student, subjects, examsById, resultsForStudent, tasksForStudent) {
+  const netOf = r => r.correct_count - r.wrong_count / 4;
+  let latestNetLabel = "Henüz deneme sonucu yok";
+  let latestExamLine = "";
+  if (resultsForStudent.length) {
+    const examIds = [...new Set(resultsForStudent.map(r => r.mock_exam_id))];
+    const sortedExams = examIds.map(id => examsById[id]).filter(Boolean)
+      .sort((a, b) => new Date(b.exam_date || b.created_at) - new Date(a.exam_date || a.created_at));
+    const latestExam = sortedExams[0];
+    if (latestExam) {
+      const totalNet = resultsForStudent.filter(r => r.mock_exam_id === latestExam.id).reduce((sum, r) => sum + netOf(r), 0);
+      latestNetLabel = `${latestExam.title}: ${totalNet.toFixed(2)} net`;
+      latestExamLine = `📊 Son deneme (${latestExam.title}): ${totalNet.toFixed(2)} net`;
+    }
+  }
+
+  const weakness = subjects.length ? computeLgsWeakness(subjects, examsById, resultsForStudent) : [];
+  const weaknessLine = weakness.length
+    ? `🎯 Öncelikli çalışması gereken dersler: ${weakness.slice(0, 2).map(w => w.subject.name).join(", ")}`
+    : "";
+
+  const counts = { bekliyor: 0, yapildi: 0, onaylandi: 0 };
+  tasksForStudent.forEach(t => { if (counts[t.status] !== undefined) counts[t.status]++; });
+  const totalTasks = tasksForStudent.length;
+  const taskLabel = totalTasks ? `${counts.onaylandi}/${totalTasks} onaylandı` : "Görev yok";
+  const taskLine = totalTasks
+    ? `📝 Bu dönemki görevler: ${counts.onaylandi} onaylandı, ${counts.yapildi} kontrol bekliyor, ${counts.bekliyor} henüz başlanmadı`
+    : "";
+
+  const lines = [
+    `Merhaba${student.veli_adi ? " " + student.veli_adi : ""}, ${student.full_name} için LGS koçluk güncellemesi:`,
+    "",
+    latestExamLine,
+    weaknessLine,
+    taskLine,
+  ].filter(Boolean);
+  lines.push("", "İyi çalışmalar dileriz.", school.name);
+
+  return { text: lines.join("\n"), latestNetLabel, taskLabel };
+}
+
+async function renderLgsVeli(profile, school, content) {
+  const [{ data: students }, { data: subjects }, { data: exams }, { data: results }, { data: tasks }] = await Promise.all([
+    sb.from("lgs_students").select("*").eq("school_id", school.id).order("full_name"),
+    sb.from("lgs_subjects").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("lgs_mock_exams").select("*").eq("school_id", school.id),
+    sb.from("lgs_mock_exam_results").select("*").eq("school_id", school.id),
+    sb.from("lgs_study_tasks").select("*").eq("school_id", school.id),
+  ]);
+  if (!students?.length) {
+    content.innerHTML = `<div class="card"><p style="color:var(--muted)">Önce <strong>Öğrenciler</strong> sekmesinden öğrenci ekle.</p></div>`;
+    return;
+  }
+  const examsById = Object.fromEntries((exams || []).map(e => [e.id, e]));
+  const resultsByStudent = {};
+  (results || []).forEach(r => (resultsByStudent[r.student_id] ??= []).push(r));
+  const tasksByStudent = {};
+  (tasks || []).forEach(t => (tasksByStudent[t.student_id] ??= []).push(t));
+
+  content.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0">Veli Bilgilendirme</h3>
+      <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Her öğrenci için son deneme sonucu, öncelikli dersler ve görev durumunu özetleyen bir WhatsApp mesajı hazırlar — göndermeden önce metni düzenleyebilirsin.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Öğrenci</th><th>Veli</th><th>Son Deneme</th><th>Görevler</th><th></th></tr></thead>
+          <tbody>
+            ${students.map(s => {
+              const m = lgsVeliMessage(school, s, subjects || [], examsById, resultsByStudent[s.id] || [], tasksByStudent[s.id] || []);
+              const link = s.veli_telefon ? waLink(s.veli_telefon, m.text) : null;
+              return `
+                <tr>
+                  <td>${esc(s.full_name)}</td>
+                  <td>${s.veli_adi ? esc(s.veli_adi) : "—"}</td>
+                  <td>${esc(m.latestNetLabel)}</td>
+                  <td>${esc(m.taskLabel)}</td>
+                  <td>${link
+                    ? `<a href="${link}" target="_blank" rel="noopener" class="pill" style="text-decoration:none">📲 Veliye Gönder</a>`
+                    : `<span style="font-size:10.5px;color:var(--muted)">tel. yok</span>`}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+async function renderLgsOzet(profile, school, content) {
+  if (profile.role === "ogretmen") {
+    content.innerHTML = `<div class="card"><p style="color:var(--muted)">Bu özet sadece okul idaresi içindir.</p></div>`;
+    return;
+  }
+  const [{ data: students }, { data: teachers }, { data: results }, { data: tasks }, { data: exams }] = await Promise.all([
+    sb.from("lgs_students").select("*").eq("school_id", school.id),
+    sb.from("teachers").select("*").eq("school_id", school.id),
+    sb.from("lgs_mock_exam_results").select("*").eq("school_id", school.id),
+    sb.from("lgs_study_tasks").select("*").eq("school_id", school.id),
+    sb.from("lgs_mock_exams").select("*").eq("school_id", school.id),
+  ]);
+  if (!students?.length) {
+    content.innerHTML = `<div class="card"><p style="color:var(--muted)">Önce <strong>Öğrenciler</strong> sekmesinden öğrenci ekle.</p></div>`;
+    return;
+  }
+  const teacherById = Object.fromEntries((teachers || []).map(t => [t.id, t]));
+  const examsById = Object.fromEntries((exams || []).map(e => [e.id, e]));
+  const resultsByStudent = {};
+  (results || []).forEach(r => (resultsByStudent[r.student_id] ??= []).push(r));
+  const tasksByStudent = {};
+  (tasks || []).forEach(t => (tasksByStudent[t.student_id] ??= []).push(t));
+
+  const flagged = students.map(s => {
+    const flags = [];
+    if (!s.coach_teacher_id) flags.push("Koç atanmamış");
+    const myResults = resultsByStudent[s.id] || [];
+    if (!myResults.length) flags.push("Hiç deneme sonucu yok");
+    if (!s.veli_telefon) flags.push("Veli telefonu yok");
+    if (myResults.length) {
+      const examIds = [...new Set(myResults.map(r => r.mock_exam_id))];
+      const dates = examIds.map(id => examsById[id]?.exam_date || examsById[id]?.created_at).filter(Boolean).map(d => new Date(d));
+      if (dates.length) {
+        const latest = new Date(Math.max(...dates));
+        const daysSince = Math.floor((Date.now() - latest) / 86400000);
+        if (daysSince > 21) flags.push(`Son deneme ${daysSince} gün önce`);
+      }
+    }
+    return { student: s, flags };
+  }).filter(x => x.flags.length);
+
+  const noCoachCount = students.filter(s => !s.coach_teacher_id).length;
+  const noResultCount = students.filter(s => !(resultsByStudent[s.id] || []).length).length;
+  const noPhoneCount = students.filter(s => !s.veli_telefon).length;
+  const totalBekliyor = (tasks || []).filter(t => t.status === "bekliyor").length;
+  const totalYapildi = (tasks || []).filter(t => t.status === "yapildi").length;
+
+  const coachIds = [...new Set(students.map(s => s.coach_teacher_id).filter(Boolean))];
+  const coachRows = coachIds.map(tid => {
+    const t = teacherById[tid];
+    const myStudents = students.filter(s => s.coach_teacher_id === tid);
+    const myStudentIds = new Set(myStudents.map(s => s.id));
+    const myTasks = (tasks || []).filter(tk => myStudentIds.has(tk.student_id));
+    return {
+      name: t?.full_name || "Bilinmeyen",
+      hasAccount: !!t?.user_id,
+      studentCount: myStudents.length,
+      bekliyor: myTasks.filter(tk => tk.status === "bekliyor").length,
+    };
+  }).sort((a, b) => b.studentCount - a.studentCount);
+
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Okul Özeti</h3>
+      <div class="list-item"><span>Toplam öğrenci</span><strong>${students.length}</strong></div>
+      <div class="list-item"><span>Koçsuz öğrenci</span><strong>${noCoachCount}</strong></div>
+      <div class="list-item"><span>Hiç deneme sonucu olmayan öğrenci</span><strong>${noResultCount}</strong></div>
+      <div class="list-item"><span>Veli telefonu eksik öğrenci</span><strong>${noPhoneCount}</strong></div>
+      <div class="list-item"><span>Bekleyen görev (okul geneli)</span><strong>${totalBekliyor}</strong></div>
+      <div class="list-item"><span>Koç onayı bekleyen görev</span><strong>${totalYapildi}</strong></div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Dikkat Gerektiren Öğrenciler (${flagged.length})</h3>
+      ${flagged.length ? `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Öğrenci</th><th>Uyarılar</th></tr></thead>
+          <tbody>
+            ${flagged.map(f => `<tr><td>${esc(f.student.full_name)}</td><td>${f.flags.map(fl => `<span class="pill warn">${esc(fl)}</span>`).join(" ")}</td></tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+      ` : `<p style="color:var(--muted);font-size:13px">Tüm öğrenciler kapsam altında — dikkat gerektiren bir durum yok.</p>`}
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Koç Yükü</h3>
+      ${coachRows.length ? `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Koç</th><th>Öğrenci</th><th>Panel Hesabı</th><th>Bekleyen Görev</th></tr></thead>
+          <tbody>
+            ${coachRows.map(c => `<tr><td>${esc(c.name)}</td><td>${c.studentCount}</td><td>${c.hasAccount ? "✅ Bağlı" : "— bağlanmadı"}</td><td>${c.bekliyor}</td></tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+      ` : `<p style="color:var(--muted);font-size:13px">Henüz kimseye öğrenci koç olarak atanmadı.</p>`}
+    </div>
+  `;
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function describeLgsAuditEntry(entry, lookups) {
+  const actor = esc(entry.actor_name || "Bilinmeyen kullanıcı");
+  const d = entry.new_data || entry.old_data || {};
+
+  if (entry.table_name === "lgs_students") {
+    const sName = esc(d.full_name || "silinmiş öğrenci");
+    if (entry.action === "insert") return `${actor} — ${sName} öğrencisini ekledi`;
+    if (entry.action === "delete") return `${actor} — ${sName} öğrencisini sildi`;
+    const fields = { full_name: "ad", class_id: "şube", coach_teacher_id: "koç", veli_telefon: "veli telefonu", veli_adi: "veli adı", hedef_puan: "hedef puan", hedef_okul: "hedef okul" };
+    const changed = Object.entries(fields)
+      .filter(([k]) => JSON.stringify(entry.old_data?.[k]) !== JSON.stringify(entry.new_data?.[k]))
+      .map(([, label]) => label);
+    return `${actor} — ${sName} kaydını güncelledi${changed.length ? ` (${esc(changed.join(", "))})` : ""}`;
+  }
+
+  const sName = esc(lookups.studentName(d.student_id) || "silinmiş öğrenci");
+
+  if (entry.table_name === "lgs_mock_exam_results") {
+    const subj = esc(lookups.subjectName(d.lgs_subject_id) || "ders");
+    if (entry.action === "insert") return `${actor} — ${sName} için ${subj} sonucu girdi (${d.correct_count} doğru, ${d.wrong_count} yanlış, ${d.blank_count} boş)`;
+    if (entry.action === "delete") return `${actor} — ${sName} için ${subj} sonucunu sildi`;
+    const o = entry.old_data || {}, n = entry.new_data || {};
+    const diffs = [];
+    if (o.correct_count !== n.correct_count) diffs.push(`doğru ${o.correct_count}→${n.correct_count}`);
+    if (o.wrong_count !== n.wrong_count) diffs.push(`yanlış ${o.wrong_count}→${n.wrong_count}`);
+    if (o.blank_count !== n.blank_count) diffs.push(`boş ${o.blank_count}→${n.blank_count}`);
+    return `${actor} — ${sName} · ${subj} sonucunu güncelledi${diffs.length ? ` (${esc(diffs.join(", "))})` : ""}`;
+  }
+
+  if (entry.table_name === "lgs_topic_errors") {
+    const subj = esc(lookups.subjectName(d.lgs_subject_id) || "ders");
+    const topic = esc(lookups.topicName(d.lgs_topic_id) || "konu");
+    if (entry.action === "delete") return `${actor} — ${sName} için ${subj} / ${topic} hata kaydını sildi`;
+    return `${actor} — ${sName} için ${subj} / ${topic} hata sayısını ${d.error_count} olarak ${entry.action === "insert" ? "kaydetti" : "güncelledi"}`;
+  }
+
+  return `${actor} — bir kayıt ${entry.action === "insert" ? "eklendi" : entry.action === "delete" ? "silindi" : "güncellendi"}`;
+}
+
+async function renderLgsKayitlar(profile, school, content) {
+  const [{ data: logs }, { data: students }, { data: subjects }, { data: topics }] = await Promise.all([
+    sb.from("lgs_audit_log").select("*").eq("school_id", school.id).order("created_at", { ascending: false }).limit(150),
+    sb.from("lgs_students").select("id, full_name").eq("school_id", school.id),
+    sb.from("lgs_subjects").select("id, name").eq("school_id", school.id),
+    sb.from("lgs_topics").select("id, name").eq("school_id", school.id),
+  ]);
+  const studentNameById = Object.fromEntries((students || []).map(s => [s.id, s.full_name]));
+  const subjectNameById = Object.fromEntries((subjects || []).map(s => [s.id, s.name]));
+  const topicNameById = Object.fromEntries((topics || []).map(t => [t.id, t.name]));
+  const lookups = {
+    studentName: id => studentNameById[id],
+    subjectName: id => subjectNameById[id],
+    topicName: id => topicNameById[id],
+  };
+
+  content.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0">Kayıt Geçmişi</h3>
+      <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">${profile.role === "ogretmen" ? "Kendi yaptığın işlemler." : "Okuldaki tüm öğrenci ve deneme sonucu değişiklikleri."} (Son ${(logs || []).length} kayıt.)</p>
+      ${(logs || []).length ? (logs || []).map(l => `
+        <div class="list-item">
+          <span style="font-size:12.5px">${describeLgsAuditEntry(l, lookups)}</span>
+          <span style="color:var(--muted);font-size:11px;white-space:nowrap;margin-left:10px">${fmtDateTime(l.created_at)}</span>
+        </div>
+      `).join("") : `<p style="color:var(--muted);font-size:13px">Henüz kayıt yok.</p>`}
+    </div>
+  `;
+}
+
 async function boot() {
   app.innerHTML = "";
   const { data: { user } } = await sb.auth.getUser();
@@ -3024,7 +4146,21 @@ async function boot() {
     .maybeSingle();
 
   if (!profile || !profile.school_id) {
+    const pendingCode = localStorage.getItem("pendingJoinCode");
+    if (pendingCode) {
+      const { error } = await sb.rpc("join_school_as_teacher", { p_code: pendingCode });
+      if (!error) {
+        localStorage.removeItem("pendingJoinCode");
+        return boot();
+      }
+      renderJoinError(error.message);
+      return;
+    }
     renderSchoolSetup(user);
+    return;
+  }
+  if (profile.role === "ogretmen") {
+    renderTeacherDashboard(profile, profile.schools);
     return;
   }
   renderDashboard(profile, profile.schools);
