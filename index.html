@@ -465,12 +465,20 @@ async function renderPersonelModule(profile, school) {
   showTab("staff");
 }
 
-function renderPersonelStaff(school, content, editingId = null) {
+async function renderPersonelStaff(school, content, editingId = null) {
   const data = loadPersonel(school);
   const editStaff = editingId ? data.staff.find(s => s.id === editingId) : null;
+  const { data: teachers } = editStaff ? { data: [] } : await sb.from("teachers").select("id, full_name, branch").eq("school_id", school.id).order("full_name");
   content.innerHTML = `
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">${editStaff ? "Personeli Düzenle" : "Yeni Personel Ekle"}</h3>
+      ${!editStaff && teachers?.length ? `
+      <label>Öğretmen listesinden doldur <span style="color:var(--muted);font-weight:400">(opsiyonel, sadece adı buraya kopyalar — bu modülün verisi yine sadece bu tarayıcıda kalır)</span></label>
+      <select id="p-teacher-fill">
+        <option value="">— seç —</option>
+        ${teachers.map(t => `<option value="${t.id}">${esc(t.full_name)}</option>`).join("")}
+      </select>
+      ` : ""}
       <label>Ad Soyad</label>
       <input id="p-name" value="${editStaff ? esc(editStaff.full_name) : ""}" placeholder="Ad Soyad">
       <label>Unvan / Branş</label>
@@ -500,6 +508,13 @@ function renderPersonelStaff(school, content, editingId = null) {
       </div>
     </div>
   `;
+  const teacherFillSelect = document.getElementById("p-teacher-fill");
+  if (teacherFillSelect) teacherFillSelect.onchange = (ev) => {
+    const t = teachers.find(x => x.id === ev.target.value);
+    if (!t) return;
+    document.getElementById("p-name").value = t.full_name;
+    if (t.branch) document.getElementById("p-title").value = t.branch;
+  };
   document.getElementById("p-save").onclick = () => {
     const full_name = document.getElementById("p-name").value.trim();
     const title = document.getElementById("p-title").value.trim();
@@ -2880,7 +2895,10 @@ async function renderTalepModule(profile, school) {
 }
 
 async function renderTalep(school, content, filterStatus = "hepsi") {
-  const { data: requests } = await sb.from("requests").select("*").eq("school_id", school.id).order("created_at", { ascending: false });
+  const [{ data: requests }, { data: teachers }] = await Promise.all([
+    sb.from("requests").select("*").eq("school_id", school.id).order("created_at", { ascending: false }),
+    sb.from("teachers").select("id, full_name").eq("school_id", school.id).order("full_name"),
+  ]);
 
   const counts = { bekliyor: 0, islemde: 0, tamamlandi: 0, reddedildi: 0 };
   (requests || []).forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
@@ -2891,7 +2909,15 @@ async function renderTalep(school, content, filterStatus = "hepsi") {
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">Yeni Talep</h3>
       <label>Talep eden</label>
-      <input id="r-name" placeholder="örn. Ayşe Öğretmen, 5-A Sınıfı">
+      <select id="r-select">
+        <option value="">Öğretmen listesinden seç…</option>
+        ${(teachers || []).map(t => `<option value="${t.id}">${esc(t.full_name)}</option>`).join("")}
+        <option value="__custom__">Listede yok (elle yaz)</option>
+      </select>
+      <div id="r-custom-wrap" class="hidden">
+        <label>Ad Soyad</label>
+        <input id="r-name" placeholder="örn. Ayşe Öğretmen, 5-A Sınıfı">
+      </div>
       <label>Kategori</label>
       <select id="r-category">
         <option value="Malzeme">Malzeme</option>
@@ -2934,13 +2960,24 @@ async function renderTalep(school, content, filterStatus = "hepsi") {
 
   content.querySelectorAll("[data-filter]").forEach(el => el.onclick = () => renderTalep(school, content, el.dataset.filter));
 
+  const talepTeacherNameById = Object.fromEntries((teachers || []).map(t => [t.id, t.full_name]));
+  document.getElementById("r-select").onchange = (ev) => {
+    document.getElementById("r-custom-wrap").classList.toggle("hidden", ev.target.value !== "__custom__");
+  };
   document.getElementById("r-save").onclick = async () => {
-    const requester_name = document.getElementById("r-name").value.trim();
+    const selectVal = document.getElementById("r-select").value;
+    let requester_name = null, requester_teacher_id = null;
+    if (selectVal === "__custom__") {
+      requester_name = document.getElementById("r-name").value.trim();
+    } else if (selectVal) {
+      requester_teacher_id = selectVal;
+      requester_name = talepTeacherNameById[selectVal];
+    }
     const category = document.getElementById("r-category").value;
     const description = document.getElementById("r-desc").value.trim();
     const msg = document.getElementById("r-msg");
     if (!requester_name || !description) { msg.innerHTML = `<div class="msg err">Talep eden ve açıklama gerekli.</div>`; return; }
-    const { error } = await sb.from("requests").insert({ school_id: school.id, requester_name, category, description });
+    const { error } = await sb.from("requests").insert({ school_id: school.id, requester_name, requester_teacher_id, category, description });
     if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
     await renderTalep(school, content, filterStatus);
   };
@@ -3039,9 +3076,10 @@ async function renderPlanlama(school, content, activeId = null) {
 }
 
 async function renderCommitteeDetail(school, committee, el) {
-  const [{ data: members }, { data: meetings }] = await Promise.all([
+  const [{ data: members }, { data: meetings }, { data: teachers }] = await Promise.all([
     sb.from("committee_members").select("*").eq("committee_id", committee.id).order("created_at"),
     sb.from("committee_meetings").select("*").eq("committee_id", committee.id).order("meeting_date", { ascending: false }),
+    sb.from("teachers").select("id, full_name").eq("school_id", school.id).order("full_name"),
   ]);
 
   el.innerHTML = `
@@ -3051,8 +3089,16 @@ async function renderCommitteeDetail(school, committee, el) {
         <div>
           <h4>Üyeler (${(members || []).length})</h4>
           ${(members || []).map(m => `<div class="list-item"><span>${esc(m.member_name)}${m.role ? ` <span class="pill">${esc(m.role)}</span>` : ""}</span><div class="row-actions"><button data-del-member="${m.id}">Sil</button></div></div>`).join("") || `<p style="color:var(--muted);font-size:13px">Henüz üye eklenmedi.</p>`}
-          <label style="margin-top:10px">Ad Soyad</label>
-          <input id="m-name" placeholder="Ad Soyad">
+          <label style="margin-top:10px">Üye</label>
+          <select id="m-select">
+            <option value="">Öğretmen listesinden seç…</option>
+            ${(teachers || []).map(t => `<option value="${t.id}">${esc(t.full_name)}</option>`).join("")}
+            <option value="__custom__">Listede yok (elle yaz — veli, öğrenci temsilcisi vb.)</option>
+          </select>
+          <div id="m-custom-wrap" class="hidden">
+            <label>Ad Soyad</label>
+            <input id="m-name" placeholder="Ad Soyad">
+          </div>
           <label>Rol <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
           <input id="m-role" placeholder="örn. Başkan, Üye, Sekreter">
           <button class="secondary" id="m-save" style="margin-top:8px;width:100%">Üye Ekle</button>
@@ -3080,11 +3126,22 @@ async function renderCommitteeDetail(school, committee, el) {
     </div>
   `;
 
+  const teacherNameById = Object.fromEntries((teachers || []).map(t => [t.id, t.full_name]));
+  document.getElementById("m-select").onchange = (ev) => {
+    document.getElementById("m-custom-wrap").classList.toggle("hidden", ev.target.value !== "__custom__");
+  };
   document.getElementById("m-save").onclick = async () => {
-    const member_name = document.getElementById("m-name").value.trim();
+    const selectVal = document.getElementById("m-select").value;
+    let member_name = null, teacher_id = null;
+    if (selectVal === "__custom__") {
+      member_name = document.getElementById("m-name").value.trim();
+    } else if (selectVal) {
+      teacher_id = selectVal;
+      member_name = teacherNameById[selectVal];
+    }
     const role = document.getElementById("m-role").value.trim() || null;
     if (!member_name) return;
-    await sb.from("committee_members").insert({ school_id: school.id, committee_id: committee.id, member_name, role });
+    await sb.from("committee_members").insert({ school_id: school.id, committee_id: committee.id, member_name, teacher_id, role });
     await renderCommitteeDetail(school, committee, el);
   };
   el.querySelectorAll("[data-del-member]").forEach(b => b.onclick = async () => {
@@ -4312,6 +4369,17 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
       ` : `<button class="primary" id="gen-token" style="width:100%">Görüntüleme Linki Oluştur</button>`}
     </div>
 
+    ${displayLink ? `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Canlı Önizleme</h3>
+      <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Koridordaki ekranda şu an ne gösterildiğini buradan, gidip bakmadan kontrol edebilirsin.</p>
+      <div style="position:relative;width:100%;max-width:480px;aspect-ratio:16/9;background:#000;border-radius:8px;overflow:hidden">
+        <iframe id="pano-preview-frame" src="${esc(displayLink)}" style="width:100%;height:100%;border:none;pointer-events:none"></iframe>
+      </div>
+      <button class="secondary" id="pano-preview-refresh" style="margin-top:10px">Önizlemeyi Yenile</button>
+    </div>
+    ` : ""}
+
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">${editItem ? "İçeriği Düzenle" : "Yeni İçerik"}</h3>
       <label>Tür</label>
@@ -4362,6 +4430,11 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
     if (!confirm("Eski link artık çalışmayacak, koridordaki ekranı yeni linkle güncellemen gerekecek. Devam?")) return;
     await sb.from("schools").update({ display_token: crypto.randomUUID() }).eq("id", school.id);
     await renderPano(profile, school, content, typeFilter, statusFilter);
+  };
+  const previewRefreshBtn = document.getElementById("pano-preview-refresh");
+  if (previewRefreshBtn) previewRefreshBtn.onclick = () => {
+    const frame = document.getElementById("pano-preview-frame");
+    frame.src = frame.src;
   };
 
   document.getElementById("p-save").onclick = async () => {
