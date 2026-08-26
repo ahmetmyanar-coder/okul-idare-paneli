@@ -4215,6 +4215,13 @@ async function renderLgsKayitlar(profile, school, content) {
 const PANO_TYPE_LABELS = { duyuru: "Duyuru", medya: "Medya", pekistirec: "Pekiştireç" };
 const PANO_CATEGORY_OPTIONS = ["Ayın Öğrencisi", "En Temiz Sınıf", "Diğer"];
 
+function fitPanoPreview() {
+  const wrap = document.getElementById("pano-preview-wrap");
+  const frame = document.getElementById("pano-preview-frame");
+  if (!wrap || !frame) return;
+  frame.style.transform = `scale(${wrap.clientWidth / 1920})`;
+}
+
 function panoPublicUrl(path) {
   if (!path) return null;
   return sb.storage.from("pano-media").getPublicUrl(path).data.publicUrl;
@@ -4372,11 +4379,11 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
     ${displayLink ? `
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">Canlı Önizleme</h3>
-      <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Koridordaki ekranda şu an ne gösterildiğini buradan, gidip bakmadan kontrol edebilirsin.</p>
-      <div style="position:relative;width:100%;max-width:480px;aspect-ratio:16/9;background:#000;border-radius:8px;overflow:hidden">
-        <iframe id="pano-preview-frame" src="${esc(displayLink)}" style="width:100%;height:100%;border:none;pointer-events:none"></iframe>
+      <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Koridordaki ekranda şu an ne gösterildiğini, gerçek boyut oranıyla ve gerçek zamanlı olarak (kendi başına dönerek) buradan görüyorsun — koridora gitmene gerek yok.</p>
+      <div id="pano-preview-wrap" style="position:relative;width:100%;max-width:640px;aspect-ratio:16/9;background:#000;border-radius:8px;overflow:hidden">
+        <iframe id="pano-preview-frame" src="${esc(displayLink)}" style="width:1920px;height:1080px;border:none;pointer-events:none;transform-origin:top left;display:block"></iframe>
       </div>
-      <button class="secondary" id="pano-preview-refresh" style="margin-top:10px">Önizlemeyi Yenile</button>
+      <button class="secondary" id="pano-preview-refresh" style="margin-top:10px">Yeni Yayınladığımı Hemen Getir</button>
     </div>
     ` : ""}
 
@@ -4436,6 +4443,10 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
     const frame = document.getElementById("pano-preview-frame");
     frame.src = frame.src;
   };
+  if (document.getElementById("pano-preview-wrap")) {
+    fitPanoPreview();
+    window.addEventListener("resize", fitPanoPreview);
+  }
 
   document.getElementById("p-save").onclick = async () => {
     const msg = document.getElementById("p-msg");
