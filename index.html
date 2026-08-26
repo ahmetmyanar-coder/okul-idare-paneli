@@ -100,6 +100,11 @@
   .list-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
   .list-item:last-child { border-bottom: none; }
   .table-wrap { overflow-x: auto; }
+  .date3 { display: flex; align-items: center; gap: 4px; }
+  .date3 input { width: auto; text-align: center; padding: 8px 2px; -moz-appearance: textfield; }
+  .date3 input.d3-day, .date3 input.d3-month { width: 2.5em; }
+  .date3 input.d3-year { width: 4em; }
+  .date3 .d3-sep { color: var(--muted); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -556,7 +561,7 @@ function renderPersonelChanges(school, content) {
         <option value="terfi">Terfi</option>
       </select>
       <label>Tarih</label>
-      <input id="c-date" type="date">
+      ${dateInputHtml("c-date", "")}
       <label>Açıklama</label>
       <textarea id="c-desc" rows="2" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px" placeholder="örn. Kademe ilerlemesi, 3. derece"></textarea>
       <button class="primary" id="c-save">Ekle</button>
@@ -586,6 +591,7 @@ function renderPersonelChanges(school, content) {
       </div>
     </div>
   `;
+  wireDate3("c-date");
   const saveBtn = document.getElementById("c-save");
   if (saveBtn) saveBtn.onclick = () => {
     const staff_id = document.getElementById("c-staff").value;
@@ -616,7 +622,7 @@ function renderPersonelAttendance(school, content) {
         ${data.staff.map(s => `<option value="${s.id}">${esc(s.full_name)}</option>`).join("")}
       </select>
       <label>Tarih</label>
-      <input id="a-date" type="date">
+      ${dateInputHtml("a-date", "")}
       <label>Durum</label>
       <select id="a-status">
         <option value="raporlu">Raporlu</option>
@@ -653,6 +659,7 @@ function renderPersonelAttendance(school, content) {
       </div>
     </div>
   `;
+  wireDate3("a-date");
   const saveBtn = document.getElementById("a-save");
   if (saveBtn) saveBtn.onclick = () => {
     const staff_id = document.getElementById("a-staff").value;
@@ -956,6 +963,62 @@ async function renderTeftis(school, content, editingId = null) {
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* Üç parçalı (gg/aa/yyyy) tarih girişi — native <input type="date">'in bazı
+   tarayıcılarda (özellikle Safari) gün girildikten sonra sağa otomatik geçmemesi
+   ve farklı bir yılı yazmanın zor olması sorununu çözer. Görünür 3 küçük input +
+   gerçek değeri tutan gizli bir input (id aynı kalıyor, mevcut okuma kodları
+   değişmeden çalışır). */
+function dateInputHtml(id, isoValue) {
+  const [y, m, d] = String(isoValue || "").split("-");
+  return `
+    <div class="date3" data-date3="${esc(id)}">
+      <input type="text" inputmode="numeric" maxlength="2" class="d3-day" placeholder="gg" value="${esc(d || "")}">
+      <span class="d3-sep">/</span>
+      <input type="text" inputmode="numeric" maxlength="2" class="d3-month" placeholder="aa" value="${esc(m || "")}">
+      <span class="d3-sep">/</span>
+      <input type="text" inputmode="numeric" maxlength="4" class="d3-year" placeholder="yyyy" value="${esc(y || "")}">
+      <input type="hidden" id="${esc(id)}" value="${esc(isoValue || "")}">
+    </div>
+  `;
+}
+
+function wireDate3(id) {
+  const wrap = document.querySelector(`[data-date3="${id}"]`);
+  if (!wrap) return;
+  const day = wrap.querySelector(".d3-day");
+  const month = wrap.querySelector(".d3-month");
+  const year = wrap.querySelector(".d3-year");
+  const hidden = wrap.querySelector(`#${CSS.escape(id)}`);
+
+  function sync() {
+    if (day.value.length && month.value.length && year.value.length === 4) {
+      hidden.value = `${year.value}-${month.value.padStart(2, "0")}-${day.value.padStart(2, "0")}`;
+    } else {
+      hidden.value = "";
+    }
+    hidden.dispatchEvent(new Event("input"));
+    hidden.dispatchEvent(new Event("change"));
+  }
+  function digitsOnly(el) {
+    el.value = el.value.replace(/\D/g, "");
+  }
+
+  day.addEventListener("input", () => { digitsOnly(day); if (day.value.length >= 2) month.focus(); sync(); });
+  month.addEventListener("input", () => { digitsOnly(month); if (month.value.length >= 2) year.focus(); sync(); });
+  year.addEventListener("input", () => { digitsOnly(year); sync(); });
+
+  day.addEventListener("keydown", (e) => { if (e.key === "ArrowRight" && day.selectionStart === day.value.length) month.focus(); });
+  month.addEventListener("keydown", (e) => {
+    if (e.key === "Backspace" && !month.value) day.focus();
+    else if (e.key === "ArrowRight" && month.selectionStart === month.value.length) year.focus();
+    else if (e.key === "ArrowLeft" && month.selectionStart === 0) day.focus();
+  });
+  year.addEventListener("keydown", (e) => {
+    if (e.key === "Backspace" && !year.value) month.focus();
+    else if (e.key === "ArrowLeft" && year.selectionStart === 0) month.focus();
+  });
 }
 
 function waPhone(raw) {
@@ -1333,11 +1396,11 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
         <option value="erkek" ${editTeacher?.gender === "erkek" ? "selected" : ""}>Erkek</option>
       </select>
       <label>İşe başlama tarihi</label>
-      <input id="t-hire" type="date" value="${editTeacher?.hire_date || ""}">
+      ${dateInputHtml("t-hire", editTeacher?.hire_date || "")}
       <div id="t-kidem-hint" style="font-size:11.5px;color:var(--muted);margin:-8px 0 12px"></div>
       <div class="check-row"><input type="checkbox" id="t-seniority" ${editTeacher?.seniority_waiver_requested ? "checked" : ""}><label for="t-seniority">Kıdem muafiyeti talep etti (kadın 20 / erkek 25 yıl doldu, istemiyor)</label></div>
       <label>Hamilelik muafiyeti bitiş tarihi <span style="color:var(--muted);font-weight:400">(boş bırak, yoksa)</span></label>
-      <input id="t-pregnancy" type="date" value="${editTeacher?.pregnancy_exempt_until || ""}">
+      ${dateInputHtml("t-pregnancy", editTeacher?.pregnancy_exempt_until || "")}
       <div class="check-row"><input type="checkbox" id="t-disability" ${editTeacher?.disability_exempt ? "checked" : ""}><label for="t-disability">Engelli / engelli çocuğu var / bakmakla yükümlü engelli birey var</label></div>
       <div class="check-row"><input type="checkbox" id="t-disability-wants" ${editTeacher?.disability_wants_duty ? "checked" : ""}><label for="t-disability-wants">Muaf olsa da nöbet tutmak istiyor (gün tercihi öncelikli)</label></div>
       <label>Yasaklı alanlar <span style="color:var(--muted);font-weight:400">(bu öğretmen buraya yazılmasın)</span></label>
@@ -1407,6 +1470,8 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
       hintEl.textContent = `Kıdem: ${years} yıl (eşik: ${threshold} yıl — henüz doldurmadı)`;
     }
   }
+  wireDate3("t-hire");
+  wireDate3("t-pregnancy");
   updateKidemHint();
   document.getElementById("t-hire").oninput = updateKidemHint;
   document.getElementById("t-gender").onchange = updateKidemHint;
@@ -1481,9 +1546,9 @@ async function renderDonem(profile, school, content, activePeriodId = null) {
       <label>Başlık</label>
       <input id="p-title" placeholder="örn. 2026-2027 Güz Dönemi">
       <label>Başlangıç</label>
-      <input id="p-start" type="date">
+      ${dateInputHtml("p-start", "")}
       <label>Bitiş</label>
-      <input id="p-end" type="date">
+      ${dateInputHtml("p-end", "")}
       <label>Tatil / idari izin günleri <span style="color:var(--muted);font-weight:400">(virgülle ayır, örn. 2026-10-29,2026-11-24)</span></label>
       <input id="p-holidays" placeholder="YYYY-AA-GG,YYYY-AA-GG">
       <button class="primary" id="p-save">Dönem Oluştur</button>
@@ -1500,6 +1565,8 @@ async function renderDonem(profile, school, content, activePeriodId = null) {
     ${period ? `<div id="schedule-area"></div>` : `<p style="color:var(--muted)">Önce bir dönem oluştur.</p>`}
   `;
 
+  wireDate3("p-start");
+  wireDate3("p-end");
   document.getElementById("p-save").onclick = async () => {
     const title = document.getElementById("p-title").value.trim();
     const starts_on = document.getElementById("p-start").value;
@@ -1858,9 +1925,9 @@ async function renderIdareciNobeti(profile, school, content, editingId = null) {
       <label>İdareci</label>
       <select id="i-teacher">${idareciler.map(t => `<option value="${t.id}" ${editAssign?.teacher_id === t.id ? "selected" : ""}>${esc(t.full_name)}</option>`).join("")}</select>
       <label>Başlangıç</label>
-      <input id="i-start" type="date" value="${editAssign?.starts_on || ""}">
+      ${dateInputHtml("i-start", editAssign?.starts_on || "")}
       <label>Bitiş</label>
-      <input id="i-end" type="date" value="${editAssign?.ends_on || ""}">
+      ${dateInputHtml("i-end", editAssign?.ends_on || "")}
       <label>Not <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
       <input id="i-note" value="${editAssign ? esc(editAssign.note || "") : ""}" placeholder="örn. izinli idareci yerine">
       <button class="primary" id="i-save">${editAssign ? "Güncelle" : "Ekle"}</button>
@@ -1903,6 +1970,8 @@ async function renderIdareciNobeti(profile, school, content, editingId = null) {
     </div>
   `;
 
+  wireDate3("i-start");
+  wireDate3("i-end");
   document.getElementById("i-save").onclick = async () => {
     const teacher_id = document.getElementById("i-teacher").value;
     const starts_on = document.getElementById("i-start").value;
@@ -2761,7 +2830,7 @@ async function renderKelebek(school, content, draftGroups = null, lastExam = nul
       <label>Sınav adı</label>
       <input id="k-name" placeholder="örn. 1. Dönem Ortak Sınavı">
       <label>Tarih <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
-      <input id="k-date" type="date">
+      ${dateInputHtml("k-date", "")}
       <div style="display:flex;gap:12px">
         <div style="flex:1"><label>Sıra sayısı</label><input id="k-rows" type="number" min="1" value="6"></div>
         <div style="flex:1"><label>Sütun sayısı</label><input id="k-cols" type="number" min="1" value="6"></div>
@@ -2812,6 +2881,7 @@ async function renderKelebek(school, content, draftGroups = null, lastExam = nul
     renderKelebek(school, content, current.length ? current : [{ label: "", text: "" }], lastExam);
   });
 
+  wireDate3("k-date");
   document.getElementById("k-generate").onclick = () => {
     const name = document.getElementById("k-name").value.trim();
     const date = document.getElementById("k-date").value;
@@ -3032,7 +3102,7 @@ async function renderPlanlama(school, content, activeId = null) {
         <option value="Kulüp">Kulüp</option>
       </select>
       <label>Kuruluş tarihi <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
-      <input id="c-date" type="date">
+      ${dateInputHtml("c-date", "")}
       <button class="primary" id="c-save">Ekle</button>
       <div id="c-msg"></div>
     </div>
@@ -3048,6 +3118,7 @@ async function renderPlanlama(school, content, activeId = null) {
     <div id="committee-detail"></div>
   `;
 
+  wireDate3("c-date");
   document.getElementById("c-save").onclick = async () => {
     const name = document.getElementById("c-name").value.trim();
     const committee_type = document.getElementById("c-type").value || null;
@@ -3114,7 +3185,7 @@ async function renderCommitteeDetail(school, committee, el) {
             </div>
           `).join("") || `<p style="color:var(--muted);font-size:13px">Henüz kayıt yok.</p>`}
           <label style="margin-top:10px">Tarih</label>
-          <input id="mt-date" type="date">
+          ${dateInputHtml("mt-date", "")}
           <label>Gündem <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
           <input id="mt-agenda" placeholder="örn. Yıllık bütçe görüşmesi">
           <label>Kararlar / Notlar <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
@@ -3126,6 +3197,7 @@ async function renderCommitteeDetail(school, committee, el) {
     </div>
   `;
 
+  wireDate3("mt-date");
   const teacherNameById = Object.fromEntries((teachers || []).map(t => [t.id, t.full_name]));
   document.getElementById("m-select").onchange = (ev) => {
     document.getElementById("m-custom-wrap").classList.toggle("hidden", ev.target.value !== "__custom__");
@@ -3427,7 +3499,7 @@ async function renderLgsDenemeler(profile, school, content, activeExamId = null)
       <label>Başlık</label>
       <input id="e-title" placeholder="örn. 3. Deneme - Ekim">
       <label>Tarih</label>
-      <input id="e-date" type="date">
+      ${dateInputHtml("e-date", "")}
       <label>Kaynak <span style="color:var(--muted);font-weight:400">(opsiyonel, sadece etiket — içerik entegrasyonu değil)</span></label>
       <input id="e-kaynak" placeholder="örn. Okul içi">
       <button class="secondary" id="e-save" style="width:100%">Ekle</button>
@@ -3447,6 +3519,7 @@ async function renderLgsDenemeler(profile, school, content, activeExamId = null)
     </div>
     <div id="exam-detail"></div>
   `;
+  wireDate3("e-date");
   const eSaveBtn = document.getElementById("e-save");
   if (eSaveBtn) eSaveBtn.onclick = async () => {
     const title = document.getElementById("e-title").value.trim();
@@ -3873,7 +3946,7 @@ async function renderLgsGorevler(profile, school, content, formStudentId = null)
       <label>Görev</label>
       <input id="tk-title" placeholder="örn. Kesirler konusu 20 soru çöz">
       <label>Hafta başlangıcı</label>
-      <input id="tk-week" type="date" value="${mondayOfWeek(new Date())}">
+      ${dateInputHtml("tk-week", mondayOfWeek(new Date()))}
       <label>Not <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
       <input id="tk-note" placeholder="örn. Zor gelirse örnek video izlesin">
       <button class="primary" id="tk-save" style="width:100%">Ata</button>
@@ -3915,6 +3988,7 @@ async function renderLgsGorevler(profile, school, content, formStudentId = null)
       </div>
     </div>
   `;
+  wireDate3("tk-week");
   document.getElementById("tk-student").onchange = (ev) => renderLgsGorevler(profile, school, content, ev.target.value || null);
   content.querySelectorAll("[data-suggest-subj]").forEach(chip => chip.onclick = () => {
     document.getElementById("tk-subject").value = chip.dataset.suggestSubj;
@@ -4215,6 +4289,16 @@ async function renderLgsKayitlar(profile, school, content) {
 const PANO_TYPE_LABELS = { duyuru: "Duyuru", medya: "Medya", pekistirec: "Pekiştireç" };
 const PANO_CATEGORY_OPTIONS = ["Ayın Öğrencisi", "En Temiz Sınıf", "Diğer"];
 
+function sendPanoCommand(token, cmd) {
+  const ch = sb.channel(`pano-control-${token}`);
+  ch.subscribe((status) => {
+    if (status === "SUBSCRIBED") {
+      ch.send({ type: "broadcast", event: "command", payload: cmd });
+      setTimeout(() => sb.removeChannel(ch), 1500);
+    }
+  });
+}
+
 function fitPanoPreview() {
   const wrap = document.getElementById("pano-preview-wrap");
   const frame = document.getElementById("pano-preview-frame");
@@ -4339,6 +4423,7 @@ function renderPanoItemRow(i) {
         ${i.subject_name ? `<div style="font-size:13px;margin-top:4px">${esc(i.subject_name)}${i.period_label ? ` · ${esc(i.period_label)}` : ""}</div>` : ""}
         ${i.body_text ? `<div style="font-size:12.5px;color:var(--muted);margin-top:4px">${esc(i.body_text.slice(0, 120))}${i.body_text.length > 120 ? "…" : ""}</div>` : ""}
         <div class="row-actions" style="margin-top:8px">
+          ${i.status === "yayinda" ? `<button data-show-now="${i.id}">📺 Şimdi Göster</button>` : ""}
           <button data-toggle-status="${i.id}">${i.status === "yayinda" ? "Geri Al" : "Yayınla"}</button>
           <button data-edit-item="${i.id}">Düzenle</button>
           <button data-del-item="${i.id}">Sil</button>
@@ -4379,11 +4464,15 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
     ${displayLink ? `
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">Canlı Önizleme</h3>
-      <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Koridordaki ekranda şu an ne gösterildiğini, gerçek boyut oranıyla ve gerçek zamanlı olarak (kendi başına dönerek) buradan görüyorsun — koridora gitmene gerek yok.</p>
+      <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Koridordaki ekranda şu an ne gösterildiğini, gerçek boyut oranıyla ve gerçek zamanlı olarak (kendi başına dönerek) buradan görüyorsun — koridora gitmene gerek yok. Aşağıdaki butonlar hem bu önizlemeyi hem <strong>koridordaki gerçek ekranı</strong> anında etkiler.</p>
       <div id="pano-preview-wrap" style="position:relative;width:100%;max-width:640px;aspect-ratio:16/9;background:#000;border-radius:8px;overflow:hidden">
         <iframe id="pano-preview-frame" src="${esc(displayLink)}" style="width:1920px;height:1080px;border:none;pointer-events:none;transform-origin:top left;display:block"></iframe>
       </div>
-      <button class="secondary" id="pano-preview-refresh" style="margin-top:10px">Yeni Yayınladığımı Hemen Getir</button>
+      <div class="row-actions" style="margin-top:10px">
+        <button class="secondary" id="pano-preview-prev">◀ Önceki</button>
+        <button class="secondary" id="pano-preview-next">Sıradaki ▶</button>
+        <button class="secondary" id="pano-preview-refresh">Yeni Yayınladığımı Hemen Getir</button>
+      </div>
     </div>
     ` : ""}
 
@@ -4397,9 +4486,9 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
       <label>Ekranda kalma süresi (saniye)</label>
       <input id="p-seconds" type="number" min="1" value="${editItem?.display_seconds ?? 15}">
       <label>Başlangıç tarihi <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
-      <input id="p-starts" type="date" value="${editItem?.starts_on || ""}">
+      ${dateInputHtml("p-starts", editItem?.starts_on || "")}
       <label>Bitiş tarihi <span style="color:var(--muted);font-weight:400">(opsiyonel, geçince otomatik gizlenir)</span></label>
-      <input id="p-ends" type="date" value="${editItem?.ends_on || ""}">
+      ${dateInputHtml("p-ends", editItem?.ends_on || "")}
       <button class="primary" id="p-save" style="width:100%;margin-top:10px">${editItem ? "Güncelle" : "Taslak Olarak Kaydet"}</button>
       ${editItem ? `<button class="secondary" id="p-cancel" style="width:100%;margin-top:8px">İptal</button>` : ""}
       <div id="p-msg"></div>
@@ -4424,6 +4513,8 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
   `;
 
   renderPanoFormFields(editItem, formType);
+  wireDate3("p-starts");
+  wireDate3("p-ends");
   const typeSelect = document.getElementById("p-type");
   if (!editItem) typeSelect.onchange = (ev) => renderPanoFormFields(null, ev.target.value);
 
@@ -4442,7 +4533,12 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
   if (previewRefreshBtn) previewRefreshBtn.onclick = () => {
     const frame = document.getElementById("pano-preview-frame");
     frame.src = frame.src;
+    sendPanoCommand(schoolRow.display_token, { type: "refresh" });
   };
+  const previewPrevBtn = document.getElementById("pano-preview-prev");
+  if (previewPrevBtn) previewPrevBtn.onclick = () => sendPanoCommand(schoolRow.display_token, { type: "prev" });
+  const previewNextBtn = document.getElementById("pano-preview-next");
+  if (previewNextBtn) previewNextBtn.onclick = () => sendPanoCommand(schoolRow.display_token, { type: "next" });
   if (document.getElementById("pano-preview-wrap")) {
     fitPanoPreview();
     window.addEventListener("resize", fitPanoPreview);
@@ -4509,6 +4605,7 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
   content.querySelectorAll("[data-type-filter]").forEach(el => el.onclick = () => renderPano(profile, school, content, el.dataset.typeFilter, statusFilter));
   content.querySelectorAll("[data-status-filter]").forEach(el => el.onclick = () => renderPano(profile, school, content, typeFilter, el.dataset.statusFilter));
   content.querySelectorAll("[data-edit-item]").forEach(b => b.onclick = () => renderPano(profile, school, content, typeFilter, statusFilter, b.dataset.editItem));
+  content.querySelectorAll("[data-show-now]").forEach(b => b.onclick = () => sendPanoCommand(schoolRow.display_token, { type: "jump", itemId: b.dataset.showNow }));
   content.querySelectorAll("[data-toggle-status]").forEach(b => b.onclick = async () => {
     const item = (items || []).find(i => i.id === b.dataset.toggleStatus);
     const newStatus = item.status === "yayinda" ? "taslak" : "yayinda";

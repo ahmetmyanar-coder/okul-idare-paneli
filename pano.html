@@ -213,12 +213,34 @@ async function fetchItems() {
   else if (!items.length) { clearTimeout(advanceTimer); showEmpty("Henüz yayında içerik yok"); }
 }
 
+function handleCommand(cmd) {
+  if (cmd.type === "refresh") { fetchItems(); return; }
+  if (!items.length) return;
+  if (cmd.type === "next") {
+    idx = (idx + 1) % items.length;
+    advance();
+  } else if (cmd.type === "prev") {
+    idx = (idx - 1 + items.length) % items.length;
+    advance();
+  } else if (cmd.type === "jump" && cmd.itemId) {
+    const i = items.findIndex(it => it.id === cmd.itemId);
+    if (i >= 0) { idx = i; advance(); }
+  }
+}
+
+function setupControlChannel(token) {
+  sb.channel(`pano-control-${token}`)
+    .on("broadcast", { event: "command" }, (msg) => handleCommand(msg.payload || {}))
+    .subscribe();
+}
+
 async function boot() {
   if (!token) { showEmpty("Geçersiz bağlantı"); return; }
   const { data: schoolName, error: nameErr } = await sb.rpc("get_pano_school_name", { p_token: token });
   if (nameErr || !schoolName) { showEmpty("Geçersiz bağlantı"); return; }
   schoolNameCache = schoolName;
   await fetchItems();
+  setupControlChannel(token);
   setInterval(fetchItems, 60000);
   setInterval(() => { const c = document.getElementById("clock"); if (c) c.textContent = clockText(); }, 30000);
 }
