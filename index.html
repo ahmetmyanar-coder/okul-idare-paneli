@@ -3183,8 +3183,9 @@ async function renderLgsOgrenciler(profile, school, content, editingId = null) {
       <input id="s-veli-adi" value="${esc(editStudent?.veli_adi || "")}" placeholder="Ad Soyad">
       <label>Veli telefonu <span style="color:var(--muted);font-weight:400">(WhatsApp bildirimi için, opsiyonel)</span></label>
       <input id="s-veli-tel" value="${esc(editStudent?.veli_telefon || "")}" placeholder="0532 000 00 00">
-      <label>Hedef puan <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <label>Hedef puan <span style="color:var(--muted);font-weight:400">(opsiyonel — koçun kendi tahmini, sistem hesaplamıyor)</span></label>
       <input id="s-hedef-puan" type="number" step="0.01" value="${editStudent?.hedef_puan ?? ""}" placeholder="örn. 450">
+      <p style="color:var(--muted);font-size:11px;margin:-6px 0 12px">Not: LGS puanı, o yılki tüm Türkiye'nin performansına göre hesaplanan göreli bir puandır (ÖSYM/MEB resmi bir "net → puan" formülü yayımlamaz) — bu yüzden sistem net'ten puan üretmiyor, sadece ham net'i takip ediyor. Hedef puanı kendi tecrübenle/yayın kaynaklarınla gir.</p>
       <label>Hedef okul <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
       <input id="s-hedef-okul" value="${esc(editStudent?.hedef_okul || "")}" placeholder="örn. Fen Lisesi">
       <button class="primary" id="s-save">${editStudent ? "Güncelle" : "Ekle"}</button>
@@ -3287,8 +3288,9 @@ async function renderLgsDersler(profile, school, content, activeSubjectId = null
   `;
   const topicSelect = document.getElementById("topic-subj-select");
   if (topicSelect) {
+    const selectedSubject = subjects.find(s => s.id === topicSelect.value);
     topicSelect.onchange = () => renderLgsDersler(profile, school, content, topicSelect.value);
-    await renderLgsTopicList(profile, school, document.getElementById("topic-list-wrap"), topicSelect.value, () => renderLgsDersler(profile, school, content, topicSelect.value));
+    await renderLgsTopicList(profile, school, document.getElementById("topic-list-wrap"), topicSelect.value, selectedSubject?.name, () => renderLgsDersler(profile, school, content, topicSelect.value));
   }
   if (!isIdareci) return;
   const seedBtn = document.getElementById("seed-subjects");
@@ -3310,11 +3312,22 @@ async function renderLgsDersler(profile, school, content, activeSubjectId = null
   });
 }
 
-async function renderLgsTopicList(profile, school, el, subjectId, onChange) {
+const LGS_STANDARD_TOPICS = {
+  "Türkçe": ["Fiilimsiler", "Cümlenin Ögeleri", "Cümle Türleri", "Sözcükte ve Cümlede Anlam", "Söz Sanatları", "Yazım Kuralları ve Noktalama İşaretleri", "Anlatım Bozuklukları", "Metin Türleri"],
+  "Matematik": ["Çarpanlar ve Katlar", "Üslü İfadeler", "Kareköklü İfadeler", "Veri Analizi", "Olasılık", "Cebirsel İfadeler ve Özdeşlikler", "Doğrusal Denklemler", "Eşitsizlikler", "Üçgenler", "Eşlik ve Benzerlik", "Dönüşüm Geometrisi", "Geometrik Cisimler"],
+  "Fen Bilimleri": ["Mevsimler ve İklim", "DNA ve Genetik Kod", "Basınç", "Madde ve Endüstri", "Basit Makineler", "Enerji Dönüşümü ve Çevre Bilimi", "Elektrik Yükleri ve Elektrik Enerjisi"],
+  "T.C. İnkılap Tarihi ve Atatürkçülük": ["Bir Kahraman Doğuyor", "Millî Uyanış", "Millî Bir Destan (Kurtuluş Savaşı)", "Atatürkçülük ve Çağdaşlaşan Türkiye", "Demokratikleşme Çabaları", "Atatürk Dönemi Türk Dış Politikası", "Atatürk'ün Ölümü ve Sonrası"],
+  "Din Kültürü ve Ahlak Bilgisi": ["Kader İnancı", "Zekât ve Sadaka", "Din ve Hayat", "Hz. Muhammed'in Örnekliği", "Kur'an-ı Kerim'in Temel Özellikleri", "İslam Düşüncesinde Yorumlar"],
+  "İngilizce": ["Friendship", "Teen Life", "In the Kitchen", "On the Phone", "The Internet", "Adventures", "Tourism", "Chores", "Science", "Natural Forces"],
+};
+
+async function renderLgsTopicList(profile, school, el, subjectId, subjectName, onChange) {
   const isIdareci = profile.role !== "ogretmen";
   const { data: topics } = await sb.from("lgs_topics").select("*").eq("lgs_subject_id", subjectId).order("sort_order");
+  const standardTopics = LGS_STANDARD_TOPICS[subjectName];
   el.innerHTML = `
     <div style="margin-top:10px">
+      ${isIdareci && !topics?.length && standardTopics ? `<button class="secondary" id="seed-topics" style="width:100%;margin-bottom:12px">MEB müfredatındaki ${esc(subjectName)} konularını ekle (${standardTopics.length} konu)</button>` : ""}
       ${(topics || []).map(t => `<div class="list-item"><span>${esc(t.name)}</span>${isIdareci ? `<div class="row-actions"><button data-del-topic="${t.id}">Sil</button></div>` : ""}</div>`).join("") || `<p style="color:var(--muted);font-size:13px">Bu ders için henüz konu eklenmedi.</p>`}
       ${isIdareci ? `
       <label>Yeni konu</label>
@@ -3325,6 +3338,11 @@ async function renderLgsTopicList(profile, school, el, subjectId, onChange) {
     </div>
   `;
   if (!isIdareci) return;
+  const seedTopicsBtn = document.getElementById("seed-topics");
+  if (seedTopicsBtn) seedTopicsBtn.onclick = async () => {
+    await sb.from("lgs_topics").insert(standardTopics.map((name, i) => ({ school_id: school.id, lgs_subject_id: subjectId, name, sort_order: i })));
+    await onChange();
+  };
   document.getElementById("add-topic").onclick = async () => {
     const name = document.getElementById("new-topic-name").value.trim();
     const msg = document.getElementById("topic-msg");
