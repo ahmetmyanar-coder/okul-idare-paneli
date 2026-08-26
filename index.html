@@ -126,6 +126,7 @@ const MODULES = [
   { name: "Sınav Kelebek", desc: "Aynı sınıftan öğrenciler yan yana oturmayacak şekilde sınav oturma planı üretir — sadece bu cihazda saklanır." },
   { name: "Talep Takibi", desc: "Öğretmenlerden gelen talep/bildirimleri kaydet, durumunu takip et." },
   { name: "Planlama İşleri", desc: "Kurul, komisyon ve kulüplerin üye listesi ve toplantı/faaliyet kayıtları." },
+  { name: "Okul Panosu", desc: "Koridor ekranı için duyuru, medya ve pekiştireç (ayın öğrencisi vb.) yönetimi." },
   { name: "LGS Koçluk", desc: "8. sınıf öğrenci havuzu, deneme sınavı takibi, ders bazlı zayıflık analizi." },
 ];
 
@@ -357,6 +358,8 @@ function renderDashboard(profile, school) {
   if (talepCard) talepCard.onclick = () => renderTalepModule(profile, school);
   const planlamaCard = document.querySelector('[data-mod="Planlama İşleri"]');
   if (planlamaCard) planlamaCard.onclick = () => renderPlanlamaModule(profile, school);
+  const panoCard = document.querySelector('[data-mod="Okul Panosu"]');
+  if (panoCard) panoCard.onclick = () => renderPanoModule(profile, school);
   const lgsCard = document.querySelector('[data-mod="LGS Koçluk"]');
   if (lgsCard) lgsCard.onclick = () => renderLgsModule(profile, school, "ogrenciler");
 }
@@ -4148,6 +4151,293 @@ async function renderLgsKayitlar(profile, school, content) {
       `).join("") : `<p style="color:var(--muted);font-size:13px">Henüz kayıt yok.</p>`}
     </div>
   `;
+}
+
+/* ============ OKUL PANOSU / İKİNCİ EKRAN ============ */
+
+const PANO_TYPE_LABELS = { duyuru: "Duyuru", medya: "Medya", pekistirec: "Pekiştireç" };
+const PANO_CATEGORY_OPTIONS = ["Ayın Öğrencisi", "En Temiz Sınıf", "Diğer"];
+
+function panoPublicUrl(path) {
+  if (!path) return null;
+  return sb.storage.from("pano-media").getPublicUrl(path).data.publicUrl;
+}
+
+async function panoUploadFile(school, file, kindHint) {
+  const maxBytes = (kindHint === "upload_video" ? 100 : 10) * 1024 * 1024;
+  if (file.size > maxBytes) {
+    throw new Error(`Dosya çok büyük (en fazla ${kindHint === "upload_video" ? "100MB" : "10MB"}).`);
+  }
+  const ext = (file.name.split(".").pop() || "bin").toLowerCase();
+  const path = `${school.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await sb.storage.from("pano-media").upload(path, file);
+  if (error) throw error;
+  return path;
+}
+
+async function renderPanoModule(profile, school) {
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Okul Panosu</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Koridor ekranında dönen duyuru, medya ve pekiştireçleri yönet.</div>
+      <div id="pano-content"></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  await renderPano(profile, school, document.getElementById("pano-content"));
+}
+
+function renderPanoMediaInput(kind, existing) {
+  const el = document.getElementById("p-media-input");
+  if (kind === "embed_video") {
+    el.innerHTML = `<label>YouTube/Vimeo linki</label><input id="p-media-url" value="${esc(existing?.media_url || "")}" placeholder="https://www.youtube.com/watch?v=...">`;
+  } else {
+    const limit = kind === "upload_video" ? "100MB" : "10MB";
+    const accept = kind === "upload_video" ? "video/*" : "image/*";
+    el.innerHTML = `<label>Dosya <span style="color:var(--muted);font-weight:400">(en fazla ${limit})</span></label><input id="p-media-file" type="file" accept="${accept}">`;
+  }
+}
+
+function renderPanoFormFields(editItem, type) {
+  const fieldsEl = document.getElementById("p-fields");
+  const ta = "width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px";
+  if (type === "duyuru") {
+    fieldsEl.innerHTML = `
+      <label>Başlık</label>
+      <input id="p-title" value="${esc(editItem?.type === "duyuru" ? editItem.title : "")}" placeholder="örn. Veli Toplantısı Hatırlatması">
+      <label>Metin</label>
+      <textarea id="p-body" rows="3" style="${ta}">${esc(editItem?.type === "duyuru" ? (editItem.body_text || "") : "")}</textarea>
+    `;
+  } else if (type === "medya") {
+    const isMedya = editItem?.type === "medya";
+    const kind = (isMedya && editItem?.media_kind) || "upload_image";
+    fieldsEl.innerHTML = `
+      <label>Başlık</label>
+      <input id="p-title" value="${esc(isMedya ? editItem.title : "")}" placeholder="örn. Okul Tanıtım Videosu">
+      <label>Medya türü</label>
+      <select id="p-media-kind">
+        <option value="upload_image" ${kind === "upload_image" ? "selected" : ""}>Fotoğraf yükle (≤10MB)</option>
+        <option value="upload_video" ${kind === "upload_video" ? "selected" : ""}>Video yükle (≤100MB)</option>
+        <option value="embed_video" ${kind === "embed_video" ? "selected" : ""}>YouTube/Vimeo linki</option>
+      </select>
+      <div id="p-media-input"></div>
+      <label>Altyazı <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <input id="p-body" value="${esc(isMedya ? (editItem.body_text || "") : "")}" placeholder="örn. Kısa açıklama">
+      ${isMedya && editItem?.media_path ? `<p style="font-size:11px;color:var(--muted)">Mevcut dosya yüklü — yeni dosya seçmezsen mevcut kalır.</p>` : ""}
+    `;
+    renderPanoMediaInput(kind, isMedya ? editItem : null);
+    document.getElementById("p-media-kind").onchange = (ev) => renderPanoMediaInput(ev.target.value, isMedya ? editItem : null);
+  } else {
+    const isPek = editItem?.type === "pekistirec";
+    fieldsEl.innerHTML = `
+      <label>Başlık</label>
+      <input id="p-title" value="${esc(isPek ? editItem.title : "")}" placeholder="örn. Ayın Öğrencisi">
+      <label>Kategori</label>
+      <select id="p-category">
+        ${PANO_CATEGORY_OPTIONS.map(c => `<option value="${c}" ${isPek && editItem.category === c ? "selected" : ""}>${c}</option>`).join("")}
+      </select>
+      <label>İsim / Sınıf</label>
+      <input id="p-subject" value="${esc(isPek ? (editItem.subject_name || "") : "")}" placeholder="örn. 8-A ya da Ahmet Yılmaz">
+      <label>Dönem <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <input id="p-period" value="${esc(isPek ? (editItem.period_label || "") : "")}" placeholder="örn. Eylül 2026">
+      <label>Açıklama <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <textarea id="p-body" rows="2" style="${ta}">${esc(isPek ? (editItem.body_text || "") : "")}</textarea>
+      <label>Fotoğraf <span style="color:var(--muted);font-weight:400">(opsiyonel, ≤10MB)</span></label>
+      <input id="p-media-file" type="file" accept="image/*">
+      ${isPek && editItem?.media_path ? `<p style="font-size:11px;color:var(--muted)">Mevcut fotoğraf yüklü — yeni dosya seçmezsen mevcut kalır.</p>` : ""}
+    `;
+  }
+}
+
+function renderPanoItemRow(i) {
+  let thumb;
+  if (i.media_kind === "upload_image" && i.media_path) {
+    thumb = `<img src="${esc(panoPublicUrl(i.media_path))}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;flex:none">`;
+  } else if (i.media_kind === "upload_video" && i.media_path) {
+    thumb = `<video src="${esc(panoPublicUrl(i.media_path))}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;flex:none" muted></video>`;
+  } else if (i.media_kind === "embed_video") {
+    thumb = `<div style="width:56px;height:56px;display:flex;align-items:center;justify-content:center;font-size:22px;background:var(--surface-2);border-radius:6px;flex:none">📺</div>`;
+  } else if (i.type === "pekistirec") {
+    thumb = `<div style="width:56px;height:56px;display:flex;align-items:center;justify-content:center;font-size:22px;background:var(--surface-2);border-radius:6px;flex:none">🏆</div>`;
+  } else {
+    thumb = `<div style="width:56px;height:56px;display:flex;align-items:center;justify-content:center;font-size:22px;background:var(--surface-2);border-radius:6px;flex:none">📢</div>`;
+  }
+  return `
+    <div class="card" style="margin-bottom:10px;background:var(--surface-2);display:flex;gap:12px;align-items:flex-start">
+      ${thumb}
+      <div style="flex:1;min-width:0">
+        <strong>${esc(i.title)}</strong>
+        <span class="pill">${PANO_TYPE_LABELS[i.type]}</span>
+        <span class="pill ${i.status === "yayinda" ? "" : "warn"}">${i.status === "yayinda" ? "Yayında" : "Taslak"}</span>
+        ${i.category ? `<span class="pill">${esc(i.category)}</span>` : ""}
+        ${i.subject_name ? `<div style="font-size:13px;margin-top:4px">${esc(i.subject_name)}${i.period_label ? ` · ${esc(i.period_label)}` : ""}</div>` : ""}
+        ${i.body_text ? `<div style="font-size:12.5px;color:var(--muted);margin-top:4px">${esc(i.body_text.slice(0, 120))}${i.body_text.length > 120 ? "…" : ""}</div>` : ""}
+        <div class="row-actions" style="margin-top:8px">
+          <button data-toggle-status="${i.id}">${i.status === "yayinda" ? "Geri Al" : "Yayınla"}</button>
+          <button data-edit-item="${i.id}">Düzenle</button>
+          <button data-del-item="${i.id}">Sil</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function renderPano(profile, school, content, typeFilter = "hepsi", statusFilter = "hepsi", editingId = null) {
+  const [{ data: items }, { data: schoolRow }] = await Promise.all([
+    sb.from("pano_items").select("*").eq("school_id", school.id).order("sort_order"),
+    sb.from("schools").select("display_token").eq("id", school.id).single(),
+  ]);
+  const editItem = editingId ? (items || []).find(i => i.id === editingId) : null;
+  const formType = editItem?.type || "duyuru";
+
+  const typeCounts = { duyuru: 0, medya: 0, pekistirec: 0 };
+  const statusCounts = { taslak: 0, yayinda: 0 };
+  (items || []).forEach(i => { typeCounts[i.type]++; statusCounts[i.status]++; });
+
+  let filtered = items || [];
+  if (typeFilter !== "hepsi") filtered = filtered.filter(i => i.type === typeFilter);
+  if (statusFilter !== "hepsi") filtered = filtered.filter(i => i.status === statusFilter);
+
+  const displayLink = schoolRow?.display_token ? `${location.origin}${location.pathname.replace(/index\.html$/, "")}pano.html?token=${schoolRow.display_token}` : null;
+
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Görüntüleme Linki</h3>
+      <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Bu bağlantıyı koridordaki ekranın tarayıcısına bir kere yapıştır, açık bırak — giriş gerekmez, içerikler otomatik döner ve yayınladıkça güncellenir.</p>
+      ${displayLink ? `
+        <input readonly value="${esc(displayLink)}" style="font-size:12px" onclick="this.select()">
+        <button class="secondary" id="regen-token" style="margin-top:10px">Yeniden Oluştur <span style="color:var(--muted);font-weight:400">(eski link geçersiz olur)</span></button>
+      ` : `<button class="primary" id="gen-token" style="width:100%">Görüntüleme Linki Oluştur</button>`}
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">${editItem ? "İçeriği Düzenle" : "Yeni İçerik"}</h3>
+      <label>Tür</label>
+      <select id="p-type" ${editItem ? "disabled" : ""}>
+        ${Object.entries(PANO_TYPE_LABELS).map(([k, v]) => `<option value="${k}" ${formType === k ? "selected" : ""}>${v}</option>`).join("")}
+      </select>
+      <div id="p-fields"></div>
+      <label>Ekranda kalma süresi (saniye)</label>
+      <input id="p-seconds" type="number" min="1" value="${editItem?.display_seconds ?? 15}">
+      <label>Başlangıç tarihi <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <input id="p-starts" type="date" value="${editItem?.starts_on || ""}">
+      <label>Bitiş tarihi <span style="color:var(--muted);font-weight:400">(opsiyonel, geçince otomatik gizlenir)</span></label>
+      <input id="p-ends" type="date" value="${editItem?.ends_on || ""}">
+      <button class="primary" id="p-save" style="width:100%;margin-top:10px">${editItem ? "Güncelle" : "Taslak Olarak Kaydet"}</button>
+      ${editItem ? `<button class="secondary" id="p-cancel" style="width:100%;margin-top:8px">İptal</button>` : ""}
+      <div id="p-msg"></div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="subtabs" style="flex-wrap:wrap">
+        <div class="subtab ${typeFilter === "hepsi" ? "active" : ""}" data-type-filter="hepsi">Tümü (${(items || []).length})</div>
+        ${Object.entries(PANO_TYPE_LABELS).map(([k, v]) => `<div class="subtab ${typeFilter === k ? "active" : ""}" data-type-filter="${k}">${v} (${typeCounts[k]})</div>`).join("")}
+      </div>
+      <div class="subtabs" style="flex-wrap:wrap;margin-top:8px">
+        <div class="subtab ${statusFilter === "hepsi" ? "active" : ""}" data-status-filter="hepsi">Tümü</div>
+        <div class="subtab ${statusFilter === "taslak" ? "active" : ""}" data-status-filter="taslak">Taslak (${statusCounts.taslak})</div>
+        <div class="subtab ${statusFilter === "yayinda" ? "active" : ""}" data-status-filter="yayinda">Yayında (${statusCounts.yayinda})</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">İçerikler</h3>
+      ${filtered.length ? filtered.map(renderPanoItemRow).join("") : `<p style="color:var(--muted)">Bu filtrede içerik yok.</p>`}
+    </div>
+  `;
+
+  renderPanoFormFields(editItem, formType);
+  const typeSelect = document.getElementById("p-type");
+  if (!editItem) typeSelect.onchange = (ev) => renderPanoFormFields(null, ev.target.value);
+
+  const genBtn = document.getElementById("gen-token");
+  if (genBtn) genBtn.onclick = async () => {
+    await sb.from("schools").update({ display_token: crypto.randomUUID() }).eq("id", school.id);
+    await renderPano(profile, school, content, typeFilter, statusFilter);
+  };
+  const regenBtn = document.getElementById("regen-token");
+  if (regenBtn) regenBtn.onclick = async () => {
+    if (!confirm("Eski link artık çalışmayacak, koridordaki ekranı yeni linkle güncellemen gerekecek. Devam?")) return;
+    await sb.from("schools").update({ display_token: crypto.randomUUID() }).eq("id", school.id);
+    await renderPano(profile, school, content, typeFilter, statusFilter);
+  };
+
+  document.getElementById("p-save").onclick = async () => {
+    const msg = document.getElementById("p-msg");
+    const type = document.getElementById("p-type").value;
+    const title = document.getElementById("p-title").value.trim();
+    if (!title) { msg.innerHTML = `<div class="msg err">Başlık zorunlu.</div>`; return; }
+    const payload = {
+      school_id: school.id,
+      type,
+      title,
+      body_text: document.getElementById("p-body")?.value.trim() || null,
+      display_seconds: Number(document.getElementById("p-seconds").value) || 15,
+      starts_on: document.getElementById("p-starts").value || null,
+      ends_on: document.getElementById("p-ends").value || null,
+    };
+    if (type === "pekistirec") {
+      payload.category = document.getElementById("p-category").value;
+      payload.subject_name = document.getElementById("p-subject").value.trim() || null;
+      payload.period_label = document.getElementById("p-period").value.trim() || null;
+      const fileInput = document.getElementById("p-media-file");
+      if (fileInput?.files?.[0]) {
+        try {
+          const path = await panoUploadFile(school, fileInput.files[0], "upload_image");
+          payload.media_kind = "upload_image";
+          payload.media_path = path;
+          payload.media_url = null;
+        } catch (e) { msg.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+      }
+    } else if (type === "medya") {
+      const kind = document.getElementById("p-media-kind").value;
+      payload.media_kind = kind;
+      if (kind === "embed_video") {
+        const url = document.getElementById("p-media-url").value.trim();
+        if (!url) { msg.innerHTML = `<div class="msg err">Link gerekli.</div>`; return; }
+        payload.media_url = url;
+        payload.media_path = null;
+      } else {
+        const fileInput = document.getElementById("p-media-file");
+        if (fileInput?.files?.[0]) {
+          try {
+            const path = await panoUploadFile(school, fileInput.files[0], kind);
+            payload.media_path = path;
+            payload.media_url = null;
+          } catch (e) { msg.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+        } else if (!editItem?.media_path) {
+          msg.innerHTML = `<div class="msg err">Dosya seç.</div>`; return;
+        }
+      }
+    }
+    const { error } = editItem
+      ? await sb.from("pano_items").update(payload).eq("id", editItem.id)
+      : await sb.from("pano_items").insert({ ...payload, created_by: profile.id, sort_order: (items || []).length });
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    await renderPano(profile, school, content, typeFilter, statusFilter);
+  };
+
+  const cancelBtn = document.getElementById("p-cancel");
+  if (cancelBtn) cancelBtn.onclick = () => renderPano(profile, school, content, typeFilter, statusFilter);
+
+  content.querySelectorAll("[data-type-filter]").forEach(el => el.onclick = () => renderPano(profile, school, content, el.dataset.typeFilter, statusFilter));
+  content.querySelectorAll("[data-status-filter]").forEach(el => el.onclick = () => renderPano(profile, school, content, typeFilter, el.dataset.statusFilter));
+  content.querySelectorAll("[data-edit-item]").forEach(b => b.onclick = () => renderPano(profile, school, content, typeFilter, statusFilter, b.dataset.editItem));
+  content.querySelectorAll("[data-toggle-status]").forEach(b => b.onclick = async () => {
+    const item = (items || []).find(i => i.id === b.dataset.toggleStatus);
+    const newStatus = item.status === "yayinda" ? "taslak" : "yayinda";
+    await sb.from("pano_items").update({ status: newStatus, published_at: newStatus === "yayinda" ? new Date().toISOString() : item.published_at }).eq("id", item.id);
+    await renderPano(profile, school, content, typeFilter, statusFilter);
+  });
+  content.querySelectorAll("[data-del-item]").forEach(b => b.onclick = async () => {
+    if (!confirm("Bu içeriği silmek istediğine emin misin?")) return;
+    const item = (items || []).find(i => i.id === b.dataset.delItem);
+    if (item?.media_path) await sb.storage.from("pano-media").remove([item.media_path]);
+    await sb.from("pano_items").delete().eq("id", item.id);
+    await renderPano(profile, school, content, typeFilter, statusFilter);
+  });
 }
 
 async function boot() {

@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Okul Panosu</title>
+<style>
+  :root{
+    --ink: #211c17; --ink-soft: #4a4238; --muted: #7d7365;
+    --paper: #f6f3ec; --surface: #ffffff; --surface-2: #efe9dd;
+    --line: #e2dac9;
+    --accent: #1f6b65; --accent-ink: #ffffff;
+    --gold: #b8862e; --gold-ink: #1a1509;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --ink: #ede7db; --ink-soft: #cdc4b3; --muted: #948a78;
+      --paper: #16140f; --surface: #201c16; --surface-2: #2a2519;
+      --line: #3a3323;
+      --accent: #57bdb2; --accent-ink: #0d1512;
+      --gold: #d9a64e; --gold-ink: #241c0a;
+    }
+  }
+  *{ box-sizing: border-box; }
+  html, body{ margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--paper); }
+  body{ font-family: "Segoe UI", Roboto, -apple-system, BlinkMacSystemFont, sans-serif; color: var(--ink); }
+
+  #stage{ position: relative; width: 100vw; height: 100vh; }
+  .slide{ position: absolute; inset: 0; display: flex; flex-direction: column; opacity: 0; transition: opacity .6s ease; pointer-events: none; }
+  .slide.active{ opacity: 1; pointer-events: auto; }
+
+  .topbar{ display: flex; align-items: center; justify-content: space-between; padding: 28px 56px 0; }
+  .school-name{ font-size: 22px; font-weight: 700; color: var(--muted); letter-spacing: .02em; }
+  .clock{ font-size: 22px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .slide-body{ flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 80px; text-align: center; }
+
+  /* Duyuru */
+  .duyuru-title{ font-size: 64px; font-weight: 800; line-height: 1.1; margin: 0 0 24px; text-wrap: balance; }
+  .duyuru-text{ font-size: 32px; color: var(--ink-soft); line-height: 1.5; max-width: 1100px; white-space: pre-wrap; }
+
+  /* Medya */
+  .media-slide .slide-body{ padding: 0; }
+  .media-slide img, .media-slide video{ width: 100%; height: 100%; object-fit: contain; background: #000; }
+  .media-slide iframe{ width: 100%; height: 100%; border: none; }
+  .media-caption{ position: absolute; left: 0; right: 0; bottom: 0; padding: 20px 56px 28px; background: linear-gradient(to top, rgba(0,0,0,.72), transparent); color: #fff; text-align: left; }
+  .media-caption .t{ font-size: 28px; font-weight: 700; }
+  .media-caption .c{ font-size: 19px; opacity: .85; margin-top: 4px; }
+
+  /* Pekiştireç — öne çıkan görünüm */
+  .pekistirec-slide{ background: linear-gradient(135deg, var(--gold), #8a6420); color: var(--gold-ink); }
+  .pekistirec-slide .topbar .school-name, .pekistirec-slide .topbar .clock{ color: rgba(0,0,0,.55); }
+  .pek-badge{ font-size: 24px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; background: rgba(0,0,0,.14); padding: 10px 28px; border-radius: 999px; margin-bottom: 28px; }
+  .pek-photo{ width: 260px; height: 260px; border-radius: 50%; object-fit: cover; border: 8px solid rgba(255,255,255,.55); box-shadow: 0 20px 50px rgba(0,0,0,.25); margin-bottom: 28px; }
+  .pek-name{ font-size: 76px; font-weight: 900; line-height: 1.05; margin: 0 0 8px; text-wrap: balance; }
+  .pek-period{ font-size: 26px; opacity: .8; margin-bottom: 20px; font-weight: 600; }
+  .pek-desc{ font-size: 28px; max-width: 1000px; line-height: 1.5; }
+
+  .empty{ display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; text-align:center; }
+  .empty h1{ font-size: 42px; margin: 0 0 12px; }
+  .empty p{ font-size: 22px; color: var(--muted); }
+
+  .progress{ position: absolute; left: 0; right: 0; bottom: 0; height: 6px; background: rgba(0,0,0,.08); }
+  .progress-bar{ height: 100%; background: var(--accent); width: 0%; }
+  .pekistirec-slide .progress-bar{ background: rgba(0,0,0,.35); }
+</style>
+</head>
+<body>
+
+<div id="stage"><div class="empty"><h1>Yükleniyor…</h1></div></div>
+
+<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+const SUPABASE_URL = "https://kwowxdunvwsxwghbdmdk.supabase.co";
+const SUPABASE_KEY = "sb_publishable_59rmyjjFN1NmBr0aOhzPNA_igHohm0X";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const stage = document.getElementById("stage");
+const token = new URLSearchParams(location.search).get("token");
+
+let items = [];
+let idx = 0;
+let advanceTimer = null;
+let progressStart = null;
+let progressRaf = null;
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function toEmbedUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname.includes("youtu.be")) {
+      return `https://www.youtube.com/embed/${u.pathname.slice(1)}?autoplay=1&mute=1&controls=0&rel=0`;
+    }
+    if (u.hostname.includes("youtube.com")) {
+      const id = u.searchParams.get("v");
+      if (id) return `https://www.youtube.com/embed/${id}?autoplay=1&mute=1&controls=0&rel=0`;
+      if (u.pathname.startsWith("/embed/")) return `${url}${url.includes("?") ? "&" : "?"}autoplay=1&mute=1&controls=0`;
+    }
+    if (u.hostname.includes("vimeo.com")) {
+      const id = u.pathname.split("/").filter(Boolean).pop();
+      return `https://player.vimeo.com/video/${id}?autoplay=1&muted=1`;
+    }
+  } catch (e) { /* fall through */ }
+  return url;
+}
+
+function clockText() {
+  return new Date().toLocaleString("tr-TR", { weekday: "long", day: "2-digit", month: "long", hour: "2-digit", minute: "2-digit" });
+}
+
+function topbar(schoolName) {
+  return `<div class="topbar"><div class="school-name">${esc(schoolName)}</div><div class="clock" id="clock">${clockText()}</div></div>`;
+}
+
+let schoolNameCache = "";
+
+function renderSlide(item) {
+  let bodyHtml = "";
+  let slideClass = "slide active";
+
+  if (item.type === "pekistirec") {
+    slideClass += " pekistirec-slide";
+    const photo = item.media_path ? panoUrl(item.media_path) : null;
+    bodyHtml = `
+      <div class="slide-body" style="flex-direction:column">
+        <div class="pek-badge">${esc(item.category || "Pekiştireç")}</div>
+        ${photo ? `<img class="pek-photo" src="${esc(photo)}">` : ""}
+        <h1 class="pek-name">${esc(item.subject_name || item.title)}</h1>
+        ${item.period_label ? `<div class="pek-period">${esc(item.period_label)}</div>` : ""}
+        ${item.body_text ? `<div class="pek-desc">${esc(item.body_text)}</div>` : ""}
+      </div>
+    `;
+  } else if (item.type === "medya") {
+    slideClass += " media-slide";
+    let mediaEl = "";
+    if (item.media_kind === "embed_video" && item.media_url) {
+      mediaEl = `<iframe src="${esc(toEmbedUrl(item.media_url))}" allow="autoplay" allowfullscreen></iframe>`;
+    } else if (item.media_kind === "upload_video" && item.media_path) {
+      mediaEl = `<video src="${esc(panoUrl(item.media_path))}" autoplay muted playsinline></video>`;
+    } else if (item.media_path) {
+      mediaEl = `<img src="${esc(panoUrl(item.media_path))}">`;
+    }
+    bodyHtml = `
+      <div class="slide-body" style="position:relative">
+        ${mediaEl}
+        ${(item.title || item.body_text) ? `<div class="media-caption"><div class="t">${esc(item.title)}</div>${item.body_text ? `<div class="c">${esc(item.body_text)}</div>` : ""}</div>` : ""}
+      </div>
+    `;
+  } else {
+    bodyHtml = `
+      <div class="slide-body">
+        <div>
+          <div class="duyuru-title">${esc(item.title)}</div>
+          ${item.body_text ? `<div class="duyuru-text">${esc(item.body_text)}</div>` : ""}
+        </div>
+      </div>
+    `;
+  }
+
+  stage.innerHTML = `
+    <div class="${slideClass}">
+      ${topbar(schoolNameCache)}
+      ${bodyHtml}
+      <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
+    </div>
+  `;
+  requestAnimationFrame(() => stage.querySelector(".slide").classList.add("active"));
+}
+
+function panoUrl(path) {
+  return sb.storage.from("pano-media").getPublicUrl(path).data.publicUrl;
+}
+
+function startProgress(durationMs) {
+  const bar = document.getElementById("progress-bar");
+  if (!bar) return;
+  progressStart = performance.now();
+  cancelAnimationFrame(progressRaf);
+  function tick(now) {
+    const pct = Math.min(100, ((now - progressStart) / durationMs) * 100);
+    bar.style.width = pct + "%";
+    if (pct < 100) progressRaf = requestAnimationFrame(tick);
+  }
+  progressRaf = requestAnimationFrame(tick);
+}
+
+function showEmpty(message) {
+  stage.innerHTML = `<div class="empty"><h1>${esc(message)}</h1><p>Panel üzerinden içerik ekleyip yayınlayınca burada görünecek.</p></div>`;
+}
+
+function advance() {
+  clearTimeout(advanceTimer);
+  if (!items.length) { showEmpty("Henüz yayında içerik yok"); return; }
+  if (idx >= items.length) idx = 0;
+  const item = items[idx];
+  renderSlide(item);
+  startProgress(item.display_seconds * 1000);
+  advanceTimer = setTimeout(() => { idx = (idx + 1) % items.length; advance(); }, item.display_seconds * 1000);
+}
+
+async function fetchItems() {
+  const { data, error } = await sb.rpc("get_published_pano", { p_token: token });
+  if (error) {
+    showEmpty("İçerik alınamadı");
+    return;
+  }
+  const wasEmpty = items.length === 0;
+  items = data || [];
+  if (wasEmpty && items.length) { idx = 0; advance(); }
+  else if (!items.length) { clearTimeout(advanceTimer); showEmpty("Henüz yayında içerik yok"); }
+}
+
+async function boot() {
+  if (!token) { showEmpty("Geçersiz bağlantı"); return; }
+  const { data: schoolName, error: nameErr } = await sb.rpc("get_pano_school_name", { p_token: token });
+  if (nameErr || !schoolName) { showEmpty("Geçersiz bağlantı"); return; }
+  schoolNameCache = schoolName;
+  await fetchItems();
+  setInterval(fetchItems, 60000);
+  setInterval(() => { const c = document.getElementById("clock"); if (c) c.textContent = clockText(); }, 30000);
+}
+
+boot();
+</script>
+</body>
+</html>
