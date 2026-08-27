@@ -253,13 +253,16 @@ function renderTeacherDashboard(profile, school) {
           <div class="who"><strong>${esc(school.name)}</strong></div>
           ${accountLineHtml(profile)}
         </div>
-        <button class="signout" id="signout">Çıkış yap</button>
+        <div id="topbar-actions" style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+          <button class="signout" id="signout">Çıkış yap</button>
+        </div>
       </div>
       <div class="grid">
+        ${isModuleEnabled(school, "LGS Koçluk") ? `
         <div class="mod clickable" data-mod="LGS Koçluk">
           <h3>LGS Koçluk</h3>
           <p>Koçluk ettiğin 8. sınıf öğrencilerinin deneme takibi, zayıflık analizi ve haftalık görevleri.</p>
-        </div>
+        </div>` : `<p style="color:var(--muted)">Şu an için idareniz tarafından size açık bir modül bulunmuyor.</p>`}
       </div>
     </div>
   `;
@@ -267,7 +270,9 @@ function renderTeacherDashboard(profile, school) {
     await sb.auth.signOut();
     boot();
   };
-  document.querySelector('[data-mod="LGS Koçluk"]').onclick = () => renderLgsModule(profile, school, "ogrenciler");
+  const lgsTeacherCard = document.querySelector('[data-mod="LGS Koçluk"]');
+  if (lgsTeacherCard) lgsTeacherCard.onclick = () => renderLgsModule(profile, school, "ogrenciler");
+  maybeShowPlatformAdminLink(profile);
 }
 
 function renderSchoolSetup(user) {
@@ -350,6 +355,24 @@ function accountLineHtml(profile) {
   `;
 }
 
+function isModuleEnabled(school, moduleName) {
+  if (!school || !school.enabled_modules || !school.enabled_modules.length) return true;
+  return school.enabled_modules.includes(moduleName);
+}
+
+async function maybeShowPlatformAdminLink(profile) {
+  const wrap = document.getElementById("topbar-actions");
+  if (!wrap) return;
+  const { data: isAdmin } = await sb.rpc("is_platform_admin");
+  if (!isAdmin) return;
+  const btn = document.createElement("button");
+  btn.className = "secondary";
+  btn.style.cssText = "font-size:12.5px;padding:7px 12px";
+  btn.textContent = "⚙ Platform Yönetimi";
+  btn.onclick = () => renderPlatformAdmin(profile);
+  wrap.prepend(btn);
+}
+
 function renderDashboard(profile, school) {
   app.innerHTML = `
     <div class="wrap dash">
@@ -359,10 +382,12 @@ function renderDashboard(profile, school) {
           <div class="who"><strong>${esc(school.name)}</strong> · ${esc(school.il)}/${esc(school.ilce)}</div>
           ${accountLineHtml(profile)}
         </div>
-        <button class="signout" id="signout">Çıkış yap</button>
+        <div id="topbar-actions" style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+          <button class="signout" id="signout">Çıkış yap</button>
+        </div>
       </div>
       <div class="grid">
-        ${MODULES.map(m => `
+        ${MODULES.filter(m => isModuleEnabled(school, m.name)).map(m => `
           <div class="mod clickable" data-mod="${m.name}">
             <h3>${m.name}</h3>
             <p>${m.desc}</p>
@@ -375,6 +400,7 @@ function renderDashboard(profile, school) {
     await sb.auth.signOut();
     boot();
   };
+  maybeShowPlatformAdminLink(profile);
   const nobetCard = document.querySelector('[data-mod="Nöbet Programı"]');
   if (nobetCard) nobetCard.onclick = () => renderNobet(profile, school, "ayarlar");
   const evrakCard = document.querySelector('[data-mod="Evrak Deposu"]');
@@ -4804,6 +4830,82 @@ async function renderSSSModule(profile, school, filterText = "") {
   }
   renderList(filterText);
   document.getElementById("sss-search").oninput = (ev) => renderList(ev.target.value);
+}
+
+/* ============ PLATFORM YÖNETİMİ ============ */
+
+async function renderPlatformAdmin(profile) {
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Platform Yönetimi</div>
+      <h1>Okullar</h1>
+      <div class="subtitle">Her okulun hangi modülleri görebileceğini buradan yönet. Bir okulda hiçbir modül işaretsiz bırakılmazsa (tümü açıksa) okul her zaman tüm modülleri görür.</div>
+      <div id="pa-list"><p style="color:var(--muted)">Yükleniyor…</p></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => boot();
+
+  const listEl = document.getElementById("pa-list");
+  const { data: schools, error } = await sb.from("schools").select("*").order("created_at", { ascending: false });
+  if (error) {
+    listEl.innerHTML = `<div class="msg err">${esc(error.message)}</div>`;
+    return;
+  }
+  if (!schools || !schools.length) {
+    listEl.innerHTML = `<p style="color:var(--muted)">Henüz kayıtlı okul yok.</p>`;
+    return;
+  }
+
+  listEl.innerHTML = schools.map(s => {
+    const restricted = !!(s.enabled_modules && s.enabled_modules.length);
+    const loc = [s.il, s.ilce].filter(Boolean).join("/");
+    return `
+      <div class="card" data-school="${s.id}" style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+          <div>
+            <strong>${esc(s.name)}</strong>
+            <div style="font-size:12.5px;color:var(--muted)">${esc(loc)}${loc && s.mudur_adi ? " · " : ""}${esc(s.mudur_adi || "")}${s.created_at ? ` · ${new Date(s.created_at).toLocaleDateString("tr-TR")}` : ""}</div>
+          </div>
+          <span class="pill" style="${restricted ? "" : "background:var(--good-soft);color:var(--good)"}">${restricted ? "Kısıtlı" : "Tüm modüller açık"}</span>
+        </div>
+        <div class="chips" style="margin-top:12px">
+          ${MODULES.map(m => `<span class="chip ${!restricted || s.enabled_modules.includes(m.name) ? "on" : ""}" data-mod-name="${esc(m.name)}">${esc(m.name)}</span>`).join("")}
+        </div>
+        <div style="margin-top:12px;display:flex;gap:10px;align-items:center">
+          <button class="secondary" data-save="${s.id}">Kaydet</button>
+          <span id="pa-msg-${s.id}"></span>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  listEl.querySelectorAll(".chip").forEach(chip => {
+    chip.onclick = () => chip.classList.toggle("on");
+  });
+
+  listEl.querySelectorAll("[data-save]").forEach(btn => {
+    btn.onclick = async () => {
+      const schoolId = btn.dataset.save;
+      const card = listEl.querySelector(`[data-school="${schoolId}"]`);
+      const selected = Array.from(card.querySelectorAll(".chip.on")).map(c => c.dataset.modName);
+      const allOn = selected.length === MODULES.length;
+      const msgEl = document.getElementById(`pa-msg-${schoolId}`);
+      btn.disabled = true;
+      const { error: saveErr } = await sb.from("schools").update({ enabled_modules: allOn ? null : selected }).eq("id", schoolId);
+      btn.disabled = false;
+      if (saveErr) {
+        msgEl.innerHTML = `<span style="color:var(--crit)">${esc(saveErr.message)}</span>`;
+        return;
+      }
+      msgEl.innerHTML = `<span style="color:var(--good)">Kaydedildi ✓</span>`;
+      const pill = card.querySelector(".pill");
+      const nowRestricted = !allOn;
+      pill.textContent = nowRestricted ? "Kısıtlı" : "Tüm modüller açık";
+      pill.style.cssText = nowRestricted ? "" : "background:var(--good-soft);color:var(--good)";
+      setTimeout(() => { if (document.body.contains(msgEl)) msgEl.innerHTML = ""; }, 2500);
+    };
+  });
 }
 
 async function boot() {
