@@ -154,9 +154,13 @@ const MODULES = [
 ];
 
 function renderAuth(mode = "login") {
-  const urlJoin = new URLSearchParams(location.search).get("join");
+  const params = new URLSearchParams(location.search);
+  const urlJoin = params.get("join");
+  const urlOkul = params.get("okul");
   if (urlJoin) localStorage.setItem("pendingJoinCode", urlJoin.trim().toUpperCase());
+  if (urlOkul) localStorage.setItem("pendingSchoolCode", urlOkul.trim().toUpperCase());
   const pendingJoin = localStorage.getItem("pendingJoinCode") || "";
+  const pendingSchool = localStorage.getItem("pendingSchoolCode") || "";
 
   app.innerHTML = `
     <div class="wrap">
@@ -168,14 +172,15 @@ function renderAuth(mode = "login") {
           <button class="tab ${mode === "login" ? "active" : ""}" id="tab-login">Giriş yap</button>
           <button class="tab ${mode === "signup" ? "active" : ""}" id="tab-signup">Üye ol</button>
         </div>
+        ${pendingSchool ? `<div class="msg ok">🏫 Okul kurma daveti (kod: ${esc(pendingSchool)}) — ${mode === "signup" ? "hesap oluşturunca" : "giriş yapınca"} otomatik olarak bu okulun müdürü olarak bağlanacaksın.</div>` : ""}
         <label>E-posta</label>
         <input id="email" type="email" autocomplete="email" placeholder="ornek@meb.gov.tr">
         <label>Şifre</label>
         <input id="password" type="password" autocomplete="${mode === "login" ? "current-password" : "new-password"}" placeholder="en az 6 karakter">
-        ${mode === "signup" ? `
+        ${mode === "signup" && !pendingSchool ? `
           <label>Öğretmen davet kodu <span style="color:var(--muted);font-weight:400">(okul idarenden aldıysan gir; boş bırakırsan yeni bir okul hesabı açılır)</span></label>
           <input id="join-code" value="${esc(pendingJoin)}" placeholder="örn. AB3K9XPZ" style="text-transform:uppercase">
-        ` : (pendingJoin ? `<div class="msg ok" style="margin-top:10px">Bekleyen bir öğretmen daveti var (kod: ${esc(pendingJoin)}). Giriş yaptığında otomatik tamamlanacak.</div>` : "")}
+        ` : (mode === "login" && pendingJoin && !pendingSchool ? `<div class="msg ok" style="margin-top:10px">Bekleyen bir öğretmen daveti var (kod: ${esc(pendingJoin)}). Giriş yaptığında otomatik tamamlanacak.</div>` : "")}
         <button class="primary" id="submit">${mode === "login" ? "Giriş yap" : "Hesap oluştur"}</button>
         <div id="msg"></div>
       </div>
@@ -239,6 +244,7 @@ function renderJoinError(message) {
   `;
   document.getElementById("join-signout").onclick = async () => {
     localStorage.removeItem("pendingJoinCode");
+    localStorage.removeItem("pendingSchoolCode");
     await sb.auth.signOut();
     boot();
   };
@@ -1124,7 +1130,22 @@ function linesToList(text) {
 }
 
 function docWrapper(school, bodyHtml) {
-  return `
+  // Tam bir HTML belgesi döndürüyoruz (DOCTYPE + html/head/meta charset + body) — sadece bir
+  // <div> parçası değil. Tarayıcı önizlemesi (iframe.srcdoc) eksik parçaları sessizce tamamladığı
+  // için ekranda sorunsuz görünüyordu, ama .doc uzantısıyla indirilip gerçek Microsoft Word'de
+  // açılınca charset/head bilgisi olmayan bir HTML parçası boş/bozuk açılabiliyordu. mso XML
+  // bloğu Word'ün belgeyi "Print Layout"ta, doğru sayfa görünümüyle açmasını sağlıyor.
+  return `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8">
+<title>Belge</title>
+<!--[if gte mso 9]>
+<xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml>
+<![endif]-->
+<style>@page { size: 21cm 29.7cm; margin: 2cm; } body { margin: 0; }</style>
+</head>
+<body>
     <div style="font-family: 'Times New Roman', serif; max-width: 700px; margin: 0 auto; padding: 40px; background:#fff; color:#111; line-height:1.7; font-size:14px">
       <div style="text-align:center; margin-bottom:24px">
         <div style="font-size:12px">T.C.</div>
@@ -1133,7 +1154,8 @@ function docWrapper(school, bodyHtml) {
       </div>
       ${bodyHtml}
     </div>
-  `;
+</body>
+</html>`;
 }
 
 const EVRAK_TEMPLATES = [
@@ -4723,7 +4745,7 @@ const KILAVUZ_SECTIONS = [
     <h4>İki tip kullanıcı</h4>
     <p>Panelde iki hesap türü var: <strong>İdareci</strong> (müdür / müdür yardımcısı) ve <strong>Öğretmen</strong>. İdareci panelin tamamını görür; öğretmen sadece LGS Koçluk'u ve orada da yalnızca kendisine atanmış öğrencileri görür.</p>
     <h4>İlk hesabı açmak (idareci)</h4>
-    <p>"Üye ol" ile e-posta/şifre girip okul bilgisini (ad, il, ilçe, müdür adı, okul türü) doldurursun. Bu, okulun panel üzerindeki tek kaydını oluşturur.</p>
+    <p>"Üye ol" ile e-posta/şifre girip okul bilgisini (ad, il, ilçe, müdür adı, okul türü) doldurursun. Bu, okulun panel üzerindeki tek kaydını oluşturur. Alternatif olarak platform yöneticisi bir okulu senin adına önceden oluşturup davet linki gönderebilir — bu durumda linke tıklayıp sadece e-posta/şifre girmen yeterli, okul bilgisi zaten hazır olur.</p>
     <h4>Öğretmen hesabı nasıl açılır</h4>
     <ol>
       <li><strong>Nöbet Programı → Öğretmenler</strong>'de ilgili öğretmenin satırında "Davet Kodu Oluştur"a bas.</li>
@@ -4870,17 +4892,65 @@ async function renderSSSModule(profile, school, filterText = "") {
 
 /* ============ PLATFORM YÖNETİMİ ============ */
 
-async function renderPlatformAdmin(profile) {
+function schoolInviteUrl(code) {
+  return `${location.origin}${location.pathname}?okul=${encodeURIComponent(code)}`;
+}
+
+async function renderPlatformAdmin(profile, formMsg = "") {
   app.innerHTML = `
     <div class="wrap wide">
       <button class="navlink" id="back-dash">← Panele dön</button>
       <div class="eyebrow">Platform Yönetimi</div>
       <h1>Okullar</h1>
       <div class="subtitle">Her okulun hangi modülleri görebileceğini buradan yönet. Bir okulda hiçbir modül işaretsiz bırakılmazsa (tümü açıksa) okul her zaman tüm modülleri görür.</div>
+      <div class="card" style="margin-bottom:20px">
+        <h3 style="margin-top:0">Yeni Okul Ekle</h3>
+        <p style="color:var(--muted);font-size:12.5px;margin-top:-6px">Okulu burada oluştur, çıkan davet kodu/linki müdüre gönder — müdür linke tıklayıp hesap oluşturunca otomatik olarak bu okula bağlanır. Kendi okul kurulum ekranındaki bilgilerin aynısı (Rolün hariç, her zaman Müdür olarak atanır).</p>
+        <label>Okul adı</label>
+        <input id="pa-name" placeholder="örn. Zübeyde Hanım TOBB Anaokulu">
+        <label>İl</label>
+        <input id="pa-il" placeholder="Balıkesir">
+        <label>İlçe</label>
+        <input id="pa-ilce" placeholder="Merkez">
+        <label>Müdür adı <span style="color:var(--muted);font-weight:400">(opsiyonel, biliyorsan gir)</span></label>
+        <input id="pa-mudur" placeholder="Ad Soyad">
+        <label>Okul türü</label>
+        <select id="pa-turu">
+          <option value="okul_oncesi">Okul Öncesi / Anaokulu</option>
+          <option value="ilkokul">İlkokul</option>
+          <option value="ortaokul">Ortaokul</option>
+          <option value="lise">Lise</option>
+        </select>
+        <button class="primary" id="pa-create">Okul Oluştur ve Davet Kodu Al</button>
+        <div id="pa-create-msg">${formMsg}</div>
+      </div>
       <div id="pa-list"><p style="color:var(--muted)">Yükleniyor…</p></div>
     </div>
   `;
   document.getElementById("back-dash").onclick = () => boot();
+
+  document.getElementById("pa-create").onclick = async () => {
+    const name = document.getElementById("pa-name").value.trim();
+    const il = document.getElementById("pa-il").value.trim();
+    const ilce = document.getElementById("pa-ilce").value.trim();
+    const mudur_adi = document.getElementById("pa-mudur").value.trim();
+    const okul_turu = document.getElementById("pa-turu").value;
+    const btn = document.getElementById("pa-create");
+    const msg = document.getElementById("pa-create-msg");
+    if (!name || !il || !ilce) {
+      msg.innerHTML = `<div class="msg err">Okul adı, il ve ilçe zorunlu.</div>`;
+      return;
+    }
+    btn.disabled = true;
+    const invite_code = randomInviteCode();
+    const { error } = await sb.from("schools").insert({ name, il, ilce, mudur_adi: mudur_adi || null, okul_turu, created_by: profile.id, invite_code });
+    btn.disabled = false;
+    if (error) {
+      msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`;
+      return;
+    }
+    await renderPlatformAdmin(profile, `<div class="msg ok">"${esc(name)}" oluşturuldu. Davet kodu: <strong style="font-family:ui-monospace,monospace">${esc(invite_code)}</strong> — aşağıdaki listede linkini bulup müdüre gönderebilirsin.</div>`);
+  };
 
   const listEl = document.getElementById("pa-list");
   const { data: schools, error } = await sb.from("schools").select("*").order("created_at", { ascending: false });
@@ -4896,6 +4966,7 @@ async function renderPlatformAdmin(profile) {
   listEl.innerHTML = schools.map(s => {
     const restricted = !!(s.enabled_modules && s.enabled_modules.length);
     const loc = [s.il, s.ilce].filter(Boolean).join("/");
+    const pending = !!s.invite_code;
     return `
       <div class="card" data-school="${s.id}" style="margin-bottom:14px">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
@@ -4904,6 +4975,15 @@ async function renderPlatformAdmin(profile) {
             <div style="font-size:12.5px;color:var(--muted)">${esc(loc)}${loc && s.mudur_adi ? " · " : ""}${esc(s.mudur_adi || "")}${s.created_at ? ` · ${new Date(s.created_at).toLocaleDateString("tr-TR")}` : ""}</div>
           </div>
           <span class="pill" style="${restricted ? "" : "background:var(--good-soft);color:var(--good)"}">${restricted ? "Kısıtlı" : "Tüm modüller açık"}</span>
+        </div>
+        <div style="margin-top:10px;font-size:12px">
+          ${pending
+            ? `<div style="background:var(--warn-soft);color:var(--warn);border-radius:8px;padding:8px 10px">
+                 ⏳ Müdür henüz hesap oluşturmadı. Davet kodu: <strong style="font-family:ui-monospace,monospace">${esc(s.invite_code)}</strong>
+                 <input readonly value="${esc(schoolInviteUrl(s.invite_code))}" style="font-size:10.5px;padding:4px;margin-top:4px" onclick="this.select()">
+                 <button data-regen-school="${s.id}" style="margin-top:4px">Yeni kod</button>
+               </div>`
+            : `<span style="color:var(--good)">✅ Müdür hesabı bağlı</span>`}
         </div>
         <div class="chips" style="margin-top:12px">
           ${MODULES.map(m => `<span class="chip ${!restricted || s.enabled_modules.includes(m.name) ? "on" : ""}" data-mod-name="${esc(m.name)}">${esc(m.name)}</span>`).join("")}
@@ -4918,6 +4998,14 @@ async function renderPlatformAdmin(profile) {
 
   listEl.querySelectorAll(".chip").forEach(chip => {
     chip.onclick = () => chip.classList.toggle("on");
+  });
+
+  listEl.querySelectorAll("[data-regen-school]").forEach(btn => {
+    btn.onclick = async () => {
+      btn.disabled = true;
+      await sb.from("schools").update({ invite_code: randomInviteCode() }).eq("id", btn.dataset.regenSchool);
+      await renderPlatformAdmin(profile);
+    };
   });
 
   listEl.querySelectorAll("[data-save]").forEach(btn => {
@@ -4958,6 +5046,16 @@ async function boot() {
     .maybeSingle();
 
   if (!profile || !profile.school_id) {
+    const pendingSchoolCode = localStorage.getItem("pendingSchoolCode");
+    if (pendingSchoolCode) {
+      const { error } = await sb.rpc("claim_school_as_mudur", { p_code: pendingSchoolCode });
+      if (!error) {
+        localStorage.removeItem("pendingSchoolCode");
+        return boot();
+      }
+      renderJoinError(error.message);
+      return;
+    }
     const pendingCode = localStorage.getItem("pendingJoinCode");
     if (pendingCode) {
       const { error } = await sb.rpc("join_school_as_teacher", { p_code: pendingCode });
