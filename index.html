@@ -752,6 +752,88 @@ function renderPersonelAttendance(school, content) {
 const MONTH_ORDER = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
 const MONTH_NAMES = { 1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan", 5: "Mayıs", 6: "Haziran", 7: "Temmuz", 8: "Ağustos", 9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık" };
 
+/**
+ * Araştırmayla doğrulanmış, birincil kaynaktan (Resmî Gazete/Bakanlık yönerge metni) teyit
+ * edilmiş aylık görevler. Yalnızca kaynağı net madde numarasıyla doğrulanabilenler eklendi —
+ * her yıl değişen (tatil/sınav) tarihler ya da tek bir yönetmelik maddesiyle net teyit
+ * edilemeyen genelge-bazlı işler bilinçli olarak dışarıda bırakıldı (Teftişe Hazırlık'taki
+ * "uydurma girme" ilkesiyle aynı disiplin).
+ */
+const VERIFIED_MONTHLY_SEED_TASKS = [
+  {
+    month: 9,
+    title: "Öğretmenler Kurulu toplantısı (ders yılı başı)",
+    description: "Ders yılı başlamadan önce, eylül ayının ilk işgününde yapılır.",
+    resmi_dayanak: "MEB Eğitim Kurulları ve Zümreleri Yönergesi, Madde 9/3-4 ve EK-1 (Eğitim Kurullarının Toplantı Takvimi)",
+  },
+  {
+    month: 9,
+    title: "Eğitim kurumu sınıf/alan zümre toplantısı (ders yılı başı)",
+    description: "Öğretmenler kurulu toplantısını takip eden işgününde yapılır.",
+    resmi_dayanak: "MEB Eğitim Kurulları ve Zümreleri Yönergesi, Madde 12/4 ve EK-2 (Zümrelerin Toplantı Takvimi)",
+  },
+  {
+    month: 10,
+    title: "Okul Aile Birliği Genel Kurulu",
+    description: "Birlik yönetim kurulunun davetiyle her yıl en geç ekim ayının sonuna kadar toplanır.",
+    resmi_dayanak: "MEB Okul-Aile Birliği Yönetmeliği, Madde 9/1",
+  },
+  {
+    month: 10,
+    title: "Sınıf/Şube Öğretmenler Kurulu (1. dönem — ortaokul)",
+    description: "Ortaokul ve imam hatip ortaokullarında ekim ayı içinde yapılır.",
+    resmi_dayanak: "MEB Eğitim Kurulları ve Zümreleri Yönergesi, Madde 10/2",
+  },
+  {
+    month: 11,
+    title: "Sınıf/Şube Öğretmenler Kurulu (1. dönem — ortaöğretim/lise)",
+    description: "Ortaöğretim kurumlarında (lise) kasım ayı içinde yapılır.",
+    resmi_dayanak: "MEB Eğitim Kurulları ve Zümreleri Yönergesi, Madde 10/2",
+  },
+  {
+    month: 2,
+    title: "Öğretmenler Kurulu toplantısı (2. dönem başı)",
+    description: "İkinci dönemin (yarıyıl tatili sonrası) ilk işgününde yapılır.",
+    resmi_dayanak: "MEB Eğitim Kurulları ve Zümreleri Yönergesi, Madde 9/4 ve EK-1",
+  },
+  {
+    month: 2,
+    title: "Eğitim kurumu sınıf/alan zümre toplantısı (2. dönem başı)",
+    description: "Öğretmenler kurulu toplantısını takip eden işgününde yapılır.",
+    resmi_dayanak: "MEB Eğitim Kurulları ve Zümreleri Yönergesi, Madde 12/4 ve EK-2",
+  },
+  {
+    month: 2,
+    title: "Sınıf/Şube Öğretmenler Kurulu (2. dönem — ortaokul)",
+    description: "Ortaokul ve imam hatip ortaokullarında şubat ayı içinde yapılır.",
+    resmi_dayanak: "MEB Eğitim Kurulları ve Zümreleri Yönergesi, Madde 10/2",
+  },
+  {
+    month: 4,
+    title: "Sınıf/Şube Öğretmenler Kurulu (2. dönem — ortaöğretim/lise)",
+    description: "Ortaöğretim kurumlarında (lise) nisan ayı içinde yapılır.",
+    resmi_dayanak: "MEB Eğitim Kurulları ve Zümreleri Yönergesi, Madde 10/2",
+  },
+  {
+    month: 6,
+    title: "Öğretmenler Kurulu toplantısı (ders yılı sonu)",
+    description: "Ders yılı bitimini takip eden haftanın ilk işgününde yapılır; eğitim ve öğretim yılı boyunca alınan kararlar ve sonuçları değerlendirilir.",
+    resmi_dayanak: "MEB Eğitim Kurulları ve Zümreleri Yönergesi, Madde 9/4 ve 9/6, EK-1",
+  },
+  {
+    month: 6,
+    title: "Eğitim kurumu sınıf/alan zümre toplantısı (ders yılı sonu) ve zümre başkanı seçimi",
+    description: "Öğretmenler kurulu toplantısını takip eden işgününde yapılır. Alanında birden fazla öğretmen bulunan zümrelerde bu toplantıda, eylül ayından itibaren geçerli olmak üzere 2 yıl süreyle görev yapacak yeni zümre başkanı seçilir.",
+    resmi_dayanak: "MEB Eğitim Kurulları ve Zümreleri Yönergesi, Madde 12/1 ve 12/4, EK-2",
+  },
+  {
+    month: 6,
+    title: "Sınıf/Şube Öğretmenler Kurulu (ders yılı sonu — ortaokul)",
+    description: "Ortaokul ve imam hatip ortaokullarında haziran ayı içinde yapılır; eğitim ve öğretim yılı boyunca alınan kararlar ve sonuçları değerlendirilir.",
+    resmi_dayanak: "MEB Eğitim Kurulları ve Zümreleri Yönergesi, Madde 10/2",
+  },
+];
+
 async function renderAylikModule(profile, school) {
   app.innerHTML = `
     <div class="wrap wide">
@@ -774,6 +856,9 @@ async function renderAylik(school, content, editingId = null) {
   const total = (tasks || []).length;
   const done = (tasks || []).filter(t => t.is_done).length;
 
+  const existingTitles = new Set((tasks || []).map(t => t.title));
+  const missingSeedTasks = VERIFIED_MONTHLY_SEED_TASKS.filter(t => !existingTitles.has(t.title));
+
   content.innerHTML = `
     ${total ? `
     <div class="card" style="margin-bottom:16px">
@@ -783,6 +868,13 @@ async function renderAylik(school, content, editingId = null) {
           <div style="height:100%;width:${total ? Math.round(done / total * 100) : 0}%;background:var(--good)"></div>
         </div>
       </div>
+    </div>` : ""}
+
+    ${missingSeedTasks.length ? `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Doğrulanmış örnek görevler</h3>
+      <p style="color:var(--muted);font-size:12.5px">Araştırmayla doğrulanmış ${missingSeedTasks.length} görev daha var (öğretmenler kurulu, zümre toplantıları, okul aile birliği genel kurulu — resmî yönerge/yönetmelik madde numarasıyla) — eklenebilir. Yıla göre değişen tatil/sınav tarihleri gibi tek maddeyle doğrulanamayan işler bilinçli olarak dahil edilmedi, onları kendin eklemen gerekir.</p>
+      <button class="secondary" id="seed-aylik-btn" style="width:100%">Bu ${missingSeedTasks.length} görevi ekle</button>
     </div>` : ""}
 
     <div class="card" style="margin-bottom:16px">
@@ -824,6 +916,16 @@ async function renderAylik(school, content, editingId = null) {
       </div>
     `).join("") || `<p style="color:var(--muted)">Henüz görev eklenmedi.</p>`}
   `;
+
+  const seedBtn = document.getElementById("seed-aylik-btn");
+  if (seedBtn) seedBtn.onclick = async () => {
+    seedBtn.disabled = true;
+    const { error } = await sb.from("monthly_tasks").insert(
+      missingSeedTasks.map((t, i) => ({ school_id: school.id, month: t.month, title: t.title, description: t.description, resmi_dayanak: t.resmi_dayanak, sort_order: (tasks || []).length + i }))
+    );
+    if (error) { seedBtn.disabled = false; alert(error.message); return; }
+    await renderAylik(school, content);
+  };
 
   document.getElementById("m-save").onclick = async () => {
     const month = parseInt(document.getElementById("m-month").value);
@@ -1129,12 +1231,47 @@ function linesToList(text) {
   return (text || "").split("\n").map(s => s.trim()).filter(Boolean).map(s => `<li>${esc(s)}</li>`).join("");
 }
 
-function docWrapper(school, bodyHtml) {
-  // Tam bir HTML belgesi döndürüyoruz (DOCTYPE + html/head/meta charset + body) — sadece bir
-  // <div> parçası değil. Tarayıcı önizlemesi (iframe.srcdoc) eksik parçaları sessizce tamamladığı
-  // için ekranda sorunsuz görünüyordu, ama .doc uzantısıyla indirilip gerçek Microsoft Word'de
-  // açılınca charset/head bilgisi olmayan bir HTML parçası boş/bozuk açılabiliyordu. mso XML
-  // bloğu Word'ün belgeyi "Print Layout"ta, doğru sayfa görünümüyle açmasını sağlıyor.
+/**
+ * Ad-soyad girdisinde soyadı büyük harfe çevirir (ad(lar) olduğu gibi kalır), Resmî
+ * Yazışmalarda Uygulanacak Usul ve Esaslar Hakkında Yönetmelik Madde 17/2'deki "adı ilk
+ * harfi büyük diğerleri küçük, soyadı ise büyük harflerle yazılır" kuralına uygun olsun diye.
+ * Soyadın Türkçe alfabede doğru büyütülmesi için tr-TR locale kullanılır (i → İ gibi).
+ * Basit bir sezgisel kural: son boşlukla ayrılmış kelime soyad kabul edilir — Türkçe adlarda
+ * neredeyse her zaman doğrudur, kullanıcının girdiği ad kısmına dokunulmaz.
+ */
+function officialSignatureName(fullName) {
+  const name = (fullName || "").trim();
+  if (!name) return "……………………";
+  const parts = name.split(/\s+/);
+  const soyad = parts.pop().toLocaleUpperCase("tr-TR");
+  return esc([...parts, soyad].join(" "));
+}
+
+/**
+ * Resmî Yazışmalarda Uygulanacak Usul ve Esaslar Hakkında Yönetmelik (RG: 10/6/2020-31151)
+ * hükümlerine göre: A4 sayfa, yazı alanı üst/sol/sağdan 1,5 cm boşluk (Madde 8), Times New
+ * Roman 12 punto (Madde 7), başlık ortalı — T.C. / bağlı olunan mülki idare (BÜYÜK HARF) /
+ * birim adı, ilk harfleri büyük diğerleri küçük (Madde 10) — okullar ilçe teşkilatı sayıldığı
+ * için ikinci satır İlçe Kaymakamlığı olarak kuruldu (Madde 10/3, 5442 sayılı İl İdaresi
+ * Kanunu). meta.konu verilirse Sayı/Tarih (Madde 11-12) ve Konu (Madde 13) bloğu eklenir —
+ * "Sayı:" alanı bilerek boş bırakıldı: gerçek kayıt numarası ancak okulun kendi resmî
+ * yazışma sistemi (EBYS/kurumsal kayıt defteri) üzerinden alınabilir, burada uydurulmadı.
+ */
+function docWrapper(school, bodyHtml, meta = {}) {
+  const ilce = (school.ilce || "").trim();
+  const il = (school.il || "").trim();
+  const okulAdi = (school.name || "").trim();
+  const ustIdare = ilce
+    ? `${esc(ilce).toLocaleUpperCase("tr-TR")} KAYMAKAMLIĞI`
+    : (il ? `${esc(il).toLocaleUpperCase("tr-TR")} VALİLİĞİ` : "");
+  const birimAdi = okulAdi + (/müdürlüğü\s*$/i.test(okulAdi) ? "" : " Müdürlüğü");
+  const ustBlok = meta.konu ? `
+    <div style="display:flex;justify-content:space-between;margin-top:22px">
+      <span>Sayı: ……………………………</span>
+      ${meta.tarih ? `<span>${fmtDate(meta.tarih)}</span>` : ""}
+    </div>
+    <div style="margin-top:4px">Konu: ${esc(meta.konu)}</div>
+  ` : "";
   return `<!DOCTYPE html>
 <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
 <head>
@@ -1143,16 +1280,20 @@ function docWrapper(school, bodyHtml) {
 <!--[if gte mso 9]>
 <xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml>
 <![endif]-->
-<style>@page { size: 21cm 29.7cm; margin: 2cm; } body { margin: 0; }</style>
+<style>@page { size: 21cm 29.7cm; margin: 1.5cm; } body { margin: 0; }</style>
 </head>
 <body>
-    <div style="font-family: 'Times New Roman', serif; max-width: 700px; margin: 0 auto; padding: 40px; background:#fff; color:#111; line-height:1.7; font-size:14px">
-      <div style="text-align:center; margin-bottom:24px">
-        <div style="font-size:12px">T.C.</div>
-        <div style="font-size:13px;font-weight:bold">${esc(school.il).toUpperCase()} VALİLİĞİ</div>
-        <div style="font-size:13px;font-weight:bold">${esc(school.name).toUpperCase()}</div>
+    <div style="font-family: 'Times New Roman', serif; max-width: 700px; margin: 0 auto; padding: 1.5cm; background:#fff; color:#111; line-height:1.5; font-size:12pt">
+      <div style="text-align:center; margin-bottom:4px">
+        <div>T.C.</div>
+        ${ustIdare ? `<div style="font-weight:bold">${ustIdare}</div>` : ""}
+        <div>${esc(birimAdi)}</div>
       </div>
+      ${ustBlok}
       ${bodyHtml}
+      <div style="margin-top:40px;border-top:1px solid #ccc;padding-top:6px;font-size:8pt;color:#666;text-align:center">
+        Bu belge Okul İdare Paneli üzerinden taslak olarak oluşturulmuştur. Resmî sayı/kayıt numarası okulunuzun kendi resmî yazışma sistemi (EBYS/kurumsal kayıt) üzerinden alınmalıdır.
+      </div>
     </div>
 </body>
 </html>`;
@@ -1168,15 +1309,15 @@ const EVRAK_TEMPLATES = [
       { id: "konu", label: "Tebliğ konusu", type: "text" },
       { id: "tarih", label: "Tarih", type: "date" },
     ],
+    meta: (d) => ({ konu: d.konu, tarih: d.tarih }),
     render: (d, school) => `
-      <p style="text-align:right">${esc(school.il)}, ${fmtDate(d.tarih)}</p>
-      <h3 style="text-align:center;text-decoration:underline">TEBLİĞ-TEBELLÜĞ BELGESİ</h3>
-      <p><strong>Konu:</strong> ${esc(d.konu)}</p>
-      <p style="text-align:justify">Yukarıda belirtilen konuya ilişkin yazı/duyuru, aşağıda adı yazılı personele tebliğ edilmiş olup, kendisi tarafından okunarak bir örneği teslim alınmıştır.</p>
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">TEBLİĞ-TEBELLÜĞ BELGESİ</h3>
+      <p style="text-align:justify;text-indent:1.25cm">Yukarıda belirtilen konuya ilişkin yazı/duyuru, aşağıda adı yazılı personele tebliğ edilmiş olup, kendisi tarafından okunarak bir örneği teslim alınmıştır.</p>
       <table style="width:100%;margin-top:50px;border-collapse:collapse"><tr>
-        <td style="width:50%;vertical-align:top"><strong>Tebliğ Eden</strong><br><br><br><br>${esc(school.mudur_adi || "……………………")}<br>Okul Müdürü</td>
+        <td style="width:50%;vertical-align:top"><strong>Tebliğ Eden</strong><br><br><br><br>${officialSignatureName(school.mudur_adi)}<br>Okul Müdürü</td>
         <td style="width:50%;vertical-align:top"><strong>Tebellüğ Eden</strong><br><br><br><br>${esc(d.personel_adi)}</td>
       </tr></table>
+      <p style="margin-top:16px">${esc(school.il)}, ${fmtDate(d.tarih)}</p>
     `,
   },
   {
@@ -1188,15 +1329,15 @@ const EVRAK_TEMPLATES = [
       { id: "toplanti_tarihi", label: "Tarih", type: "date" },
       { id: "gundem", label: "Gündem maddeleri (her satıra bir madde)", type: "textarea" },
     ],
+    meta: (d) => ({ konu: `Öğretmenler Kurulu Toplantısı (Toplantı No: ${d.toplanti_no || "-"})`, tarih: d.toplanti_tarihi }),
     render: (d, school) => `
-      <p style="text-align:right">${esc(school.il)}, ${fmtDate(d.toplanti_tarihi)}</p>
-      <h3 style="text-align:center;text-decoration:underline">ÖĞRETMENLER KURULU TOPLANTI TUTANAĞI</h3>
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">ÖĞRETMENLER KURULU TOPLANTI TUTANAĞI</h3>
       <p><strong>Toplantı No:</strong> ${esc(d.toplanti_no)} &nbsp;&nbsp; <strong>Tarih:</strong> ${fmtDate(d.toplanti_tarihi)}</p>
       <p><strong>Gündem Maddeleri:</strong></p>
       <ol style="text-align:justify">${linesToList(d.gundem)}</ol>
-      <p style="margin-top:30px">Yukarıdaki gündem maddeleri öğretmenler kurulunda görüşülmüş, alınan kararlar tutanak altına alınmıştır.</p>
+      <p style="margin-top:30px;text-align:justify;text-indent:1.25cm">Yukarıdaki gündem maddeleri öğretmenler kurulunda görüşülmüş, alınan kararlar tutanak altına alınmıştır.</p>
       <table style="width:100%;margin-top:50px"><tr>
-        <td style="text-align:center"><strong>${esc(school.mudur_adi || "……………………")}</strong><br>Okul Müdürü</td>
+        <td style="text-align:center"><strong>${officialSignatureName(school.mudur_adi)}</strong><br>Okul Müdürü</td>
       </tr></table>
     `,
   },
@@ -1209,14 +1350,14 @@ const EVRAK_TEMPLATES = [
       { id: "tarih", label: "Tarih", type: "date" },
       { id: "gorevler", label: "Görevler (her satıra bir madde)", type: "textarea" },
     ],
+    meta: (d) => ({ konu: `Görev Dağılımı (${d.md_yrd_adi || "-"})`, tarih: d.tarih }),
     render: (d, school) => `
-      <p style="text-align:right">${esc(school.il)}, ${fmtDate(d.tarih)}</p>
-      <h3 style="text-align:center;text-decoration:underline">GÖREV DAĞILIMI YAZISI</h3>
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">GÖREV DAĞILIMI YAZISI</h3>
       <p><strong>Sayın:</strong> ${esc(d.md_yrd_adi)}</p>
-      <p style="text-align:justify">Okulumuzun idari işlerinin düzenli yürütülmesi amacıyla, aşağıda belirtilen görevlerin tarafınızca yerine getirilmesi hususunu bilgilerinize sunarım.</p>
+      <p style="text-align:justify;text-indent:1.25cm">Okulumuzun idari işlerinin düzenli yürütülmesi amacıyla, aşağıda belirtilen görevlerin tarafınızca yerine getirilmesi hususunu bilgilerinize sunarım.</p>
       <ol style="text-align:justify">${linesToList(d.gorevler)}</ol>
       <table style="width:100%;margin-top:50px"><tr>
-        <td style="text-align:center"><strong>${esc(school.mudur_adi || "……………………")}</strong><br>Okul Müdürü</td>
+        <td style="text-align:center"><strong>${officialSignatureName(school.mudur_adi)}</strong><br>Okul Müdürü</td>
       </tr></table>
     `,
   },
@@ -1229,15 +1370,15 @@ const EVRAK_TEMPLATES = [
       { id: "tarih", label: "Tarih", type: "date" },
       { id: "maddeler", label: "Talimat maddeleri (her satıra bir madde)", type: "textarea" },
     ],
+    meta: (d) => ({ konu: `Nöbetçi Öğretmen Görev Talimatnamesi (${d.donem_adi || "-"})`, tarih: d.tarih }),
     render: (d, school) => `
-      <p style="text-align:right">${esc(school.il)}, ${fmtDate(d.tarih)}</p>
-      <h3 style="text-align:center;text-decoration:underline">NÖBETÇİ ÖĞRETMEN GÖREV TALİMATNAMESİ</h3>
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">NÖBETÇİ ÖĞRETMEN GÖREV TALİMATNAMESİ</h3>
       <p><strong>Dönem:</strong> ${esc(d.donem_adi)}</p>
-      <p style="text-align:justify">Nöbetçi öğretmenler, nöbet süresince aşağıda belirtilen hususlara uymakla yükümlüdür:</p>
+      <p style="text-align:justify;text-indent:1.25cm">Nöbetçi öğretmenler, nöbet süresince aşağıda belirtilen hususlara uymakla yükümlüdür:</p>
       <ol style="text-align:justify">${linesToList(d.maddeler)}</ol>
-      <p style="margin-top:20px">İş bu talimatname öğretmenler kurulunda görüşülerek yürürlüğe girmiştir.</p>
+      <p style="margin-top:20px;text-align:justify;text-indent:1.25cm">İş bu talimatname öğretmenler kurulunda görüşülerek yürürlüğe girmiştir.</p>
       <table style="width:100%;margin-top:40px"><tr>
-        <td style="text-align:center"><strong>${esc(school.mudur_adi || "……………………")}</strong><br>Okul Müdürü</td>
+        <td style="text-align:center"><strong>${officialSignatureName(school.mudur_adi)}</strong><br>Okul Müdürü</td>
       </tr></table>
     `,
   },
@@ -1251,10 +1392,10 @@ const EVRAK_TEMPLATES = [
       { id: "devir_tarihi", label: "Devir tarihi", type: "date" },
       { id: "kalemler", label: "Devredilen hususlar (her satıra bir madde)", type: "textarea" },
     ],
+    meta: (d) => ({ konu: "Müdür Devir-Teslim Tutanağı", tarih: d.devir_tarihi }),
     render: (d, school) => `
-      <p style="text-align:right">${esc(school.il)}, ${fmtDate(d.devir_tarihi)}</p>
-      <h3 style="text-align:center;text-decoration:underline">MÜDÜR DEVİR-TESLİM TUTANAĞI</h3>
-      <p style="text-align:justify">${esc(school.name)} Müdürlüğü görevi, ${fmtDate(d.devir_tarihi)} tarihi itibarıyla ${esc(d.giden_mudur)}${turkceEk(d.giden_mudur, "den", "dan")} ${esc(d.gelen_mudur)}${turkceEk(d.gelen_mudur, "e", "a", true)} aşağıda belirtilen hususlar çerçevesinde devredilmiştir.</p>
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">MÜDÜR DEVİR-TESLİM TUTANAĞI</h3>
+      <p style="text-align:justify;text-indent:1.25cm">${esc(school.name)} Müdürlüğü görevi, ${fmtDate(d.devir_tarihi)} tarihi itibarıyla ${esc(d.giden_mudur)}${turkceEk(d.giden_mudur, "den", "dan")} ${esc(d.gelen_mudur)}${turkceEk(d.gelen_mudur, "e", "a", true)} aşağıda belirtilen hususlar çerçevesinde devredilmiştir.</p>
       <p><strong>Devredilen Hususlar:</strong></p>
       <ol style="text-align:justify">${linesToList(d.kalemler)}</ol>
       <table style="width:100%;margin-top:50px"><tr>
@@ -1315,7 +1456,7 @@ function renderDocForm(school, key) {
   document.getElementById("doc-gen").onclick = () => {
     const data = {};
     tpl.fields.forEach(f => data[f.id] = document.getElementById("f-" + f.id).value);
-    const fullHtml = docWrapper(school, tpl.render(data, school));
+    const fullHtml = docWrapper(school, tpl.render(data, school), tpl.meta ? tpl.meta(data) : {});
     const preview = document.getElementById("doc-preview");
     preview.innerHTML = `
       <div style="border:1px solid var(--line);border-radius:8px;overflow:hidden">
@@ -4769,6 +4910,7 @@ const KILAVUZ_SECTIONS = [
   ` },
   { id: "evrak", title: "Evrak Deposu", html: `
     <p>5 hazır şablon var: Tebliğ-Tebellüğ Belgesi, Öğretmenler Kurulu Toplantı Tutanağı, Müdür Yardımcısı Görev Dağılımı, Nöbetçi Öğretmen Talimatnamesi, Müdür Devir-Teslim Tutanağı. Formu doldur, "Belgeyi Oluştur" — okul/müdür bilgisi otomatik dolar, resmî yazışma formatında önizleme çıkar. "Yazdır" ya da "Word olarak indir" ile kullanabilirsin.</p>
+    <p>Sayfa düzeni, yazı tipi/punto, başlık, Sayı/Tarih/Konu yerleşimi ve imza bloğu <strong>Resmî Yazışmalarda Uygulanacak Usul ve Esaslar Hakkında Yönetmelik</strong>e (RG: 10/6/2020-31151) uygun kuruldu. Tek istisna: <strong>"Sayı:"</strong> alanı bilerek boş bırakılıyor — gerçek kayıt numarası ancak okulunun kendi resmî yazışma sistemi (EBYS/kurumsal kayıt defteri) üzerinden alınabilir, bu panel onu uyduramaz; belgeyi resmîleştirirken bu alanı elle doldurman gerekir.</p>
   ` },
   { id: "teftis", title: "Teftişe Hazırlık", html: `
     <p>Kategori bazlı, işaretlenebilir bir kontrol listesi. Her maddede varsa <strong>resmî dayanak</strong> (kanun/yönetmelik) ve sahadan gelen <strong>pratik not</strong> ayrı ayrı tutulur. Liste boşsa "Doğrulanmış örnek maddeler" seed butonuyla gerçek mevzuata dayalı bir başlangıç seti eklenebilir. Kendi maddeni eklerken emin olmadığın resmî dayanağı boş bırak — uydurma girme.</p>
