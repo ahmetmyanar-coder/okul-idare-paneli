@@ -1726,7 +1726,7 @@ async function renderSchedule(profile, school, period, area, devretId = null, ge
         </div>
         <button class="primary" id="gen-btn" style="margin:0;width:auto;padding:10px 18px">${assignments?.length ? "Yeniden Oluştur" : "Çizelge Oluştur"}</button>
       </div>
-      <p style="color:var(--muted);font-size:11.5px;margin:6px 0 0">Yeniden oluşturma, "Devret" ile sabitlenmiş atamaları korur.</p>
+      <p style="color:var(--muted);font-size:11.5px;margin:6px 0 0">Yeniden oluşturma, "Devret" ile sabitlenmiş atamaları korur. Ders Dağıtım Programı'nda haftanın bazı günlerinde hiç dersi olmayan öğretmenler o günlere otomatik nöbetçi yazılmaz (ders programı hiç girilmemişse bu kısıt uygulanmaz).</p>
       <div id="gen-msg"></div>
     </div>
     ${summaryRows.length ? `
@@ -1805,11 +1805,38 @@ async function renderSchedule(profile, school, period, area, devretId = null, ge
   }
 }
 
+/**
+ * Ders Dağıtım Programı'ndan öğretmenin hangi haftaiçi günlerde hiç dersi olmadığını çıkarır
+ * (day_of_week: 1=Pazartesi…5=Cuma, DERS_DAYS ile aynı kural). Yalnızca ders programında EN AZ
+ * BİR kaydı bulunan öğretmenler için "o gün yok" sayılır — ders programı hiç girilmemiş bir
+ * öğretmen (örn. henüz atanmamış, idareci) eski davranışta kalır (her gün uygun kabul edilir);
+ * aksi halde ders programını hiç kullanmayan okullarda tüm öğretmenler yanlışlıkla her günden
+ * "yok" sayılırdı.
+ */
+function lessonDayIndex(rows) {
+  const daysByTeacher = {};
+  (rows || []).forEach(r => {
+    if (!r.teacher_id) return;
+    (daysByTeacher[r.teacher_id] ??= new Set()).add(r.day_of_week);
+  });
+  return {
+    hasNoLessonThatDay(teacherId, dow) {
+      const days = daysByTeacher[teacherId];
+      return !!days && !days.has(dow);
+    },
+  };
+}
+
 async function suggestSubstitute(school, assignments, target) {
-  const { data: teachers } = await sb.from("teachers").select("*").eq("school_id", school.id);
+  const [{ data: teachers }, { data: lessonRows }] = await Promise.all([
+    sb.from("teachers").select("*").eq("school_id", school.id),
+    sb.from("lesson_assignments").select("teacher_id, day_of_week").eq("school_id", school.id),
+  ]);
   const { data: blocked } = await sb.from("teacher_blocked_areas").select("*").in("teacher_id", (teachers || []).map(t => t.id).length ? (teachers || []).map(t => t.id) : ["00000000-0000-0000-0000-000000000000"]);
   const blockedByTeacher = {};
   (blocked || []).forEach(b => { (blockedByTeacher[b.teacher_id] ??= new Set()).add(b.duty_area_id); });
+  const availability = lessonDayIndex(lessonRows);
+  const targetDow = new Date(target.duty_date + "T00:00:00").getDay();
 
   function isExempt(t, date) {
     if (t.pregnancy_exempt_until && date <= t.pregnancy_exempt_until) return true;
@@ -1833,6 +1860,7 @@ async function suggestSubstitute(school, assignments, target) {
     if (t.id === target.teacher_id) return false;
     if (isExempt(t, target.duty_date)) return false;
     if (blockedByTeacher[t.id]?.has(target.duty_area_id)) return false;
+    if (availability.hasNoLessonThatDay(t.id, targetDow)) return false;
     const wk = weekCountByTeacher[t.id + "|" + weekKeyOf(target.duty_date)] || 0;
     if (wk >= (t.weekly_duty_quota || 2)) return false;
     return true;
@@ -1865,11 +1893,12 @@ function weekKeyOf(dateStr) {
 async function generateSchedule(school, period) {
   await sb.from("duty_assignments").delete().eq("duty_period_id", period.id).eq("is_pinned", false);
 
-  const [{ data: teachers }, { data: slots }, { data: areas }, { data: existing }] = await Promise.all([
+  const [{ data: teachers }, { data: slots }, { data: areas }, { data: existing }, { data: lessonRows }] = await Promise.all([
     sb.from("teachers").select("*").eq("school_id", school.id),
     sb.from("duty_time_slots").select("*").eq("school_id", school.id).order("sort_order"),
     sb.from("duty_areas").select("*").eq("school_id", school.id).order("sort_order"),
     sb.from("duty_assignments").select("*").eq("duty_period_id", period.id),
+    sb.from("lesson_assignments").select("teacher_id, day_of_week").eq("school_id", school.id),
   ]);
   const { data: blocked } = await sb.from("teacher_blocked_areas").select("*").in("teacher_id", (teachers || []).map(t => t.id).length ? (teachers || []).map(t => t.id) : ["00000000-0000-0000-0000-000000000000"]);
 
@@ -1879,6 +1908,7 @@ async function generateSchedule(school, period) {
 
   const blockedByTeacher = {};
   (blocked || []).forEach(b => { (blockedByTeacher[b.teacher_id] ??= new Set()).add(b.duty_area_id); });
+  const availability = lessonDayIndex(lessonRows);
 
   const pinned = (existing || []).filter(a => a.is_pinned);
   const pinnedKeys = new Set(pinned.map(a => `${a.duty_date}|${a.time_slot_id}|${a.duty_area_id}`));
@@ -1892,12 +1922,13 @@ async function generateSchedule(school, period) {
 
   const holidaySet = new Set(period.holiday_dates || []);
   const days = [];
+  const dowByDate = {};
   let d = new Date(period.starts_on + "T00:00:00");
   const end = new Date(period.ends_on + "T00:00:00");
   while (d <= end) {
     const iso = toLocalISO(d);
     const dow = d.getDay();
-    if (dow !== 0 && dow !== 6 && !holidaySet.has(iso)) days.push(iso);
+    if (dow !== 0 && dow !== 6 && !holidaySet.has(iso)) { days.push(iso); dowByDate[iso] = dow; }
     d.setDate(d.getDate() + 1);
   }
 
@@ -1916,6 +1947,7 @@ async function generateSchedule(school, period) {
   const newRows = [];
   const unfilledByDate = {};
   for (const date of days) {
+    const dow = dowByDate[date];
     for (const slot of slots) {
       for (const ar of areas) {
         const key = `${date}|${slot.id}|${ar.id}`;
@@ -1924,6 +1956,7 @@ async function generateSchedule(school, period) {
         let pool = teachers.filter(t => {
           if (isExempt(t, date)) return false;
           if (blockedByTeacher[t.id]?.has(ar.id)) return false;
+          if (availability.hasNoLessonThatDay(t.id, dow)) return false;
           const wk = weekCountByTeacher[t.id + "|" + weekKeyOf(date)] || 0;
           if (wk >= (t.weekly_duty_quota || 2)) return false;
           return true;
@@ -4706,6 +4739,8 @@ const KILAVUZ_SECTIONS = [
     <p>Bu ekran panelin genelinde kullanılan <strong>tek öğretmen kaynağıdır</strong> — Planlama İşleri, Talep Takibi, LGS Koçluk ve Ders Dağıtımı hep buradan beslenir, başka hiçbir yerde ayrı bir "öğretmen ekle" formu yoktur. Kıdem/hamilelik/engellilik muafiyetleri ve yasaklı alanlar da burada işaretlenir; sistem çizelgeyi oluştururken bunlara otomatik uyar.</p>
     <h4>Dönem &amp; Çizelge</h4>
     <p>Bir dönem (tarih aralığı + tatil günleri) oluştur, "Çizelge Oluştur" bas — dönüşümlü/dengeli dağıtım otomatik yapılır, muafiyetler ve yasaklı alanlar ihlal edilmez. Kota nedeniyle boş kalan slotlar "Eksik Kapsama" uyarısıyla ayrıca gösterilir. İzinli/raporlu bir öğretmenin yerine "Devret" ile en az nöbeti olan uygun öğretmen otomatik önerilir.</p>
+    <h4>Ders Dağıtım Programı ile bağlantı</h4>
+    <p>Ders Dağıtım Programı'nda bir öğretmenin haftanın belirli günlerinde hiç dersi yoksa (o gün okulda değilse), hem "Çizelge Oluştur" hem de "Devret" o öğretmeni o güne otomatik nöbetçi yazmaz — bu, elle "yasaklı alan" girmeye gerek kalmadan ders programından otomatik çekilir. Bir öğretmenin ders programında hiç kaydı yoksa (örn. idareci ya da program henüz girilmemiş) bu kısıt uygulanmaz, öğretmen her gün için normal şekilde uygun kabul edilir.</p>
     <h4>İdareci Nöbeti</h4>
     <p>Müdür yardımcıları arası nöbet/izin takibi — mevzuatta paylaşıma dair açık hüküm olmadığı için tamamen idarenin takdirine bırakılmış, ayrı bir kayıt defteri.</p>
     <p>Her satırda 📲 ile ilgili öğretmene WhatsApp üzerinden doğrudan bildirim gönderebilirsin.</p>
@@ -4786,6 +4821,7 @@ const SSS_ITEMS = [
   { cat: "Nöbet Programı", q: "Nöbet çizelgesinde bazı hücreler boş kalıyor, bu bir hata mı?", a: `Hayır. Öğretmenlerin haftalık kotası dolduğunda sistem kota ihlali yapmamak için o slotu bilerek boş bırakır ve ekranda "Eksik Kapsama" uyarısıyla hangi gün/alanların boş kaldığını ayrıca gösterir.` },
   { cat: "Nöbet Programı", q: "İzinli/raporlu bir öğretmenin nöbetini nasıl devrederim?", a: `Çizelgedeki ilgili satırda "Devret" butonuna bas, sebebi seç — sistem en az nöbeti olan uygun (muafiyeti/yasaklı alanı çakışmayan) öğretmeni otomatik önerir, onaylarsın.` },
   { cat: "Nöbet Programı", q: "Kıdem/hamilelik/engellilik muafiyeti otomatik mi uygulanıyor?", a: `Hamilelik ve engellilik muafiyeti zorunlu olduğu için çizelgeye otomatik yansır. Kıdem muafiyeti ise mevzuata göre talebe bağlı olduğundan, öğretmen kaydında elle işaretlenmesi gerekir — sistem sadece eşiği dolduranları hatırlatır.` },
+  { cat: "Nöbet Programı", q: "Bir öğretmenin haftanın bazı günleri dersi yoksa, o günlere nöbet yazılmasını nasıl engellerim?", a: `Elle bir şey yapmana gerek yok. Ders Dağıtım Programı'nda o öğretmenin hangi günlerde hiç dersi olmadığı otomatik tespit edilir; hem "Çizelge Oluştur" hem de "Devret" o öğretmeni o günlere nöbetçi yazmaz. Bu kısıt yalnızca Ders Dağıtım Programı'nda en az bir kaydı olan öğretmenler için geçerlidir — programı hiç girilmemiş bir öğretmen (örn. idareci) her gün için normal şekilde uygun sayılmaya devam eder.` },
   { cat: "Personel ve Gizlilik", q: "Personel İşleri'ndeki kayıtlar başka bir bilgisayarda neden görünmüyor?", a: `Bu modül bilinçli bir tasarım kararıyla verisini sadece o cihazda/tarayıcıda tutar, sunucuya hiç göndermez (maaş, terfi, devam gibi hassas veri olduğu için). Aynı durum Sınav Kelebek için de geçerlidir.` },
   { cat: "Mevzuata Sor", q: "Mevzuata Sor bir soruya cevap bulamadı, neden?", a: `Bu araç yapay zekâ değildir ve internetten cevap üretmez — sadece Teftişe Hazırlık ve Aylık Yönetim Akışı'na senin daha önce girdiğin doğrulanmış maddeler arasında arama yapar. Sonuç yoksa önce ilgili maddeyi oraya eklemen gerekir.` },
   { cat: "Okul Panosu", q: "Okul Panosu'na eklediğim içerik neden koridordaki ekranda görünmüyor?", a: `Yeni içerik önce "taslak" olarak kaydedilir, ekranda görünmez. Listeden ilgili içeriğin yanındaki "Yayınla" butonuna basman gerekir.` },
