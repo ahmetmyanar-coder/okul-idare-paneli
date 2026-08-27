@@ -66,6 +66,8 @@
   .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
   .who { font-size: 13px; color: var(--muted); }
   .who strong { color: var(--ink); }
+  .account-line { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .account-email { color: var(--ink-faint, var(--muted)); }
   .signout { font-size: 12.5px; color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
 
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -100,11 +102,25 @@
   .list-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
   .list-item:last-child { border-bottom: none; }
   .table-wrap { overflow-x: auto; }
-  .date3 { display: flex; align-items: center; gap: 4px; }
+  .date3 { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
   .date3 input { width: auto; text-align: center; padding: 8px 2px; -moz-appearance: textfield; }
   .date3 input.d3-day, .date3 input.d3-month { width: 2.5em; }
   .date3 input.d3-year { width: 4em; }
   .date3 .d3-sep { color: var(--muted); font-size: 13px; }
+  .guide-content h4 { margin: 22px 0 6px; font-size: 15px; color: var(--ink); }
+  .guide-content h4:first-child { margin-top: 0; }
+  .guide-content p, .guide-content ul, .guide-content ol { margin: 0 0 10px; font-size: 13.5px; color: var(--ink-soft); line-height: 1.65; }
+  .guide-content ul, .guide-content ol { padding-left: 20px; }
+  .guide-content li { margin-bottom: 4px; }
+  .guide-content strong { color: var(--ink); }
+  .faq-item { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+  .faq-item summary { padding: 12px 14px; font-size: 13.5px; font-weight: 600; cursor: pointer; color: var(--ink); list-style: none; }
+  .faq-item summary::-webkit-details-marker { display: none; }
+  .faq-item summary::before { content: "▸ "; color: var(--accent); }
+  .faq-item[open] summary::before { content: "▾ "; }
+  .faq-item .faq-answer { padding: 0 14px 14px; font-size: 13.5px; color: var(--ink-soft); line-height: 1.6; }
+  .faq-cat { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 0 8px; }
+  .faq-cat:first-child { margin-top: 0; }
 </style>
 </head>
 <body>
@@ -132,6 +148,8 @@ const MODULES = [
   { name: "Talep Takibi", desc: "Öğretmenlerden gelen talep/bildirimleri kaydet, durumunu takip et." },
   { name: "Planlama İşleri", desc: "Kurul, komisyon ve kulüplerin üye listesi ve toplantı/faaliyet kayıtları." },
   { name: "Okul Panosu", desc: "Koridor ekranı için duyuru, medya ve pekiştireç (ayın öğrencisi vb.) yönetimi." },
+  { name: "Kullanma Kılavuzu", desc: "Her modülün nasıl kullanılacağı, adım adım." },
+  { name: "Sıkça Sorulan Sorular", desc: "Aranabilir soru-cevap listesi." },
   { name: "LGS Koçluk", desc: "8. sınıf öğrenci havuzu, deneme sınavı takibi, ders bazlı zayıflık analizi." },
 ];
 
@@ -232,7 +250,8 @@ function renderTeacherDashboard(profile, school) {
       <div class="topbar">
         <div>
           <div class="eyebrow">Okul İdare Paneli</div>
-          <div class="who"><strong>${esc(school.name)}</strong> · ${esc(profile.full_name || "Öğretmen")}</div>
+          <div class="who"><strong>${esc(school.name)}</strong></div>
+          ${accountLineHtml(profile)}
         </div>
         <button class="signout" id="signout">Çıkış yap</button>
       </div>
@@ -319,6 +338,18 @@ function renderSchoolSetup(user) {
   };
 }
 
+const ROLE_LABELS = { mudur: "Müdür", mudur_yardimcisi: "Müdür Yardımcısı", ogretmen: "Öğretmen (Koç)" };
+
+function accountLineHtml(profile) {
+  return `
+    <div class="account-line">
+      <span class="pill">${esc(ROLE_LABELS[profile.role] || profile.role)}</span>
+      <span>${esc(profile.full_name || "İsimsiz hesap")}</span>
+      ${profile.email ? `<span class="account-email">${esc(profile.email)}</span>` : ""}
+    </div>
+  `;
+}
+
 function renderDashboard(profile, school) {
   app.innerHTML = `
     <div class="wrap dash">
@@ -326,6 +357,7 @@ function renderDashboard(profile, school) {
         <div>
           <div class="eyebrow">Okul İdare Paneli</div>
           <div class="who"><strong>${esc(school.name)}</strong> · ${esc(school.il)}/${esc(school.ilce)}</div>
+          ${accountLineHtml(profile)}
         </div>
         <button class="signout" id="signout">Çıkış yap</button>
       </div>
@@ -365,6 +397,10 @@ function renderDashboard(profile, school) {
   if (planlamaCard) planlamaCard.onclick = () => renderPlanlamaModule(profile, school);
   const panoCard = document.querySelector('[data-mod="Okul Panosu"]');
   if (panoCard) panoCard.onclick = () => renderPanoModule(profile, school);
+  const kilavuzCard = document.querySelector('[data-mod="Kullanma Kılavuzu"]');
+  if (kilavuzCard) kilavuzCard.onclick = () => renderKilavuzModule(profile, school);
+  const sssCard = document.querySelector('[data-mod="Sıkça Sorulan Sorular"]');
+  if (sssCard) sssCard.onclick = () => renderSSSModule(profile, school);
   const lgsCard = document.querySelector('[data-mod="LGS Koçluk"]');
   if (lgsCard) lgsCard.onclick = () => renderLgsModule(profile, school, "ogrenciler");
 }
@@ -1397,7 +1433,7 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
       </select>
       <label>İşe başlama tarihi</label>
       ${dateInputHtml("t-hire", editTeacher?.hire_date || "")}
-      <div id="t-kidem-hint" style="font-size:11.5px;color:var(--muted);margin:-8px 0 12px"></div>
+      <div id="t-kidem-hint" style="font-size:11.5px;color:var(--muted);margin:6px 0 12px"></div>
       <div class="check-row"><input type="checkbox" id="t-seniority" ${editTeacher?.seniority_waiver_requested ? "checked" : ""}><label for="t-seniority">Kıdem muafiyeti talep etti (kadın 20 / erkek 25 yıl doldu, istemiyor)</label></div>
       <label>Hamilelik muafiyeti bitiş tarihi <span style="color:var(--muted);font-weight:400">(boş bırak, yoksa)</span></label>
       ${dateInputHtml("t-pregnancy", editTeacher?.pregnancy_exempt_until || "")}
@@ -4621,6 +4657,155 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
   });
 }
 
+/* ============ KULLANMA KILAVUZU ============ */
+
+const KILAVUZ_SECTIONS = [
+  { id: "giris", title: "Giriş ve Roller", html: `
+    <h4>İki tip kullanıcı</h4>
+    <p>Panelde iki hesap türü var: <strong>İdareci</strong> (müdür / müdür yardımcısı) ve <strong>Öğretmen</strong>. İdareci panelin tamamını görür; öğretmen sadece LGS Koçluk'u ve orada da yalnızca kendisine atanmış öğrencileri görür.</p>
+    <h4>İlk hesabı açmak (idareci)</h4>
+    <p>"Üye ol" ile e-posta/şifre girip okul bilgisini (ad, il, ilçe, müdür adı, okul türü) doldurursun. Bu, okulun panel üzerindeki tek kaydını oluşturur.</p>
+    <h4>Öğretmen hesabı nasıl açılır</h4>
+    <ol>
+      <li><strong>Nöbet Programı → Öğretmenler</strong>'de ilgili öğretmenin satırında "Davet Kodu Oluştur"a bas.</li>
+      <li>Çıkan kodu ya da linki öğretmene gönder (WhatsApp uygun).</li>
+      <li>Öğretmen "Üye ol" ekranında kodu girer (linke tıklarsa otomatik dolar) — üye olunca doğrudan kendi öğretmen kaydına bağlanır.</li>
+    </ol>
+    <p>Kod tek kullanımlıktır, kullanılınca kaybolur. Yanlış kişiye gittiyse ya da kaybolduysa aynı ekrandan yeni bir kod üretebilirsin, eskisi geçersiz olur.</p>
+  ` },
+  { id: "nobet", title: "Nöbet Programı", html: `
+    <h4>Ayarlar</h4>
+    <p>Gün içindeki nöbet <strong>zaman dilimlerini</strong> (Sabah Girişi, Teneffüs vb.) ve nöbet tutulan sabit <strong>alanları</strong> (1. Kat, Bahçe, Yemekhane vb.) burada tanımlarsın.</p>
+    <h4>Öğretmenler</h4>
+    <p>Bu ekran panelin genelinde kullanılan <strong>tek öğretmen kaynağıdır</strong> — Planlama İşleri, Talep Takibi, LGS Koçluk ve Ders Dağıtımı hep buradan beslenir, başka hiçbir yerde ayrı bir "öğretmen ekle" formu yoktur. Kıdem/hamilelik/engellilik muafiyetleri ve yasaklı alanlar da burada işaretlenir; sistem çizelgeyi oluştururken bunlara otomatik uyar.</p>
+    <h4>Dönem &amp; Çizelge</h4>
+    <p>Bir dönem (tarih aralığı + tatil günleri) oluştur, "Çizelge Oluştur" bas — dönüşümlü/dengeli dağıtım otomatik yapılır, muafiyetler ve yasaklı alanlar ihlal edilmez. Kota nedeniyle boş kalan slotlar "Eksik Kapsama" uyarısıyla ayrıca gösterilir. İzinli/raporlu bir öğretmenin yerine "Devret" ile en az nöbeti olan uygun öğretmen otomatik önerilir.</p>
+    <h4>İdareci Nöbeti</h4>
+    <p>Müdür yardımcıları arası nöbet/izin takibi — mevzuatta paylaşıma dair açık hüküm olmadığı için tamamen idarenin takdirine bırakılmış, ayrı bir kayıt defteri.</p>
+    <p>Her satırda 📲 ile ilgili öğretmene WhatsApp üzerinden doğrudan bildirim gönderebilirsin.</p>
+  ` },
+  { id: "evrak", title: "Evrak Deposu", html: `
+    <p>5 hazır şablon var: Tebliğ-Tebellüğ Belgesi, Öğretmenler Kurulu Toplantı Tutanağı, Müdür Yardımcısı Görev Dağılımı, Nöbetçi Öğretmen Talimatnamesi, Müdür Devir-Teslim Tutanağı. Formu doldur, "Belgeyi Oluştur" — okul/müdür bilgisi otomatik dolar, resmî yazışma formatında önizleme çıkar. "Yazdır" ya da "Word olarak indir" ile kullanabilirsin.</p>
+  ` },
+  { id: "teftis", title: "Teftişe Hazırlık", html: `
+    <p>Kategori bazlı, işaretlenebilir bir kontrol listesi. Her maddede varsa <strong>resmî dayanak</strong> (kanun/yönetmelik) ve sahadan gelen <strong>pratik not</strong> ayrı ayrı tutulur. Liste boşsa "Doğrulanmış örnek maddeler" seed butonuyla gerçek mevzuata dayalı bir başlangıç seti eklenebilir. Kendi maddeni eklerken emin olmadığın resmî dayanağı boş bırak — uydurma girme.</p>
+  ` },
+  { id: "aylik", title: "Aylık Yönetim Akışı", html: `
+    <p>Akademik yıla göre sıralı (Eylül → Ağustos), ay bazlı gruplanmış bir idari görev listesi. İçerik boş başlar, kendi yıllık idari takviminle doldurulur.</p>
+  ` },
+  { id: "personel", title: "Personel İşleri", html: `
+    <p>🔒 <strong>Bu modülün verisi sadece bu tarayıcıda/cihazda saklanır, sunucuya hiç gönderilmez</strong> — maaş, terfi ve devam gibi hassas veri olduğu için bilinçli bir tasarım kararı. Başka bir bilgisayardan girince burayı boş görürsün, bu bir hata değildir.</p>
+    <p>Personel eklerken "Öğretmen listesinden doldur" ile Nöbet Programı'ndaki kayıttan adı/branşı kopyalayabilirsin — yine de veri bu cihazda kalır.</p>
+  ` },
+  { id: "mevzuat", title: "Mevzuata Sor", html: `
+    <p>Teftişe Hazırlık ve Aylık Yönetim Akışı'na <strong>senin girdiğin</strong> doğrulanmış maddeler arasında arama yapar. Yapay zekâ değildir, internetten cevap üretmez, hiçbir şey uydurmaz — sadece kendi girdiğin veriyi arar. Bir konuda sonuç çıkmıyorsa, önce ilgili maddeyi Teftişe Hazırlık'a eklemen gerekir.</p>
+  ` },
+  { id: "ders", title: "Ders Dağıtım Programı", html: `
+    <p><strong>Ayarlar</strong>: dersler, şubeler ve ders saatlerini tanımla. <strong>Atamalar</strong>: hangi öğretmenin hangi sınıfa haftada kaç saat gireceğini gir. <strong>Program</strong>: çakışmasız, dengeli bir haftalık ders programı otomatik üretilir.</p>
+  ` },
+  { id: "kelebek", title: "Sınav Kelebek", html: `
+    <p>🔒 Sadece bu cihazda saklanır. Sınıf/şube gruplarını (öğrenci listeleriyle) gir, oturma planını oluştur — aynı gruptan öğrenciler yan yana, art arda ya da çapraz komşu olmayacak şekilde otomatik dağıtılır.</p>
+  ` },
+  { id: "talep", title: "Talep Takibi", html: `
+    <p>Öğretmenlerden gelen talep/bildirimleri (malzeme, bakım-tamirat, izin, diğer) kaydet, durumunu (bekliyor / işlemde / tamamlandı / reddedildi) güncelle. Talep eden, öğretmen listesinden seçilebilir ya da öğretmen olmayan biri için elle yazılabilir.</p>
+  ` },
+  { id: "planlama", title: "Planlama İşleri", html: `
+    <p>Kurul, komisyon ya da kulüp oluştur; üyelerini öğretmen listesinden seç ya da (veli, öğrenci temsilcisi gibi öğretmen olmayanlar için) elle yaz. Her kurul için ayrı toplantı/faaliyet kaydı (tarih, gündem, kararlar) tutulur.</p>
+  ` },
+  { id: "pano", title: "Okul Panosu", html: `
+    <p>Koridora asılacak ikinci bir ekran için duyuru, medya (fotoğraf/video yükleme ya da YouTube-Vimeo linki) ve pekiştireç (ayın öğrencisi vb.) yönetimi.</p>
+    <ol>
+      <li>"Görüntüleme Linki Oluştur"a bas, çıkan bağlantıyı koridordaki ekranın tarayıcısına <strong>bir kere</strong> yapıştır ve açık bırak — giriş gerekmez.</li>
+      <li>İçerik eklerken tür seç (duyuru/medya/pekiştireç), kaydet — bu, <strong>taslak</strong> olarak kalır, ekranda görünmez.</li>
+      <li>Listeden "Yayınla" demeden hiçbir şey koridorda çıkmaz.</li>
+    </ol>
+    <p>"Canlı Önizleme" ile panelin içinden, gitmeden, ekranda o an ne olduğunu görebilirsin. Altındaki "◀ Önceki" / "Sıradaki ▶" ve her yayındaki içeriğin yanındaki "📺 Şimdi Göster" butonları koridordaki <strong>gerçek ekranı da anında</strong> etkiler. Koridordaki bilgisayarda sağ alttaki ⛶ ikonuyla tarayıcı çubuklarını gizleyip tam ekrana geçebilirsin.</p>
+  ` },
+  { id: "lgs", title: "LGS Koçluk", html: `
+    <p><strong>Öğrenciler</strong>: 8. sınıf öğrenci havuzu — şube ve koç öğretmen ataması. <strong>Dersler</strong>: standart LGS derslerini tek tıkla ekle; isteğe bağlı olarak MEB müfredatındaki konuları da seed'leyebilirsin (bu, deneme sonucunda "hangi konudan hata" etiketlemesi için gerekli). <strong>Denemeler</strong>: öğrenci bazlı hızlı doğru/yanlış/boş girişi, net otomatik hesaplanır.</p>
+    <p><strong>Zayıflık Analizi</strong>: hangi öğrencinin hangi derste (ve konu tanımlıysa hangi konuda) geride olduğunu, grafiklerle ve önceliklendirilmiş listeyle gösterir — naif "en düşük net" değil, son denemelerin ağırlıklı trendi ve dersin LGS'deki soru ağırlığı birlikte hesaba katılır.</p>
+    <p><strong>Haftalık Görevler</strong>: zayıflık analizinden gelen önerileri tek tıkla göreve çevir, koç onay akışıyla takip et. <strong>Veli Bilgilendirme</strong>: tek tıkla, son deneme + öncelik + görev durumunu özetleyen bir WhatsApp mesajı hazırlar. <strong>Kayıt Geçmişi</strong>: kim, ne zaman, neyi değiştirdi. <strong>Müdür Özeti</strong> (sadece idareci): koçsuz/verisiz/telefonsuz öğrenci uyarıları ve koç yükü.</p>
+    <p>Öğretmen hesabıyla girildiğinde bütün bu ekranlar aynen çalışır, sadece veriler o öğretmene atanmış öğrencilerle sınırlıdır.</p>
+  ` },
+];
+
+async function renderKilavuzModule(profile, school, activeId = "giris") {
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Kullanma Kılavuzu</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Her modülün ne işe yaradığı ve nasıl kullanılacağı.</div>
+      <div class="subtabs" style="flex-wrap:wrap">
+        ${KILAVUZ_SECTIONS.map(s => `<div class="subtab ${activeId === s.id ? "active" : ""}" data-kilavuz-section="${s.id}">${s.title}</div>`).join("")}
+      </div>
+      <div class="card guide-content" id="kilavuz-content"></div>
+      <button class="secondary" id="kilavuz-print" style="margin-top:14px">Yazdır</button>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  const section = KILAVUZ_SECTIONS.find(s => s.id === activeId) || KILAVUZ_SECTIONS[0];
+  document.getElementById("kilavuz-content").innerHTML = `<h4>${esc(section.title)}</h4>${section.html}`;
+  document.querySelectorAll("[data-kilavuz-section]").forEach(el => el.onclick = () => renderKilavuzModule(profile, school, el.dataset.kilavuzSection));
+  document.getElementById("kilavuz-print").onclick = () => window.print();
+}
+
+/* ============ SIKÇA SORULAN SORULAR ============ */
+
+const SSS_ITEMS = [
+  { cat: "Giriş ve Roller", q: "Öğretmen hesabını nasıl açarım?", a: `Nöbet Programı → Öğretmenler'de ilgili satırda "Davet Kodu Oluştur"a bas, çıkan kodu/linki öğretmene gönder. Öğretmen "Üye ol" ekranında bu kodu girer.` },
+  { cat: "Giriş ve Roller", q: "Davet kodunu kaybettim ya da yanlış kişiye gönderdim, ne yapmalıyım?", a: `Aynı ekrandan "Yeni Kod" oluştur — eskisi otomatik geçersiz olur.` },
+  { cat: "Giriş ve Roller", q: "Öğretmen panelde neleri görebilir?", a: `Sadece LGS Koçluk'u, orada da yalnızca kendisine koç olarak atanmış öğrencileri. Nöbet, evrak, personel gibi diğer modüllere erişimi yoktur.` },
+  { cat: "Giriş ve Roller", q: "Birden fazla idareci (müdür + müdür yardımcısı) aynı okulu birlikte yönetebilir mi?", a: `Şu an için panel her okulda tek idareci hesabı (okulu ilk kuran kişi) üzerinden çalışıyor — öğretmenlerdeki gibi bir "idareci davet kodu" henüz yok. İkinci bir idareci için ayrı bir çözüm istersen bunu ayrıca değerlendirebiliriz.` },
+  { cat: "Nöbet Programı", q: "Nöbet çizelgesinde bazı hücreler boş kalıyor, bu bir hata mı?", a: `Hayır. Öğretmenlerin haftalık kotası dolduğunda sistem kota ihlali yapmamak için o slotu bilerek boş bırakır ve ekranda "Eksik Kapsama" uyarısıyla hangi gün/alanların boş kaldığını ayrıca gösterir.` },
+  { cat: "Nöbet Programı", q: "İzinli/raporlu bir öğretmenin nöbetini nasıl devrederim?", a: `Çizelgedeki ilgili satırda "Devret" butonuna bas, sebebi seç — sistem en az nöbeti olan uygun (muafiyeti/yasaklı alanı çakışmayan) öğretmeni otomatik önerir, onaylarsın.` },
+  { cat: "Nöbet Programı", q: "Kıdem/hamilelik/engellilik muafiyeti otomatik mi uygulanıyor?", a: `Hamilelik ve engellilik muafiyeti zorunlu olduğu için çizelgeye otomatik yansır. Kıdem muafiyeti ise mevzuata göre talebe bağlı olduğundan, öğretmen kaydında elle işaretlenmesi gerekir — sistem sadece eşiği dolduranları hatırlatır.` },
+  { cat: "Personel ve Gizlilik", q: "Personel İşleri'ndeki kayıtlar başka bir bilgisayarda neden görünmüyor?", a: `Bu modül bilinçli bir tasarım kararıyla verisini sadece o cihazda/tarayıcıda tutar, sunucuya hiç göndermez (maaş, terfi, devam gibi hassas veri olduğu için). Aynı durum Sınav Kelebek için de geçerlidir.` },
+  { cat: "Mevzuata Sor", q: "Mevzuata Sor bir soruya cevap bulamadı, neden?", a: `Bu araç yapay zekâ değildir ve internetten cevap üretmez — sadece Teftişe Hazırlık ve Aylık Yönetim Akışı'na senin daha önce girdiğin doğrulanmış maddeler arasında arama yapar. Sonuç yoksa önce ilgili maddeyi oraya eklemen gerekir.` },
+  { cat: "Okul Panosu", q: "Okul Panosu'na eklediğim içerik neden koridordaki ekranda görünmüyor?", a: `Yeni içerik önce "taslak" olarak kaydedilir, ekranda görünmez. Listeden ilgili içeriğin yanındaki "Yayınla" butonuna basman gerekir.` },
+  { cat: "Okul Panosu", q: "Görüntüleme linkini yanlışlıkla paylaştım / güvenliğinden emin değilim, ne yapmalıyım?", a: `Okul Panosu'nda "Yeniden Oluştur"a bas — yeni bir link üretilir, eskisi anında çalışmaz hale gelir. Koridordaki ekrana yeni linki girmen gerekir.` },
+  { cat: "Okul Panosu", q: "Koridordaki ekranı panelden gerçekten kontrol edebiliyor muyum, yoksa sadece izliyor muyum?", a: `Gerçekten kontrol ediyorsun — "Önceki"/"Sıradaki" ve içerik listesindeki "Şimdi Göster" butonları koridordaki ekranı anında (sayfa yenilenmeden) değiştirir, sadece bir önizleme değildir.` },
+  { cat: "LGS Koçluk", q: "\"Hedef puan\" alanı neden net'ten otomatik hesaplanmıyor?", a: `LGS puanı, o yılki tüm Türkiye kohortunun performansına göre hesaplanan göreli/istatistiksel bir puandır; ÖSYM/MEB resmî bir "net → puan" formülü yayımlamaz. Bu yüzden sistem uydurmak yerine sadece ham net'i takip eder, hedef puanı kendi tecrübenle girersin.` },
+  { cat: "LGS Koçluk", q: "Zayıflık Analizi'ndeki \"öncelik skoru\" nasıl hesaplanıyor?", a: `Ham "en düşük net" sıralaması değildir — son denemelerin yakınlık ağırlıklı trendi ile dersin (ya da tanımlıysa konunun) LGS'deki soru ağırlığı birlikte hesaba katılır. Az soru gelen bir ders, çok soru gelen bir dersin önüne geçemez.` },
+  { cat: "LGS Koçluk", q: "Konu bazlı hata etiketlemesi zorunlu mu?", a: `Hayır, tamamen opsiyoneldir. Konu tanımlamazsan sistem ders bazlı çalışmaya devam eder; tanımlarsan Zayıflık Analizi ve Haftalık Görevler'deki öneriler konu seviyesinde daha spesifik hale gelir (ör. "Matematik çalış" yerine "Kesirler çalış").` },
+  { cat: "LGS Koçluk", q: "Kayıt Geçmişi'ni kim görebilir?", a: `İdareci okul genelindeki tüm değişiklikleri, öğretmen ise sadece kendi yaptığı işlemleri görür.` },
+  { cat: "Genel", q: "Bir öğrenciyi/dersi/denemeyi silme yetkisi kimde?", a: `Kalıcı/idari işlemler (ekleme, silme, ders/deneme tanımlama) sadece idareciye açıktır. Öğretmen kendi öğrencisinin bazı bilgilerini güncelleyebilir ama silemez, yeni öğrenci ekleyemez.` },
+  { cat: "Genel", q: "Girdiğim veriler nerede saklanıyor, güvenli mi?", a: `Akademik/idari veriler (öğrenci, deneme, nöbet, evrak vb.) Supabase üzerinde, okul bazlı izole (başka bir okulun verisi hiçbir şekilde görünmez) şekilde saklanır. Hassas kabul edilen Personel İşleri ve Sınav Kelebek ise hiç sunucuya gitmez, sadece kullandığın cihazda kalır.` },
+];
+
+async function renderSSSModule(profile, school, filterText = "") {
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Sıkça Sorulan Sorular</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Aramak istediğin kelimeyi yaz, ya da aşağıdan gezin.</div>
+      <input id="sss-search" placeholder="örn. davet kodu, personel, önizleme…" value="${esc(filterText)}" style="margin-bottom:18px">
+      <div id="sss-list"></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+
+  function renderList(filter) {
+    const needle = filter.trim().toLocaleLowerCase("tr-TR");
+    const filtered = SSS_ITEMS.filter(item => !needle || (item.q + " " + item.a).toLocaleLowerCase("tr-TR").includes(needle));
+    const byCat = {};
+    filtered.forEach(item => (byCat[item.cat] ??= []).push(item));
+    const listEl = document.getElementById("sss-list");
+    listEl.innerHTML = Object.keys(byCat).length ? Object.entries(byCat).map(([cat, items]) => `
+      <div class="faq-cat">${esc(cat)}</div>
+      ${items.map(item => `
+        <details class="faq-item">
+          <summary>${esc(item.q)}</summary>
+          <div class="faq-answer">${item.a}</div>
+        </details>
+      `).join("")}
+    `).join("") : `<p style="color:var(--muted)">Bu aramayla eşleşen soru bulunamadı.</p>`;
+  }
+  renderList(filterText);
+  document.getElementById("sss-search").oninput = (ev) => renderList(ev.target.value);
+}
+
 async function boot() {
   app.innerHTML = "";
   const { data: { user } } = await sb.auth.getUser();
@@ -4648,6 +4833,7 @@ async function boot() {
     renderSchoolSetup(user);
     return;
   }
+  profile.email = user.email;
   if (profile.role === "ogretmen") {
     renderTeacherDashboard(profile, profile.schools);
     return;
