@@ -1,0 +1,172 @@
+{
+  "meta": {
+    "name": "Okul İdare Paneli — Design DNA",
+    "description": "Mevcut uygulamanın :root token'ları ve global bileşen CSS'inden (index.html satır 7-124) doğrudan koddan ölçülerek çıkarılmış tasarım DNA'sı. Hex değerleri tahmin edilmedi, kaynak koddan birebir okundu.",
+    "source_references": ["index.html :root (light + dark) — satır 7-29", "global component classes — satır 30-124"],
+    "created_at": "2026-08-29"
+  },
+  "design_system": {
+    "color": {
+      "palette_type": "accented-neutral (sıcak nötr + tek vurgu rengi, complementary/triadic değil)",
+      "primary": { "hex": "#211c17", "role": "ana metin (ink), koyu sıcak antrasit — saf siyah değil" },
+      "secondary": { "hex": "#4a4238", "role": "ikincil metin (ink-soft)" },
+      "accent": { "hex": "#1f6b65", "role": "vurgu/CTA — koyu çam yeşili/teal, kurumsal ve güvenilir" },
+      "neutral": {
+        "scale": ["#f6f3ec", "#ffffff", "#efe9dd", "#e2dac9", "#cdc0a4", "#7d7365", "#4a4238", "#211c17"],
+        "usage": "paper(bg)→surface(kart)→surface-2(gömme)→line→line-strong→muted(metin)→ink-soft→ink(en koyu metin), açıktan koyuya sıralı"
+      },
+      "semantic": { "success": "#2f7d4f", "warning": "#a5690a", "error": "#b3402c", "info": "#1f6b65 (ayrı info rengi yok, accent kullanılıyor)" },
+      "surface": { "background": "#f6f3ec", "card": "#ffffff", "elevated": "#ffffff (aynı, elevation shadow ile ayrışıyor)" },
+      "contrast_strategy": "subtle layers — kağıt tonu arka plan, beyaz kart, ince (1px) çizgilerle katman ayrımı; koyu temada ters çevrilmiş aynı mantık",
+      "measurement": { "method": "source-code (CSS custom properties), not image-measured — deterministic and exact" }
+    },
+    "typography": {
+      "type_scale": {
+        "display": { "size": "n/a (tanımlı değil)" },
+        "heading_1": { "size": "26px", "weight": "700 (h1 varsayılan)", "line_height": "~1.3", "tracking": "-.02em" },
+        "heading_2": { "size": "n/a — ekran bazlı ad hoc (14.5-16px arası)" },
+        "heading_3": { "size": "n/a — ekran bazlı ad hoc" },
+        "body": { "size": "15px", "weight": "400", "line_height": "1.6", "tracking": "0" },
+        "body_small": { "size": "13-14px", "weight": "400-600", "line_height": "~1.5" },
+        "caption": { "size": "10.5-12.5px", "weight": "600-700", "line_height": "~1.4" },
+        "overline": { "size": "11.5px", "weight": "700", "line_height": "1", "tracking": ".08em, uppercase" }
+      },
+      "font_families": {
+        "heading": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif (body ile aynı, ayrı başlık fontu yok)",
+        "body": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+        "mono": "ui-monospace (sadece belge/kod parçalarında ad hoc kullanılıyor, global token değil)"
+      },
+      "font_style_notes": "sistem fontu (SaaS standardı, hızlı yükleme) — geometric/humanist ayrımı yapılamaz çünkü platform fontuna devrediliyor. TESPİT: 10.5/11.5/12.5/13/13.5/14/14.5/15px gibi çok sayıda birbirine çok yakın, sistemsiz boyut var — net bir ölçek disiplini yok."
+    },
+    "spacing": {
+      "base_unit": "~2px artışlarla (2,4,6,8,10,12,14,16,18,20,24) — kabaca tutarlı ama resmi bir token seti yok",
+      "scale": [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 30],
+      "content_density": "comfortable",
+      "section_rhythm": "kart içi 24px padding, kartlar arası 14-16px gap — orta yoğunluk, nefes alan ama sıkışık değil"
+    },
+    "layout": {
+      "grid_system": "tek sütun form (.wrap, 560px) / 2 sütun modül grid (.grid) / geniş veri ekranı (.wrap.wide, 860px)",
+      "max_content_width": "560px (form) / 720px (dashboard) / 860px (wide/data)",
+      "columns": "2 (modül kartları, 560px altında 1'e düşüyor)",
+      "gutter": "14px",
+      "breakpoints": "560px (tek breakpoint, mobile-first değil ama mobile-aware)",
+      "alignment_tendency": "strict grid, ortalanmış (max-width + margin:auto)"
+    },
+    "shape": {
+      "border_radius": { "small": "6px", "medium": "8px", "large": "12px", "pill": "99px" },
+      "border_usage": "subtle 1px — neredeyse her kart/input/buton 1px `--line` ile çevrili",
+      "divider_style": "1px solid --line, tabloda satır altı, list-item'da alt çizgi"
+    },
+    "elevation": {
+      "shadow_style": "soft diffused, TEK seviye (--shadow tek bir değer, tüm bileşenlerde aynı) — hiyerarşi yok",
+      "levels": {
+        "low": "0 1px 2px rgba(ink,.06)",
+        "medium": "0 1px 2px rgba(ink,.06), 0 8px 24px -12px rgba(ink,.18) (mevcut TEK --shadow değeri)",
+        "high": "tanımlı değil — hover/active durumunda hiç artmıyor"
+      },
+      "depth_cues": "shadow + surface rengi katmanlaması (paper→surface→surface-2)"
+    },
+    "iconography": {
+      "style": "yok — panel emoji kullanıyor (📖 ✅ ⏳ 📲 vb.), özel ikon seti yok",
+      "stroke_weight": "n/a",
+      "size_scale": "n/a",
+      "preferred_set": "emoji (sistem)"
+    },
+    "motion": {
+      "easing": "TANIMLI DEĞİL — hiçbir yerde transition yok",
+      "duration_scale": { "micro": "yok", "normal": "yok", "macro": "yok" },
+      "entrance_pattern": "yok (anlık DOM değişimi, animasyonsuz)",
+      "exit_pattern": "yok",
+      "philosophy": "none — TESPİT: bu en büyük eksik. hover/focus durumları anlık/sert değişiyor, hiçbir geçiş yumuşatması yok"
+    },
+    "components": {
+      "button_style": "primary: dolu accent renk + beyaz metin, kalın (700); secondary: surface-2 dolgu + kenarlık; link: metin-only accent renk. HİÇBİRİNDE hover/focus geri bildirimi yok",
+      "input_style": "1px kenarlıklı, paper renginde (sayfa arka planıyla aynı — hafif gömük his), focus'ta sadece kenarlık rengi değişiyor, görünür focus ring YOK (erişilebilirlik eksiği)",
+      "card_style": "beyaz/surface zemin, 1px kenarlık + tek seviye shadow, 12px radius, 24px padding",
+      "navigation_pattern": "üst çubuk (topbar) + geri linki (navlink) + tab/subtab çubukları",
+      "modal_style": "yok (modal kullanılmıyor, hep aynı sayfa içi render)",
+      "list_style": "list-item (flex row, alt çizgi) ve data table (th/td, alt çizgi) karışık kullanılıyor",
+      "component_notes": "genel olarak sağlam ve tutarlı bir temel var (renk token'ları, radius, spacing kabaca disiplinli) ama İKİ SİSTEMİK EKSİK var: (1) hiçbir yerde transition/motion yok, (2) interaktif elemanlarda (buton, chip, tab) hover/focus geri bildirimi eksik ya da minimal. Bunlar 'profesyonelleştirme' için en yüksek etkili, en düşük riskli müdahale noktaları."
+    }
+  },
+  "design_style": {
+    "aesthetic": {
+      "mood": ["ciddi", "güvenilir", "sıcak", "sade", "kurumsal"],
+      "visual_metaphor": "kağıt/defter — 'paper' arka plan tonu, resmi evrak temalı bir okul idare aracı",
+      "era_influence": "modern SaaS (2020'ler) minimalizmi, dekoratif değil",
+      "genre": "kurumsal/B2B SaaS — devlet kurumu ciddiyeti ile modern ürün rahatlığı arası",
+      "personality_traits": ["güvenilir", "mütevazı", "düzenli", "sakin"],
+      "adjectives": ["sade", "sıcak-nötr", "işlevsel", "temiz"]
+    },
+    "visual_language": {
+      "complexity": "minimal",
+      "ornamentation": "none — hiç dekoratif eleman yok, tamamen işlevsel",
+      "whitespace_usage": "dengeli — sıkışık değil ama israf da yok (comfortable density)",
+      "visual_weight_distribution": "içerik-merkezli, düz katmanlı (shadow tek seviye olduğu için görsel ağırlık dağılımı şu an biraz DÜZ/farksız)",
+      "focal_strategy": "distributed interest — modül kartları eşit ağırlıkta",
+      "contrast_level": "orta — accent rengi CTA'larda öne çıkıyor ama genel palette düşük kontrastlı sıcak tonlar",
+      "texture_usage": "none"
+    },
+    "composition": {
+      "hierarchy_method": "tipografik boyut + renk (accent) ağırlıklı, spatial isolation (kart) ikincil",
+      "balance_type": "symmetric — ortalanmış, grid tabanlı",
+      "flow_direction": "yukarıdan aşağı, tek sütun akış",
+      "grouping_strategy": "kart bazlı gruplama (her bilgi bloğu ayrı .card)",
+      "negative_space_role": "nefes alanı sağlıyor, dekoratif değil işlevsel"
+    },
+    "imagery": {
+      "photo_treatment": "yok — fotoğraf kullanılmıyor",
+      "illustration_style": "yok",
+      "graphic_elements": "emoji ikonlar tek görsel unsur",
+      "pattern_usage": "none",
+      "image_shape": "n/a"
+    },
+    "interaction_feel": {
+      "feedback_style": "minimal — TESPİT: geliştirilmesi gereken alan",
+      "hover_behavior": "çoğu bileşende yok ya da sadece renk/kenarlık değişimi (geçişsiz)",
+      "transition_personality": "none (hedef: 'snappy' — hızlı ama fark edilir, 150-200ms)",
+      "loading_style": "statik metin mesajları (\"Yükleniyor…\"), spinner/skeleton yok",
+      "microinteraction_density": "çok düşük"
+    },
+    "brand_voice_in_ui": {
+      "tone": "resmi ama samimi — Türkçe idari dil (\"Panele dön\", \"Kaydedildi ✓\")",
+      "formality": "yarı-resmi — devlet kurumu bağlamına uygun ama soğuk değil",
+      "cta_style": "direct imperative (\"Kaydet\", \"Ekle\", \"Belgeyi Oluştur\")",
+      "empty_state_approach": "kısa açıklayıcı metin (\"Henüz kayıt eklenmedi.\")",
+      "error_tone": "net ve kısa, suçlayıcı değil"
+    }
+  },
+  "visual_effects": {
+    "overview": {
+      "effect_intensity": "none",
+      "performance_tier": "lightweight",
+      "fallback_strategy": "n/a — efekt zaten yok",
+      "primary_technology": "CSS only"
+    },
+    "background_effects": { "type": "none", "description": "yok", "technology": "n/a" },
+    "particle_systems": { "enabled": false },
+    "3d_elements": { "enabled": false },
+    "shader_effects": { "enabled": false },
+    "scroll_effects": {
+      "parallax": { "enabled": false },
+      "scroll_triggered_animations": { "enabled": false },
+      "scroll_morphing": { "enabled": false }
+    },
+    "text_effects": { "type": "none", "description": "yok", "technology": "n/a" },
+    "cursor_effects": { "enabled": false },
+    "image_effects": { "type": "none", "description": "yok", "technology": "n/a" },
+    "glassmorphism_neumorphism": { "enabled": false, "style": "none" },
+    "canvas_drawings": { "enabled": false },
+    "svg_animations": { "enabled": false },
+    "composite_notes": "Bilinçli olarak efektsiz — okul idare paneli türü bir kurumsal araç için doğru tercih. Bu proje kapsamında görsel efekt EKLENMEYECEK (kullanıcı talebi: sade ve performanslı kalmalı). Profesyonelleştirme sadece design_system (Boyut 1) katmanında yapılacak: motion/transition, elevation hiyerarşisi, focus-visible erişilebilirlik, hover geri bildirimi."
+  },
+  "professionalization_targets": {
+    "note": "Bu bölüm şemanın dışında, sadece bu görev için eklenen bir uygulama planı — hedef DNA'nın mevcut DNA'dan farkı.",
+    "motion": "Ekle: --ease: cubic-bezier(.4,0,.2,1); --dur-fast: 140ms; --dur-normal: 200ms. Tüm interaktif elemanlara (buton, input, tab, chip, kart) transition uygula.",
+    "elevation": "3 seviyeli gölge sistemi: --shadow-sm (mevcut, hafifletilmiş) / --shadow-md (mevcut değer) / --shadow-lg (hover/active için daha belirgin). Kartlara hover'da hafif kalkış (translateY(-1px) + shadow-lg).",
+    "focus_visible": "Tüm focusable elemanlara :focus-visible ile accent renkli, yumuşak box-shadow ring (erişilebilirlik + modern SaaS hissi).",
+    "hover_feedback": "button.secondary, .chip, .pill (tıklanabilir olanlar), .row-actions button için hover arka plan/kenarlık tepkisi ekle — şu an hiçbiri hover'da tepki vermiyor.",
+    "tokens": "--radius-sm/md/lg/pill ve --space-* değişkenlerini formalize et (mevcut sabit değerleri değiştirmeden, aynı sayısal karşılıklarla) — gelecekte tutarlılık için.",
+    "scope_guard": "SADECE index.html satır 7-124 (paylaşılan :root + global bileşen CSS) değiştirilecek. ~30 ekran render fonksiyonundaki inline stillere dokunulmayacak (düşük risk şartı)."
+  }
+}
