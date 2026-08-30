@@ -572,7 +572,7 @@ function renderSchoolSetup(user) {
     btn.disabled = true;
     const { data: school, error: schoolErr } = await sb
       .from("schools")
-      .insert({ name, il, ilce, mudur_adi, okul_turu, created_by: user.id })
+      .insert({ name, il, ilce, mudur_adi, okul_turu, created_by: user.id, enabled_modules: defaultEnabledModulesFor(okul_turu) })
       .select()
       .single();
     if (schoolErr) {
@@ -607,6 +607,18 @@ function accountLineHtml(profile) {
 function isModuleEnabled(school, moduleName) {
   if (!school || !school.enabled_modules || !school.enabled_modules.length) return true;
   return school.enabled_modules.includes(moduleName);
+}
+
+/**
+ * Yeni bir okul kurulurken okul türüne göre akıllı bir enabled_modules varsayımı üretir
+ * (Beş Bakış Denetimi #5). LGS Koçluk yalnızca ortaokul 8. sınıfa özgüdür — okul öncesi,
+ * ilkokul ve lise için anlamsızdır, o yüzden bu türlerde varsayılan olarak kapalı gelir.
+ * Bu sadece bir BAŞLANGIÇ değeridir, okulun kendisini hiçbir şekilde kısıtlamaz — sadece
+ * LGS Koçluk kartını gizler. Platform Yönetimi'nden istenildiği zaman geri açılabilir.
+ */
+function defaultEnabledModulesFor(okulTuru) {
+  if (okulTuru === "ortaokul") return null;
+  return MODULES.map(m => m.name).filter(n => n !== "LGS Koçluk");
 }
 
 async function maybeShowPlatformAdminLink(profile) {
@@ -5288,6 +5300,7 @@ const KILAVUZ_SECTIONS = [
     <p><strong>Zayıflık Analizi</strong>: hangi öğrencinin hangi derste (ve konu tanımlıysa hangi konuda) geride olduğunu, grafiklerle ve önceliklendirilmiş listeyle gösterir — naif "en düşük net" değil, son denemelerin ağırlıklı trendi ve dersin LGS'deki soru ağırlığı birlikte hesaba katılır.</p>
     <p><strong>Haftalık Görevler</strong>: zayıflık analizinden gelen önerileri tek tıkla göreve çevir, koç onay akışıyla takip et. <strong>Veli Bilgilendirme</strong>: tek tıkla, son deneme + öncelik + görev durumunu özetleyen bir WhatsApp mesajı hazırlar. <strong>Kayıt Geçmişi</strong>: kim, ne zaman, neyi değiştirdi. <strong>Müdür Özeti</strong> (sadece idareci): koçsuz/verisiz/telefonsuz öğrenci uyarıları ve koç yükü.</p>
     <p>Öğretmen hesabıyla girildiğinde bütün bu ekranlar aynen çalışır, sadece veriler o öğretmene atanmış öğrencilerle sınırlıdır.</p>
+    <p style="color:var(--muted)">LGS 8. sınıfa özgü olduğu için okul türü "Ortaokul" dışında kurulan okullarda bu kart varsayılan olarak kapalı gelir — istersen platform yöneticisinden açtırabilirsin.</p>
   ` },
 ];
 
@@ -5426,7 +5439,7 @@ async function renderPlatformAdmin(profile, formMsg = "") {
     }
     btn.disabled = true;
     const invite_code = randomInviteCode();
-    const { error } = await sb.from("schools").insert({ name, il, ilce, mudur_adi: mudur_adi || null, okul_turu, created_by: profile.id, invite_code });
+    const { error } = await sb.from("schools").insert({ name, il, ilce, mudur_adi: mudur_adi || null, okul_turu, created_by: profile.id, invite_code, enabled_modules: defaultEnabledModulesFor(okul_turu) });
     btn.disabled = false;
     if (error) {
       msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`;
