@@ -634,6 +634,34 @@ async function maybeShowPlatformAdminLink(profile) {
   wrap.prepend(btn);
 }
 
+/**
+ * Dashboard'daki modül kartlarına, dikkat isteyen sayıları küçük bir rozet olarak ekler
+ * (Beş Bakış Denetimi #6 — "yaşam koçu" bulgusu: kullanıcı her şeyi kendi hatırlamak
+ * zorunda kalmasın, önemli olan ana ekrana sızsın). Dashboard'un kendi render'ını
+ * geciktirmemek için maybeShowPlatformAdminLink ile aynı desende, ayrı ve asenkron.
+ * İlgili kart (Platform Yönetimi'nden kapatılmışsa) yoksa sessizce atlanır.
+ */
+async function maybeShowPendingBadges(school) {
+  const [{ count: talepCount }, { data: aylikTasks }] = await Promise.all([
+    sb.from("requests").select("id", { count: "exact", head: true }).eq("school_id", school.id).eq("status", "bekliyor"),
+    sb.from("monthly_tasks").select("month").eq("school_id", school.id).eq("is_done", false),
+  ]);
+  const currentMonth = new Date().getMonth() + 1;
+  const aylikPendingThisMonth = (aylikTasks || []).filter(t => t.month === currentMonth).length;
+
+  function addBadge(modName, count) {
+    if (!count) return;
+    const h3 = document.querySelector(`[data-mod="${modName}"] h3`);
+    if (!h3) return;
+    const badge = document.createElement("span");
+    badge.textContent = String(count);
+    badge.style.cssText = "display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;border-radius:99px;background:var(--warn-soft);color:var(--warn);font-size:10.5px;font-weight:700;vertical-align:middle";
+    h3.appendChild(badge);
+  }
+  addBadge("Talep Takibi", talepCount);
+  addBadge("Aylık Yönetim Akışı", aylikPendingThisMonth);
+}
+
 function renderDashboard(profile, school) {
   app.innerHTML = `
     <div class="wrap dash">
@@ -664,6 +692,7 @@ function renderDashboard(profile, school) {
   };
   document.getElementById("idareciler-btn").onclick = () => renderIdareciYonetimi(profile, school);
   maybeShowPlatformAdminLink(profile);
+  maybeShowPendingBadges(school);
   const nobetCard = document.querySelector('[data-mod="Nöbet Programı"]');
   if (nobetCard) nobetCard.onclick = () => renderNobet(profile, school, "ayarlar");
   const evrakCard = document.querySelector('[data-mod="Evrak Deposu"]');
