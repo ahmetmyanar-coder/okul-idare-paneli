@@ -312,6 +312,10 @@ function renderTeacherDashboard(profile, school) {
           <h3>Nöbetim ve Programım</h3>
           <p>Nöbet çizelgende ve ders programında sana ait kayıtlar — salt okunur.</p>
         </div>
+        <div class="mod clickable" data-mod="Taleplerim">
+          <h3>Taleplerim</h3>
+          <p>İdareye bir talep/bildirim gönder, durumunu buradan takip et.</p>
+        </div>
         ${isModuleEnabled(school, "LGS Koçluk") ? `
         <div class="mod clickable" data-mod="LGS Koçluk">
           <h3>LGS Koçluk</h3>
@@ -326,6 +330,8 @@ function renderTeacherDashboard(profile, school) {
   };
   const scheduleCard = document.querySelector('[data-mod="Nöbetim ve Programım"]');
   if (scheduleCard) scheduleCard.onclick = () => renderTeacherSchedule(profile, school, "nobet");
+  const requestsCard = document.querySelector('[data-mod="Taleplerim"]');
+  if (requestsCard) requestsCard.onclick = () => renderTeacherRequests(profile, school);
   const lgsTeacherCard = document.querySelector('[data-mod="LGS Koçluk"]');
   if (lgsTeacherCard) lgsTeacherCard.onclick = () => renderLgsModule(profile, school, "ogrenciler");
   maybeShowPlatformAdminLink(profile);
@@ -442,6 +448,80 @@ async function renderTeacherProgram(school, content) {
       </div>
     </div>
   `;
+}
+
+/**
+ * Öğretmenin kendi adına idareye talep/bildirim gönderebildiği ekran (Beş Bakış Denetimi
+ * #4). Öncesinde Talep Takibi tamamen idareci-only'di — öğretmen kendi talebini sisteme
+ * giremiyordu, yine sözlü/WhatsApp'a bağımlıydı. requests_teacher_insert RLS politikası
+ * öğretmenin sadece kendi requester_teacher_id'siyle INSERT yapmasına izin veriyor; durum/not
+ * güncellemesi hâlâ sadece idarecide (requests_idareci_all, UPDATE/DELETE dahil).
+ */
+async function renderTeacherRequests(profile, school) {
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Taleplerim</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">İdareye bir talep/bildirim gönder, durumunu buradan takip et.</div>
+      <div id="tr-content"><p style="color:var(--muted)">Yükleniyor…</p></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => renderTeacherDashboard(profile, school);
+  await renderTeacherRequestsList(profile, school, document.getElementById("tr-content"));
+}
+
+async function renderTeacherRequestsList(profile, school, content) {
+  const [{ data: teacherId }, { data: myRequests, error }] = await Promise.all([
+    sb.rpc("current_teacher_id"),
+    sb.from("requests").select("*").order("created_at", { ascending: false }),
+  ]);
+  if (error) { content.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Yeni Talep</h3>
+      <label>Kategori</label>
+      <select id="tr-category">
+        <option value="Malzeme">Malzeme</option>
+        <option value="Bakım / Tamirat">Bakım / Tamirat</option>
+        <option value="İzin">İzin</option>
+        <option value="Diğer">Diğer</option>
+      </select>
+      <label>Açıklama</label>
+      <textarea id="tr-desc" rows="3" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px" placeholder="Talebin ayrıntısı"></textarea>
+      <button class="primary" id="tr-save">Gönder</button>
+      <div id="tr-msg"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Gönderdiklerim (${(myRequests || []).length})</h3>
+      ${(myRequests || []).length ? myRequests.map(r => `
+        <div class="card" style="margin-bottom:10px;background:var(--surface-2)">
+          <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;flex-wrap:wrap">
+            <div>
+              ${r.category ? `<span class="pill">${esc(r.category)}</span>` : ""}
+              <div style="font-size:13px;margin-top:4px">${esc(r.description)}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px">${fmtDate(r.created_at.slice(0, 10))}</div>
+              ${r.note ? `<div style="font-size:12px;color:var(--ink-soft);margin-top:6px">📝 ${esc(r.note)}</div>` : ""}
+            </div>
+            <span class="pill ${r.status === "reddedildi" ? "warn" : ""}">${esc(TALEP_STATUS_LABELS[r.status] || r.status)}</span>
+          </div>
+        </div>
+      `).join("") : `<p style="color:var(--muted)">Henüz talep göndermedin.</p>`}
+    </div>
+  `;
+
+  document.getElementById("tr-save").onclick = async () => {
+    const category = document.getElementById("tr-category").value;
+    const description = document.getElementById("tr-desc").value.trim();
+    const msg = document.getElementById("tr-msg");
+    if (!description) { msg.innerHTML = `<div class="msg err">Açıklama gerekli.</div>`; return; }
+    const { error: insErr } = await sb.from("requests").insert({
+      school_id: school.id, requester_teacher_id: teacherId, requester_name: profile.full_name || "Öğretmen", category, description,
+    });
+    if (insErr) { msg.innerHTML = `<div class="msg err">${esc(insErr.message)}</div>`; return; }
+    await renderTeacherRequestsList(profile, school, content);
+  };
 }
 
 function renderSchoolSetup(user) {
