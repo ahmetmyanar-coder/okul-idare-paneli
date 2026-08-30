@@ -308,11 +308,15 @@ function renderTeacherDashboard(profile, school) {
         </div>
       </div>
       <div class="grid">
+        <div class="mod clickable" data-mod="Nöbetim ve Programım">
+          <h3>Nöbetim ve Programım</h3>
+          <p>Nöbet çizelgende ve ders programında sana ait kayıtlar — salt okunur.</p>
+        </div>
         ${isModuleEnabled(school, "LGS Koçluk") ? `
         <div class="mod clickable" data-mod="LGS Koçluk">
           <h3>LGS Koçluk</h3>
           <p>Koçluk ettiğin 8. sınıf öğrencilerinin deneme takibi, zayıflık analizi ve haftalık görevleri.</p>
-        </div>` : `<p style="color:var(--muted)">Şu an için idareniz tarafından size açık bir modül bulunmuyor.</p>`}
+        </div>` : ""}
       </div>
     </div>
   `;
@@ -320,9 +324,124 @@ function renderTeacherDashboard(profile, school) {
     await sb.auth.signOut();
     boot();
   };
+  const scheduleCard = document.querySelector('[data-mod="Nöbetim ve Programım"]');
+  if (scheduleCard) scheduleCard.onclick = () => renderTeacherSchedule(profile, school, "nobet");
   const lgsTeacherCard = document.querySelector('[data-mod="LGS Koçluk"]');
   if (lgsTeacherCard) lgsTeacherCard.onclick = () => renderLgsModule(profile, school, "ogrenciler");
   maybeShowPlatformAdminLink(profile);
+}
+
+/**
+ * Öğretmenin kendi nöbet çizelgesini ve ders programını görebildiği, salt okunur ekran
+ * (Beş Bakış Denetimi #2). Öncesinde öğretmen bu bilgilere veritabanı seviyesinde bile
+ * erişemiyordu (duty_assignments/lesson_assignments sadece idareci_all policy'sine
+ * sahipti) — tek kanal idarecinin elle attığı WhatsApp mesajıydı. Yeni
+ * duty_assignments_teacher_select / lesson_assignments_teacher_select RLS politikaları
+ * (teacher_id = current_teacher_id()) sadece kendi kayıtlarını döndürür.
+ */
+async function renderTeacherSchedule(profile, school, tab = "nobet") {
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Nöbetim ve Programım</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Sadece sana ait kayıtlar — salt okunur.</div>
+      <div class="subtabs">
+        <div class="subtab ${tab === "nobet" ? "active" : ""}" data-ts-tab="nobet">Nöbetlerim</div>
+        <div class="subtab ${tab === "program" ? "active" : ""}" data-ts-tab="program">Programım</div>
+      </div>
+      <div id="ts-content"></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => renderTeacherDashboard(profile, school);
+  document.querySelectorAll("[data-ts-tab]").forEach(el => el.onclick = () => renderTeacherSchedule(profile, school, el.dataset.tsTab));
+  const content = document.getElementById("ts-content");
+  if (tab === "program") await renderTeacherProgram(school, content);
+  else await renderTeacherNobet(school, content);
+}
+
+async function renderTeacherNobet(school, content) {
+  content.innerHTML = `<p style="color:var(--muted)">Yükleniyor…</p>`;
+  const { data: assignments, error } = await sb
+    .from("duty_assignments")
+    .select("*, duty_time_slots(label), duty_areas(label), duty_periods(title)")
+    .order("duty_date");
+  if (error) { content.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+
+  const today = toLocalISO(new Date());
+  const upcoming = (assignments || []).filter(a => a.duty_date >= today);
+  const past = (assignments || []).filter(a => a.duty_date < today).slice().reverse();
+
+  const rows = (list) => list.map(a => `
+    <tr>
+      <td>${fmtDate(a.duty_date)}</td>
+      <td>${esc(a.duty_periods?.title || "-")}</td>
+      <td>${esc(a.duty_time_slots?.label || "-")}</td>
+      <td>${esc(a.duty_areas?.label || a.area || "-")}</td>
+    </tr>
+  `).join("");
+
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Yaklaşan Nöbetlerim (${upcoming.length})</h3>
+      ${upcoming.length ? `
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Tarih</th><th>Dönem</th><th>Zaman Dilimi</th><th>Alan</th></tr></thead>
+          <tbody>${rows(upcoming)}</tbody>
+        </table>
+      </div>` : `<p style="color:var(--muted)">Yaklaşan bir nöbetin görünmüyor.</p>`}
+    </div>
+    ${past.length ? `
+    <div class="card">
+      <h3 style="margin-top:0">Geçmiş Nöbetlerim (${past.length})</h3>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Tarih</th><th>Dönem</th><th>Zaman Dilimi</th><th>Alan</th></tr></thead>
+          <tbody>${rows(past)}</tbody>
+        </table>
+      </div>
+    </div>` : ""}
+  `;
+}
+
+async function renderTeacherProgram(school, content) {
+  content.innerHTML = `<p style="color:var(--muted)">Yükleniyor…</p>`;
+  const [{ data: assignments, error }, { data: periods }] = await Promise.all([
+    sb.from("lesson_assignments").select("*, classes(name), subjects(name)"),
+    sb.from("lesson_periods").select("*").eq("school_id", school.id).order("sort_order"),
+  ]);
+  if (error) { content.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+  if (!periods?.length || !(assignments || []).length) {
+    content.innerHTML = `<p style="color:var(--muted)">Henüz sana ait bir ders programı kaydı yok.</p>`;
+    return;
+  }
+
+  const cellMap = {};
+  (assignments || []).forEach(a => { cellMap[`${a.day_of_week}|${a.period_id}`] = a; });
+
+  content.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0">Haftalık Ders Programım</h3>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th></th>${DERS_DAYS.map(d => `<th>${DAY_NAMES_DERS[d]}</th>`).join("")}</tr></thead>
+          <tbody>
+            ${periods.map(p => `
+              <tr>
+                <td style="white-space:nowrap"><strong>${esc(p.label)}</strong></td>
+                ${DERS_DAYS.map(d => {
+                  const a = cellMap[`${d}|${p.id}`];
+                  if (!a) return `<td></td>`;
+                  return `<td>${esc(a.classes?.name || "?")}<div style="font-size:10.5px;color:var(--muted)">${esc(a.subjects?.name || "?")}</div></td>`;
+                }).join("")}
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
 }
 
 function renderSchoolSetup(user) {
