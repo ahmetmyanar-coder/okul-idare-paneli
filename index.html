@@ -187,10 +187,13 @@ function renderAuth(mode = "login") {
   const params = new URLSearchParams(location.search);
   const urlJoin = params.get("join");
   const urlOkul = params.get("okul");
+  const urlIdareci = params.get("idareci");
   if (urlJoin) localStorage.setItem("pendingJoinCode", urlJoin.trim().toUpperCase());
   if (urlOkul) localStorage.setItem("pendingSchoolCode", urlOkul.trim().toUpperCase());
+  if (urlIdareci) localStorage.setItem("pendingIdareciCode", urlIdareci.trim().toUpperCase());
   const pendingJoin = localStorage.getItem("pendingJoinCode") || "";
   const pendingSchool = localStorage.getItem("pendingSchoolCode") || "";
+  const pendingIdareci = localStorage.getItem("pendingIdareciCode") || "";
 
   app.innerHTML = `
     <div class="wrap">
@@ -203,14 +206,19 @@ function renderAuth(mode = "login") {
           <button class="tab ${mode === "signup" ? "active" : ""}" id="tab-signup">Üye ol</button>
         </div>
         ${pendingSchool ? `<div class="msg ok">🏫 Okul kurma daveti (kod: ${esc(pendingSchool)}) — ${mode === "signup" ? "hesap oluşturunca" : "giriş yapınca"} otomatik olarak bu okulun müdürü olarak bağlanacaksın.</div>` : ""}
+        ${pendingIdareci && !pendingSchool ? `<div class="msg ok">🗝️ İdareci daveti (kod: ${esc(pendingIdareci)}) — ${mode === "signup" ? "hesap oluşturunca" : "giriş yapınca"} otomatik olarak bu okulun idarecisi olarak bağlanacaksın.</div>` : ""}
         <label>E-posta</label>
         <input id="email" type="email" autocomplete="email" placeholder="ornek@meb.gov.tr">
         <label>Şifre</label>
         <input id="password" type="password" autocomplete="${mode === "login" ? "current-password" : "new-password"}" placeholder="en az 6 karakter">
-        ${mode === "signup" && !pendingSchool ? `
+        ${mode === "signup" && pendingIdareci && !pendingSchool ? `
+          <label>Adın Soyadın</label>
+          <input id="idareci-name" placeholder="Ad Soyad">
+        ` : ""}
+        ${mode === "signup" && !pendingSchool && !pendingIdareci ? `
           <label>Öğretmen davet kodu <span style="color:var(--muted);font-weight:400">(okul idarenden aldıysan gir; boş bırakırsan yeni bir okul hesabı açılır)</span></label>
           <input id="join-code" value="${esc(pendingJoin)}" placeholder="örn. AB3K9XPZ" style="text-transform:uppercase">
-        ` : (mode === "login" && pendingJoin && !pendingSchool ? `<div class="msg ok" style="margin-top:10px">Bekleyen bir öğretmen daveti var (kod: ${esc(pendingJoin)}). Giriş yaptığında otomatik tamamlanacak.</div>` : "")}
+        ` : (mode === "login" && pendingJoin && !pendingSchool && !pendingIdareci ? `<div class="msg ok" style="margin-top:10px">Bekleyen bir öğretmen daveti var (kod: ${esc(pendingJoin)}). Giriş yaptığında otomatik tamamlanacak.</div>` : "")}
         <button class="primary" id="submit">${mode === "login" ? "Giriş yap" : "Hesap oluştur"}</button>
         <div id="msg"></div>
       </div>
@@ -224,6 +232,10 @@ function renderAuth(mode = "login") {
     const joinCodeInput = document.getElementById("join-code");
     if (joinCodeInput && joinCodeInput.value.trim()) {
       localStorage.setItem("pendingJoinCode", joinCodeInput.value.trim().toUpperCase());
+    }
+    const idareciNameInput = document.getElementById("idareci-name");
+    if (idareciNameInput && idareciNameInput.value.trim()) {
+      localStorage.setItem("pendingIdareciName", idareciNameInput.value.trim());
     }
     const btn = document.getElementById("submit");
     const msg = document.getElementById("msg");
@@ -275,6 +287,8 @@ function renderJoinError(message) {
   document.getElementById("join-signout").onclick = async () => {
     localStorage.removeItem("pendingJoinCode");
     localStorage.removeItem("pendingSchoolCode");
+    localStorage.removeItem("pendingIdareciCode");
+    localStorage.removeItem("pendingIdareciName");
     await sb.auth.signOut();
     boot();
   };
@@ -420,6 +434,7 @@ function renderDashboard(profile, school) {
         </div>
         <div id="topbar-actions" style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
           <button class="signout" id="signout">Çıkış yap</button>
+          <button class="secondary" id="idareciler-btn" style="font-size:12.5px;padding:7px 12px">İdareciler</button>
         </div>
       </div>
       <div class="grid">
@@ -436,6 +451,7 @@ function renderDashboard(profile, school) {
     await sb.auth.signOut();
     boot();
   };
+  document.getElementById("idareciler-btn").onclick = () => renderIdareciYonetimi(profile, school);
   maybeShowPlatformAdminLink(profile);
   const nobetCard = document.querySelector('[data-mod="Nöbet Programı"]');
   if (nobetCard) nobetCard.onclick = () => renderNobet(profile, school, "ayarlar");
@@ -465,6 +481,91 @@ function renderDashboard(profile, school) {
   if (sssCard) sssCard.onclick = () => renderSSSModule(profile, school);
   const lgsCard = document.querySelector('[data-mod="LGS Koçluk"]');
   if (lgsCard) lgsCard.onclick = () => renderLgsModule(profile, school, "ogrenciler");
+}
+
+/**
+ * Okulun ikinci (üçüncü…) idareci hesabını (müdür yardımcısı ya da ek müdür) davet
+ * edebilmesi için ekran. Öğretmen davet akışıyla aynı desende: davet kodu üret, link
+ * paylaş, karşı taraf üye olurken kodu otomatik yakalar ve idareci rolüyle bağlanır
+ * (bkz. claim_idareci_invite RPC'si). Önceden panelin tek idareci hesabı sınırı vardı —
+ * bu ekran o sınırı kaldırıyor.
+ */
+async function renderIdareciYonetimi(profile, school) {
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">İdareciler</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Okulunun idareci (müdür / müdür yardımcısı) hesaplarını buradan yönet.</div>
+      <div id="idareci-content"><p style="color:var(--muted)">Yükleniyor…</p></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => boot();
+  await renderIdareciList(profile, school, document.getElementById("idareci-content"));
+}
+
+async function renderIdareciList(profile, school, content) {
+  const [{ data: idareciler, error: idareciErr }, { data: invites }] = await Promise.all([
+    sb.from("profiles").select("id, full_name, role").eq("school_id", school.id).in("role", ["mudur", "mudur_yardimcisi"]).order("role"),
+    sb.from("idareci_invites").select("*").eq("school_id", school.id).is("used_at", null).order("created_at", { ascending: false }),
+  ]);
+
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Mevcut İdareciler (${(idareciler || []).length})</h3>
+      ${idareciErr ? `<div class="msg err">${esc(idareciErr.message)}</div>` : (idareciler || []).map(p => `
+        <div class="list-item">
+          <span>${esc(p.full_name || "İsimsiz hesap")}${p.id === profile.id ? " (Sen)" : ""}</span>
+          <span class="pill">${esc(ROLE_LABELS[p.role] || p.role)}</span>
+        </div>
+      `).join("") || `<p style="color:var(--muted)">Kayıt yok.</p>`}
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Yeni İdareci Davet Et</h3>
+      <p style="color:var(--muted);font-size:12.5px;margin-top:-6px">Davet edilen kişi kendi e-posta/şifresiyle üye olur, gönderdiğin linke tıklayınca otomatik olarak seçtiğin rolle bu okula bağlanır.</p>
+      <label>Rol</label>
+      <select id="inv-role">
+        <option value="mudur_yardimcisi">Müdür Yardımcısı</option>
+        <option value="mudur">Müdür</option>
+      </select>
+      <button class="primary" id="inv-create">Davet Kodu Oluştur</button>
+      <div id="inv-msg"></div>
+    </div>
+
+    ${(invites || []).length ? `
+    <div class="card">
+      <h3 style="margin-top:0">Bekleyen Davetler</h3>
+      ${invites.map(inv => `
+        <div style="padding:12px 0;border-bottom:1px solid var(--line)">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+            <span class="pill">${esc(ROLE_LABELS[inv.role] || inv.role)}</span>
+            <button data-cancel-invite="${inv.id}" style="font-size:11.5px;background:none;border:1px solid var(--line);border-radius:6px;padding:4px 8px;cursor:pointer;color:var(--muted)">İptal Et</button>
+          </div>
+          <div style="font-size:11.5px;margin-top:6px">Kod: <strong style="font-family:ui-monospace,monospace">${esc(inv.code)}</strong></div>
+          <input readonly value="${esc(idareciInviteUrl(inv.code))}" style="font-size:10.5px;padding:4px;margin-top:4px" onclick="this.select()">
+        </div>
+      `).join("")}
+    </div>` : ""}
+  `;
+
+  document.getElementById("inv-create").onclick = async () => {
+    const role = document.getElementById("inv-role").value;
+    const btn = document.getElementById("inv-create");
+    const msg = document.getElementById("inv-msg");
+    btn.disabled = true;
+    const code = randomInviteCode();
+    const { error } = await sb.from("idareci_invites").insert({ school_id: school.id, role, code, created_by: profile.id });
+    btn.disabled = false;
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    await renderIdareciList(profile, school, content);
+  };
+
+  content.querySelectorAll("[data-cancel-invite]").forEach(b => b.onclick = async () => {
+    if (!confirm("Bu daveti iptal etmek istediğine emin misin?")) return;
+    await sb.from("idareci_invites").delete().eq("id", b.dataset.cancelInvite);
+    await renderIdareciList(profile, school, content);
+  });
 }
 
 function localStorageAvailable() {
@@ -4916,7 +5017,14 @@ const KILAVUZ_SECTIONS = [
     <h4>İki tip kullanıcı</h4>
     <p>Panelde iki hesap türü var: <strong>İdareci</strong> (müdür / müdür yardımcısı) ve <strong>Öğretmen</strong>. İdareci panelin tamamını görür; öğretmen sadece LGS Koçluk'u ve orada da yalnızca kendisine atanmış öğrencileri görür.</p>
     <h4>İlk hesabı açmak (idareci)</h4>
-    <p>"Üye ol" ile e-posta/şifre girip okul bilgisini (ad, il, ilçe, müdür adı, okul türü) doldurursun. Bu, okulun panel üzerindeki tek kaydını oluşturur. Alternatif olarak platform yöneticisi bir okulu senin adına önceden oluşturup davet linki gönderebilir — bu durumda linke tıklayıp sadece e-posta/şifre girmen yeterli, okul bilgisi zaten hazır olur.</p>
+    <p>"Üye ol" ile e-posta/şifre girip okul bilgisini (ad, il, ilçe, müdür adı, okul türü) doldurursun. Bu, okulun panel üzerindeki ilk idareci kaydını oluşturur. Alternatif olarak platform yöneticisi bir okulu senin adına önceden oluşturup davet linki gönderebilir — bu durumda linke tıklayıp sadece e-posta/şifre girmen yeterli, okul bilgisi zaten hazır olur.</p>
+    <h4>İkinci bir idareci (müdür yardımcısı) hesabı nasıl açılır</h4>
+    <ol>
+      <li>Panelin sağ üstündeki <strong>İdareciler</strong> butonuna bas.</li>
+      <li>"Yeni İdareci Davet Et" bölümünden rol seç (Müdür Yardımcısı / Müdür), "Davet Kodu Oluştur"a bas.</li>
+      <li>Çıkan linki paylaş — karşı taraf "Üye ol" ekranında ad-soyadını girip hesap oluşturur, otomatik olarak seçtiğin rolle bu okula bağlanır.</li>
+    </ol>
+    <p>Her idareci kendi hesabıyla, aynı yetkilerle giriş yapar — sınırsız sayıda idareci eklenebilir.</p>
     <h4>Öğretmen hesabı nasıl açılır</h4>
     <ol>
       <li><strong>Nöbet Programı → Öğretmenler</strong>'de ilgili öğretmenin satırında "Davet Kodu Oluştur"a bas.</li>
@@ -5011,7 +5119,7 @@ const SSS_ITEMS = [
   { cat: "Giriş ve Roller", q: "Öğretmen hesabını nasıl açarım?", a: `Nöbet Programı → Öğretmenler'de ilgili satırda "Davet Kodu Oluştur"a bas, çıkan kodu/linki öğretmene gönder. Öğretmen "Üye ol" ekranında bu kodu girer.` },
   { cat: "Giriş ve Roller", q: "Davet kodunu kaybettim ya da yanlış kişiye gönderdim, ne yapmalıyım?", a: `Aynı ekrandan "Yeni Kod" oluştur — eskisi otomatik geçersiz olur.` },
   { cat: "Giriş ve Roller", q: "Öğretmen panelde neleri görebilir?", a: `Sadece LGS Koçluk'u, orada da yalnızca kendisine koç olarak atanmış öğrencileri. Nöbet, evrak, personel gibi diğer modüllere erişimi yoktur.` },
-  { cat: "Giriş ve Roller", q: "Birden fazla idareci (müdür + müdür yardımcısı) aynı okulu birlikte yönetebilir mi?", a: `Şu an için panel her okulda tek idareci hesabı (okulu ilk kuran kişi) üzerinden çalışıyor — öğretmenlerdeki gibi bir "idareci davet kodu" henüz yok. İkinci bir idareci için ayrı bir çözüm istersen bunu ayrıca değerlendirebiliriz.` },
+  { cat: "Giriş ve Roller", q: "Birden fazla idareci (müdür + müdür yardımcısı) aynı okulu birlikte yönetebilir mi?", a: `Evet. Panel üstündeki "İdareciler" butonundan (sağ üstte, "Çıkış yap"ın altında) yeni bir idareci davet edebilirsin — rolünü (Müdür / Müdür Yardımcısı) seç, "Davet Kodu Oluştur"a bas, çıkan linki paylaş. Davet edilen kişi kendi e-posta/şifresiyle üye olur, otomatik olarak o okula seçtiğin rolle bağlanır. Her idareci kendi hesabıyla, aynı yetkilerle giriş yapar.` },
   { cat: "Nöbet Programı", q: "Nöbet çizelgesinde bazı hücreler boş kalıyor, bu bir hata mı?", a: `Hayır. Öğretmenlerin haftalık kotası dolduğunda sistem kota ihlali yapmamak için o slotu bilerek boş bırakır ve ekranda "Eksik Kapsama" uyarısıyla hangi gün/alanların boş kaldığını ayrıca gösterir.` },
   { cat: "Nöbet Programı", q: "İzinli/raporlu bir öğretmenin nöbetini nasıl devrederim?", a: `Çizelgedeki ilgili satırda "Devret" butonuna bas, sebebi seç — sistem en az nöbeti olan uygun (muafiyeti/yasaklı alanı çakışmayan) öğretmeni otomatik önerir, onaylarsın.` },
   { cat: "Nöbet Programı", q: "Kıdem/hamilelik/engellilik muafiyeti otomatik mi uygulanıyor?", a: `Hamilelik ve engellilik muafiyeti zorunlu olduğu için çizelgeye otomatik yansır. Kıdem muafiyeti ise mevzuata göre talebe bağlı olduğundan, öğretmen kaydında elle işaretlenmesi gerekir — sistem sadece eşiği dolduranları hatırlatır.` },
@@ -5066,6 +5174,10 @@ async function renderSSSModule(profile, school, filterText = "") {
 
 function schoolInviteUrl(code) {
   return `${location.origin}${location.pathname}?okul=${encodeURIComponent(code)}`;
+}
+
+function idareciInviteUrl(code) {
+  return `${location.origin}${location.pathname}?idareci=${encodeURIComponent(code)}`;
 }
 
 async function renderPlatformAdmin(profile, formMsg = "") {
@@ -5223,6 +5335,18 @@ async function boot() {
       const { error } = await sb.rpc("claim_school_as_mudur", { p_code: pendingSchoolCode });
       if (!error) {
         localStorage.removeItem("pendingSchoolCode");
+        return boot();
+      }
+      renderJoinError(error.message);
+      return;
+    }
+    const pendingIdareciCode = localStorage.getItem("pendingIdareciCode");
+    if (pendingIdareciCode) {
+      const pendingIdareciName = localStorage.getItem("pendingIdareciName") || "";
+      const { error } = await sb.rpc("claim_idareci_invite", { p_code: pendingIdareciCode, p_full_name: pendingIdareciName });
+      if (!error) {
+        localStorage.removeItem("pendingIdareciCode");
+        localStorage.removeItem("pendingIdareciName");
         return boot();
       }
       renderJoinError(error.message);
