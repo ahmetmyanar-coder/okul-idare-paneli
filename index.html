@@ -3714,6 +3714,26 @@ async function renderPlanlamaModule(profile, school) {
   await renderPlanlama(school, document.getElementById("planlama-content"));
 }
 
+/**
+ * Kurul/komisyon/kulüpleri türlerine göre gruplar. `committee_type` serbest metin olarak
+ * saklandığı için (form "Kurul" yazarken eski/dış kayıtlar "kurul" olabilir) eşleştirme
+ * büyük-küçük harf ve Türkçe karakter duyarsız yapılır; tanınmayan ya da boş tür
+ * "Diğer" altında toplanır — hiçbir kayıt listeden düşmez.
+ */
+function groupCommitteesByType(committees) {
+  const gruplar = [
+    { baslik: "Kurullar", anahtar: "kurul", items: [] },
+    { baslik: "Komisyonlar", anahtar: "komisyon", items: [] },
+    { baslik: "Kulüpler", anahtar: "kulup", items: [] },
+    { baslik: "Diğer", anahtar: null, items: [] },
+  ];
+  (committees || []).forEach(c => {
+    const tur = (c.committee_type || "").toLocaleLowerCase("tr-TR").replace(/ü/g, "u");
+    (gruplar.find(g => g.anahtar && tur.includes(g.anahtar)) || gruplar[3]).items.push(c);
+  });
+  return gruplar.filter(g => g.items.length);
+}
+
 async function renderPlanlama(school, content, activeId = null) {
   const { data: committees } = await sb.from("committees").select("*").eq("school_id", school.id).order("name");
   const active = activeId ? (committees || []).find(c => c.id === activeId) : null;
@@ -3736,12 +3756,15 @@ async function renderPlanlama(school, content, activeId = null) {
       <div id="c-msg"></div>
     </div>
     <div class="card" style="margin-bottom:16px">
-      <h3 style="margin-top:0">Kurullar (${(committees || []).length})</h3>
-      ${(committees || []).length ? (committees || []).map(c => `
-        <div class="list-item ${activeId === c.id ? "active" : ""}" style="cursor:pointer" data-select-committee="${c.id}">
-          <span>${esc(c.name)} ${c.committee_type ? `<span class="pill">${esc(c.committee_type)}</span>` : ""}</span>
-          <div class="row-actions"><button data-del-committee="${c.id}">Sil</button></div>
-        </div>
+      <h3 style="margin-top:0">Kurul, Komisyon ve Kulüpler (${(committees || []).length})</h3>
+      ${(committees || []).length ? groupCommitteesByType(committees).map(g => `
+        <div class="faq-cat">${esc(g.baslik)} (${g.items.length})</div>
+        ${g.items.map(c => `
+          <div class="list-item ${activeId === c.id ? "active" : ""}" style="cursor:pointer" data-select-committee="${c.id}">
+            <span>${esc(c.name)} ${c.committee_type ? `<span class="pill">${esc(c.committee_type)}</span>` : ""}</span>
+            <div class="row-actions"><button data-del-committee="${c.id}">Sil</button></div>
+          </div>
+        `).join("")}
       `).join("") : `<p style="color:var(--muted);font-size:13px">Henüz eklenmedi.</p>`}
     </div>
     <div id="committee-detail"></div>
