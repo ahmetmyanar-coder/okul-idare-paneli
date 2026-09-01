@@ -3304,7 +3304,7 @@ function generateKelebekSeating(groups, rows, cols) {
   const chosenIndices = interleaved.map((_, i) => Math.floor((i * seatOrder.length) / interleaved.length));
   const usedSeatIdx = new Set(chosenIndices);
   const seating = chosenIndices.map((idx, i) => ({ ...seatOrder[idx], ...interleaved[i] }));
-  const emptySeats = seatOrder.filter((_, idx) => !usedSeatIdx.has(idx));
+  const emptySeats = seatOrder.filter((_, idx) => !usedSeatIdx.has(idx)).map(s => ({ row: s.row, col: s.col }));
 
   function seatAt(r, c) { return seating.find(s => s.row === r && s.col === c); }
   function neighborsOf(seat) {
@@ -3325,8 +3325,16 @@ function generateKelebekSeating(groups, rows, cols) {
     b.name = tmpName; b.label = tmpLabel;
   }
 
+  // Bir öğrenciyi boş bir sıraya taşır (öğrencinin konumuyla boş sıranın konumunu takas eder).
+  function relocate(occupied, empty) {
+    const r = occupied.row, c = occupied.col;
+    occupied.row = empty.row; occupied.col = empty.col;
+    empty.row = r; empty.col = c;
+  }
+  const snapshot = () => seating.map(s => ({ row: s.row, col: s.col, name: s.name, label: s.label }));
+
   let current = countViolations();
-  let bestSnapshot = seating.map(s => ({ name: s.name, label: s.label }));
+  let bestSnapshot = snapshot();
   let bestViolations = current;
   let temperature = 4;
   const iterations = Math.min(6000, seating.length * 150);
@@ -3336,25 +3344,48 @@ function generateKelebekSeating(groups, rows, cols) {
     const violatingSeats = seating.filter(s => neighborsOf(s).some(nb => nb !== s && nb.label === s.label));
     if (!violatingSeats.length) break;
     const a = violatingSeats[Math.floor(Math.random() * violatingSeats.length)];
-    const b = seating[Math.floor(Math.random() * seating.length)];
-    if (a === b || a.label === b.label) { temperature *= cooling; continue; }
 
-    swap(a, b);
+    // İki hamle türü var ve İKİNCİSİ kritik:
+    // (1) iki öğrenciyi yer değiştir — dolu sıra KÜMESİ değişmez, sadece etiketler permüte olur;
+    // (2) bir öğrenciyi boş sıraya taşı — dolu sıra kümesinin kendisi değişir.
+    // Yalnızca (1) ile arama, başta stride ile seçilmiş sıra kümesine hapsolur. O küme geometrik
+    // olarak kötüyse (ör. üç sıra birbirine komşuysa, iki grupla güvercin yuvası gereği en az bir
+    // aynı-grup komşuluk KAÇINILMAZDIR) hiçbir etiket permütasyonu sıfıra inemez — kare grid'lerde
+    // (8×8, 9×9) tam olarak bu oluyordu ve sonuç ısrarla 1 ihlalde takılı kalıyordu. (2) bu kilidi açar.
+    let undo;
+    if (emptySeats.length && Math.random() < 0.5) {
+      const e = emptySeats[Math.floor(Math.random() * emptySeats.length)];
+      relocate(a, e);
+      undo = () => relocate(a, e);
+    } else {
+      const b = seating[Math.floor(Math.random() * seating.length)];
+      if (a === b || a.label === b.label) { temperature *= cooling; continue; }
+      swap(a, b);
+      undo = () => swap(a, b);
+    }
+
     const next = countViolations();
     const delta = next - current;
     if (delta <= 0 || Math.random() < Math.exp(-delta / Math.max(temperature, 0.01))) {
       current = next;
       if (current < bestViolations) {
         bestViolations = current;
-        bestSnapshot = seating.map(s => ({ name: s.name, label: s.label }));
+        bestSnapshot = snapshot();
       }
     } else {
-      swap(a, b); // revert
+      undo();
     }
     temperature *= cooling;
   }
 
-  seating.forEach((s, i) => { s.name = bestSnapshot[i].name; s.label = bestSnapshot[i].label; });
+  seating.forEach((s, i) => {
+    s.row = bestSnapshot[i].row; s.col = bestSnapshot[i].col;
+    s.name = bestSnapshot[i].name; s.label = bestSnapshot[i].label;
+  });
+  // Konumlar değişmiş olabileceği için boş sıra listesi en iyi çözüme göre yeniden hesaplanır.
+  const dolu = new Set(seating.map(s => s.row + "," + s.col));
+  emptySeats.length = 0;
+  seatOrder.forEach(s => { if (!dolu.has(s.row + "," + s.col)) emptySeats.push({ row: s.row, col: s.col }); });
 
   const violations = [];
   seating.forEach(s => {
