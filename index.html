@@ -3969,11 +3969,17 @@ function addMonthsISO(iso, months) {
   return toLocalISO(dt);
 }
 
+/* "Yaklaşıyor" eşiği: 30 gün, ama periyodun yarısını aşmaz — aylık bir kalem bugün yapıldığında
+   anında "yaklaşıyor" görünmesin (1 ay → 15 gün, 2 ay ve üzeri → 30 gün). */
+function bakimWarnThreshold(periodMonths) {
+  return Math.min(30, Math.max(7, Math.round(periodMonths * 30.4 / 2)));
+}
+
 function bakimStatusOf(item, todayISO) {
   if (!item.last_done_on) return { status: "kayit_yok", next: null, daysLeft: null };
   const next = addMonthsISO(item.last_done_on, item.period_months);
   const daysLeft = Math.round((new Date(next + "T00:00:00") - new Date(todayISO + "T00:00:00")) / 86400000);
-  const status = daysLeft < 0 ? "gecikti" : daysLeft <= 30 ? "yaklasiyor" : "uygun";
+  const status = daysLeft < 0 ? "gecikti" : daysLeft <= bakimWarnThreshold(item.period_months) ? "yaklasiyor" : "uygun";
   return { status, next, daysLeft };
 }
 
@@ -4036,7 +4042,7 @@ async function renderBakim(profile, school, content, state = {}) {
     ${rows.length ? `
     <div class="card" style="margin-bottom:16px">
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px">
-        ${[["Toplam kalem", rows.length, ""], ["Gecikmiş", counts.gecikti, "crit"], ["Yaklaşan (≤30 gün)", counts.yaklasiyor, "warn"], ["Uygun", counts.uygun, "good"], ["Kayıt yok", counts.kayit_yok, "muted"]].map(([label, n, cls]) => `
+        ${[["Toplam kalem", rows.length, ""], ["Gecikmiş", counts.gecikti, "crit"], ["Yaklaşan", counts.yaklasiyor, "warn"], ["Uygun", counts.uygun, "good"], ["Kayıt yok", counts.kayit_yok, "muted"]].map(([label, n, cls]) => `
           <div style="padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-md);background:var(--surface-2)">
             <div style="font-size:11px;color:var(--muted)">${label}</div>
             <div style="font-size:22px;font-weight:700;color:${cls === "crit" ? "var(--crit)" : cls === "warn" ? "var(--warn)" : cls === "good" ? "var(--good)" : "var(--ink)"}">${n}</div>
@@ -5748,7 +5754,7 @@ const KILAVUZ_SECTIONS = [
     <p>Kurul, komisyon ya da kulüp oluştur; üyelerini öğretmen listesinden seç ya da (veli, öğrenci temsilcisi gibi öğretmen olmayanlar için) elle yaz. Her kurul için ayrı toplantı/faaliyet kaydı (tarih, gündem, kararlar) tutulur.</p>
   ` },
   { id: "bakim", title: "Periyodik Bakım Takibi", html: `
-    <p>Okulun periyodik bakım/kontrol kalemlerini (asansör, yangın tüpü, su deposu, doğalgaz, paratoner, jeneratör…) tek yerden takip eder: <strong>son yapılma tarihi + periyot → sonraki tarih</strong>, kalan gün ve durum (Gecikti / Yaklaşıyor ≤30 gün / Uygun) otomatik hesaplanır. Gecikmiş kalem sayısı ana ekrandaki kartta rozet olarak görünür.</p>
+    <p>Okulun periyodik bakım/kontrol kalemlerini (asansör, yangın tüpü, su deposu, doğalgaz, paratoner, jeneratör…) tek yerden takip eder: <strong>son yapılma tarihi + periyot → sonraki tarih</strong>, kalan gün ve durum (Gecikti / Yaklaşıyor / Uygun) otomatik hesaplanır. "Yaklaşıyor" eşiği 30 gündür; aylık kalemlerde periyodun yarısı (15 gün) alınır ki yeni yapılmış bir bakım hemen uyarı vermesin. Gecikmiş kalem sayısı ana ekrandaki kartta rozet olarak görünür.</p>
     <ol>
       <li>İlk açılışta "Örnek kalemleri ekle" ile sık rastlanan kalemleri yükle, sonra düzenle/sil. <strong>Periyotlar öneridir</strong> — asansör, yangın tesisatı, doğalgaz, elektrik/topraklama gibi kalemlerde yürürlükteki mevzuatın ve yetkili kuruluşun belirlediği süreyi esas al, gerekirse periyodu değiştir.</li>
       <li>Bir bakım yapıldığında ilgili satırda <strong>"✓ Yapıldı"</strong> de, tarih/yapan/not/maliyet gir — hem sonraki tarih otomatik ilerler hem de kayıt <strong>Bakım Geçmişi</strong>'ne kalıcı olarak düşer (teftişte "ne zaman yapıldı, kim yaptı" sorusunun cevabı).</li>
