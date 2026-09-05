@@ -116,6 +116,9 @@
   table.data tbody tr:hover { background: var(--surface-2); }
   .pill { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent); margin: 1px 2px 1px 0; }
   .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.crit { background: var(--crit-soft); color: var(--crit); }
+  .pill.good { background: var(--good-soft); color: var(--good); }
+  .pill.muted { background: var(--surface-2); color: var(--muted); }
   .row-actions button { font-size: 11.5px; background: none; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 4px 8px; cursor: pointer; color: var(--muted); margin-right: 4px; transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease); }
   .row-actions button:hover { border-color: var(--line-strong); color: var(--ink); background: var(--surface-2); }
   .check-row { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
@@ -177,6 +180,7 @@ const MODULES = [
   { name: "Sınav Kelebek", desc: "Aynı sınıftan öğrenciler yan yana oturmayacak şekilde sınav oturma planı üretir — sadece bu cihazda saklanır." },
   { name: "Talep Takibi", desc: "Öğretmenlerden gelen talep/bildirimleri kaydet, durumunu takip et." },
   { name: "Planlama İşleri", desc: "Kurul, komisyon ve kulüplerin üye listesi ve toplantı/faaliyet kayıtları." },
+  { name: "Periyodik Bakım Takibi", desc: "Asansör, yangın tüpü, su deposu, doğalgaz… bakım periyotları, gecikme uyarısı, denetim izi." },
   { name: "Okul Panosu", desc: "Koridor ekranı için duyuru, medya ve pekiştireç (ayın öğrencisi vb.) yönetimi." },
   { name: "Kullanma Kılavuzu", desc: "Her modülün nasıl kullanılacağı, adım adım." },
   { name: "Sıkça Sorulan Sorular", desc: "Aranabilir soru-cevap listesi." },
@@ -642,12 +646,15 @@ async function maybeShowPlatformAdminLink(profile) {
  * İlgili kart (Platform Yönetimi'nden kapatılmışsa) yoksa sessizce atlanır.
  */
 async function maybeShowPendingBadges(school) {
-  const [{ count: talepCount }, { data: aylikTasks }] = await Promise.all([
+  const [{ count: talepCount }, { data: aylikTasks }, { data: bakimItems }] = await Promise.all([
     sb.from("requests").select("id", { count: "exact", head: true }).eq("school_id", school.id).eq("status", "bekliyor"),
     sb.from("monthly_tasks").select("month").eq("school_id", school.id).eq("is_done", false),
+    sb.from("maintenance_items").select("last_done_on, period_months").eq("school_id", school.id).eq("is_active", true),
   ]);
   const currentMonth = new Date().getMonth() + 1;
   const aylikPendingThisMonth = (aylikTasks || []).filter(t => t.month === currentMonth).length;
+  const bakimToday = toLocalISO(new Date());
+  const bakimOverdue = (bakimItems || []).filter(i => bakimStatusOf(i, bakimToday).status === "gecikti").length;
 
   function addBadge(modName, count) {
     if (!count) return;
@@ -660,6 +667,7 @@ async function maybeShowPendingBadges(school) {
   }
   addBadge("Talep Takibi", talepCount);
   addBadge("Aylık Yönetim Akışı", aylikPendingThisMonth);
+  addBadge("Periyodik Bakım Takibi", bakimOverdue);
 }
 
 function renderDashboard(profile, school) {
@@ -713,6 +721,8 @@ function renderDashboard(profile, school) {
   if (talepCard) talepCard.onclick = () => renderTalepModule(profile, school);
   const planlamaCard = document.querySelector('[data-mod="Planlama İşleri"]');
   if (planlamaCard) planlamaCard.onclick = () => renderPlanlamaModule(profile, school);
+  const bakimCard = document.querySelector('[data-mod="Periyodik Bakım Takibi"]');
+  if (bakimCard) bakimCard.onclick = () => renderBakimModule(profile, school);
   const panoCard = document.querySelector('[data-mod="Okul Panosu"]');
   if (panoCard) panoCard.onclick = () => renderPanoModule(profile, school);
   const kilavuzCard = document.querySelector('[data-mod="Kullanma Kılavuzu"]');
@@ -3918,6 +3928,374 @@ async function renderCommitteeDetail(school, committee, el) {
   });
 }
 
+/* ============ PERİYODİK BAKIM TAKİBİ ============ */
+
+const BAKIM_CATEGORIES = ["Hijyen", "Mekanik", "Güvenlik", "Elektrik", "Tesisat", "Diğer"];
+const BAKIM_STATUS_LABELS = { gecikti: "Gecikti", yaklasiyor: "Yaklaşıyor", uygun: "Uygun", kayit_yok: "Kayıt yok" };
+const BAKIM_STATUS_PILL = { gecikti: "crit", yaklasiyor: "warn", uygun: "good", kayit_yok: "muted" };
+const BAKIM_STATUS_ORDER = ["gecikti", "yaklasiyor", "kayit_yok", "uygun"];
+const AY_KISA = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
+
+/**
+ * Örnek bakım kalemleri. Periyotlar ÖRNEK/öneri niteliğindedir — asansör, yangın tesisatı,
+ * doğalgaz, elektrik/topraklama gibi kalemlerde yürürlükteki mevzuat ve yetkili kuruluşun
+ * belirlediği süreler esastır; kullanıcı kendi okuluna göre düzenler. Sahadan bir okul
+ * yöneticisinin paylaştığı takip çizelgesi temel alınarak yeniden düzenlendi; hiçbir periyot
+ * burada yasal zorunluluk olarak sunulmuyor (UI'da da bu açıkça yazılı).
+ */
+const BAKIM_SEED_ITEMS = [
+  { name: "Su deposu temizliği ve dezenfeksiyonu", category: "Hijyen", period_months: 6 },
+  { name: "İlaçlama (haşere kontrolü)", category: "Hijyen", period_months: 3 },
+  { name: "Asansör periyodik bakımı", category: "Mekanik", period_months: 1 },
+  { name: "Asansör yıllık kontrolü (yetkili muayene kuruluşu)", category: "Mekanik", period_months: 12 },
+  { name: "Yangın söndürme tüpleri kontrolü", category: "Güvenlik", period_months: 12 },
+  { name: "Yangın algılama ve alarm sistemi kontrolü", category: "Güvenlik", period_months: 6 },
+  { name: "Jeneratör bakımı", category: "Mekanik", period_months: 3 },
+  { name: "Klima / havalandırma sistemi bakımı", category: "Mekanik", period_months: 6 },
+  { name: "Paratoner (yıldırımlık) kontrolü", category: "Elektrik", period_months: 12 },
+  { name: "Elektrik tesisatı ve topraklama ölçümü", category: "Elektrik", period_months: 12 },
+  { name: "Doğalgaz tesisatı kontrolü", category: "Tesisat", period_months: 12 },
+  { name: "Kazan dairesi / kombi bakımı", category: "Tesisat", period_months: 6 },
+  { name: "Bahçe / oyun grubu ekipmanları kontrolü", category: "Güvenlik", period_months: 6 },
+  { name: "Çevre aydınlatma ve jeneratör devreye alma testi", category: "Elektrik", period_months: 1 },
+];
+
+/* EDATE mantığı: ay ekle, gün ayın son gününü aşarsa kırp (31 Oca + 1 ay = 28/29 Şub). */
+function addMonthsISO(iso, months) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1 + months, 1);
+  const lastDay = new Date(dt.getFullYear(), dt.getMonth() + 1, 0).getDate();
+  dt.setDate(Math.min(d, lastDay));
+  return toLocalISO(dt);
+}
+
+function bakimStatusOf(item, todayISO) {
+  if (!item.last_done_on) return { status: "kayit_yok", next: null, daysLeft: null };
+  const next = addMonthsISO(item.last_done_on, item.period_months);
+  const daysLeft = Math.round((new Date(next + "T00:00:00") - new Date(todayISO + "T00:00:00")) / 86400000);
+  const status = daysLeft < 0 ? "gecikti" : daysLeft <= 30 ? "yaklasiyor" : "uygun";
+  return { status, next, daysLeft };
+}
+
+function bakimPeriodLabel(months) {
+  if (months % 12 === 0) return months === 12 ? "Yılda 1" : `${months / 12} yılda 1`;
+  if (months === 1) return "Her ay";
+  return `${months} ayda 1`;
+}
+
+async function renderBakimModule(profile, school, tab = "takip") {
+  const tabs = [
+    { id: "takip", label: "Bakım Takibi" },
+    { id: "plan", label: "Yıllık Plan" },
+    { id: "gecmis", label: "Bakım Geçmişi" },
+  ];
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Periyodik Bakım Takibi</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Okulun periyodik bakım/kontrol kalemleri: son yapılma tarihi + periyot → sonraki tarih, gecikme uyarısı ve teftiş için kalıcı bakım geçmişi. Periyotlar öneridir; asansör, yangın tesisatı, doğalgaz, elektrik gibi kalemlerde yürürlükteki mevzuatı ve yetkili kuruluşun süresini esas al.</div>
+      <div class="subtabs">
+        ${tabs.map(t => `<div class="subtab ${t.id === tab ? "active" : ""}" data-tab="${t.id}">${t.label}</div>`).join("")}
+      </div>
+      <div id="bakim-content"></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  document.querySelectorAll("[data-tab]").forEach(el => el.onclick = () => renderBakimModule(profile, school, el.dataset.tab));
+  const content = document.getElementById("bakim-content");
+  content.innerHTML = `<div class="card">Yükleniyor…</div>`;
+  await renderBakim(profile, school, content, { tab });
+}
+
+async function renderBakim(profile, school, content, state = {}) {
+  const { tab = "takip", filter = "hepsi", editingId = null, logItemId = null, historyItemId = null } = state;
+  const [{ data: items }, { data: logs }] = await Promise.all([
+    sb.from("maintenance_items").select("*").eq("school_id", school.id).eq("is_active", true).order("name"),
+    sb.from("maintenance_logs").select("*").eq("school_id", school.id).order("done_on", { ascending: false }),
+  ]);
+  const todayISO = toLocalISO(new Date());
+  const rows = (items || []).map(i => ({ ...i, ...bakimStatusOf(i, todayISO) }));
+  const counts = { gecikti: 0, yaklasiyor: 0, uygun: 0, kayit_yok: 0 };
+  rows.forEach(r => counts[r.status]++);
+  const rerender = (patch) => renderBakim(profile, school, content, { ...state, ...patch });
+
+  if (tab === "plan") return renderBakimPlan(rows, content, rerender);
+  if (tab === "gecmis") return renderBakimGecmis(school, rows, logs || [], content, rerender);
+
+  // Aciliyet sırası: gecikti (en çok gecikmiş önce) → yaklaşıyor → kayıt yok → uygun (en yakın önce)
+  const orderIdx = Object.fromEntries(BAKIM_STATUS_ORDER.map((s, i) => [s, i]));
+  rows.sort((a, b) => (orderIdx[a.status] - orderIdx[b.status]) || ((a.daysLeft ?? 1e9) - (b.daysLeft ?? 1e9)) || a.name.localeCompare(b.name, "tr"));
+  const filtered = filter === "hepsi" ? rows : rows.filter(r => r.status === filter);
+  const editItem = editingId ? rows.find(r => r.id === editingId) : null;
+  const missingSeed = BAKIM_SEED_ITEMS.filter(s => !(items || []).some(i => i.name.toLocaleLowerCase("tr-TR") === s.name.toLocaleLowerCase("tr-TR")));
+  const logsByItem = {};
+  (logs || []).forEach(l => (logsByItem[l.item_id] ??= []).push(l));
+
+  content.innerHTML = `
+    ${rows.length ? `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px">
+        ${[["Toplam kalem", rows.length, ""], ["Gecikmiş", counts.gecikti, "crit"], ["Yaklaşan (≤30 gün)", counts.yaklasiyor, "warn"], ["Uygun", counts.uygun, "good"], ["Kayıt yok", counts.kayit_yok, "muted"]].map(([label, n, cls]) => `
+          <div style="padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-md);background:var(--surface-2)">
+            <div style="font-size:11px;color:var(--muted)">${label}</div>
+            <div style="font-size:22px;font-weight:700;color:${cls === "crit" ? "var(--crit)" : cls === "warn" ? "var(--warn)" : cls === "good" ? "var(--good)" : "var(--ink)"}">${n}</div>
+          </div>`).join("")}
+      </div>
+    </div>` : ""}
+    ${missingSeed.length ? `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Örnek bakım kalemleri</h3>
+      <p style="color:var(--muted);font-size:12.5px">Sık rastlanan ${missingSeed.length} bakım/kontrol kalemini örnek periyotlarıyla tek tıkla ekleyebilirsin; sonra düzenler, silersin. <strong>Periyotlar öneridir</strong> — mevzuat/yetkili kuruluş süresi farklıysa onu esas al.</p>
+      <button class="secondary" id="b-seed" style="width:100%">${rows.length ? "Eksik örnek kalemleri ekle" : "Örnek kalemleri ekle"} (${missingSeed.length})</button>
+    </div>` : ""}
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">${editItem ? "Bakım Kalemini Düzenle" : "Yeni Bakım Kalemi"}</h3>
+      <label>Bakım / kontrol adı</label>
+      <input id="b-name" value="${esc(editItem?.name || "")}" placeholder="örn. Yangın söndürme tüpleri kontrolü">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label>Kategori</label>
+          <select id="b-category">${BAKIM_CATEGORIES.map(c => `<option value="${c}" ${(editItem?.category || "Diğer") === c ? "selected" : ""}>${c}</option>`).join("")}</select>
+        </div>
+        <div>
+          <label>Periyot (ay)</label>
+          <input id="b-period" type="number" min="1" max="120" value="${esc(editItem?.period_months ?? 6)}">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label>Sorumlu firma / kişi <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+          <input id="b-responsible" value="${esc(editItem?.responsible || "")}" placeholder="örn. Asansör bakım firması">
+        </div>
+        <div>
+          <label>İletişim <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+          <input id="b-contact" value="${esc(editItem?.contact || "")}" placeholder="telefon / dahili">
+        </div>
+      </div>
+      <label>Son yapılma tarihi <span style="color:var(--muted);font-weight:400">(boş bırakılırsa "kayıt yok" sayılır)</span></label>
+      ${dateInputHtml("b-last", editItem?.last_done_on || "")}
+      <label>Not <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <input id="b-notes" value="${esc(editItem?.notes || "")}" placeholder="örn. rapor dosyada, sözleşme yıl sonunda bitiyor">
+      <button class="primary" id="b-save">${editItem ? "Güncelle" : "Ekle"}</button>
+      ${editItem ? `<button class="secondary" id="b-cancel" style="margin-top:8px;width:100%">İptal</button>` : ""}
+      <div id="b-msg"></div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="subtabs" style="flex-wrap:wrap">
+        <div class="subtab ${filter === "hepsi" ? "active" : ""}" data-filter="hepsi">Tümü (${rows.length})</div>
+        ${BAKIM_STATUS_ORDER.map(s => `<div class="subtab ${filter === s ? "active" : ""}" data-filter="${s}">${BAKIM_STATUS_LABELS[s]} (${counts[s]})</div>`).join("")}
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <h3 style="margin:0">Bakım Kalemleri</h3>
+        ${rows.length ? `<button class="secondary" id="b-print" style="width:auto;padding:7px 12px;font-size:12.5px">Yazdır</button>` : ""}
+      </div>
+      ${filtered.length ? `
+      <div class="table-wrap" style="margin-top:12px">
+      <table class="data">
+        <thead><tr><th>Bakım</th><th>Kategori</th><th>Periyot</th><th>Son</th><th>Sonraki</th><th>Kalan</th><th>Durum</th><th></th></tr></thead>
+        <tbody>
+          ${filtered.map(r => `
+            <tr>
+              <td><strong>${esc(r.name)}</strong>${r.responsible ? `<div style="font-size:11.5px;color:var(--muted)">${esc(r.responsible)}${r.contact ? ` · ${esc(r.contact)}` : ""}</div>` : ""}${r.notes ? `<div style="font-size:11.5px;color:var(--muted)">💡 ${esc(r.notes)}</div>` : ""}</td>
+              <td>${esc(r.category || "—")}</td>
+              <td style="white-space:nowrap">${bakimPeriodLabel(r.period_months)}</td>
+              <td style="white-space:nowrap">${r.last_done_on ? fmtDate(r.last_done_on) : "—"}</td>
+              <td style="white-space:nowrap">${r.next ? fmtDate(r.next) : "—"}</td>
+              <td style="white-space:nowrap">${r.daysLeft === null ? "—" : r.daysLeft < 0 ? `<span style="color:var(--crit);font-weight:700">${-r.daysLeft} gün geçti</span>` : `${r.daysLeft} gün`}</td>
+              <td><span class="pill ${BAKIM_STATUS_PILL[r.status]}">${BAKIM_STATUS_LABELS[r.status]}</span></td>
+              <td class="row-actions" style="white-space:nowrap">
+                <button data-log-for="${r.id}">✓ Yapıldı</button>
+                <button data-history-for="${r.id}">Geçmiş${logsByItem[r.id]?.length ? ` (${logsByItem[r.id].length})` : ""}</button>
+                <button data-edit-bakim="${r.id}">Düzenle</button>
+                <button data-del-bakim="${r.id}">Sil</button>
+              </td>
+            </tr>
+            ${logItemId === r.id ? `
+            <tr><td colspan="8" style="background:var(--surface-2)">
+              <div style="padding:6px 0"><strong>${esc(r.name)}</strong> — bakım yapıldı olarak kaydet</div>
+              <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:12px;align-items:end">
+                <div><label>Tarih</label>${dateInputHtml("bl-date", todayISO)}</div>
+                <div><label>Yapan firma / kişi</label><input id="bl-by" value="${esc(r.responsible || "")}" placeholder="opsiyonel"></div>
+                <div><label>Maliyet (₺) <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label><input id="bl-cost" type="number" min="0" step="0.01" placeholder="0"></div>
+              </div>
+              <label>Açıklama / not <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+              <input id="bl-note" placeholder="örn. kontrol tamamlandı, rapor arşivlendi">
+              <div style="display:flex;gap:8px;margin-top:10px">
+                <button class="primary" id="bl-save" style="margin:0;width:auto;padding:9px 16px">Kaydet</button>
+                <button class="secondary" id="bl-cancel" style="margin:0;width:auto;padding:9px 16px">İptal</button>
+              </div>
+              <div id="bl-msg"></div>
+            </td></tr>` : ""}
+            ${historyItemId === r.id ? `
+            <tr><td colspan="8" style="background:var(--surface-2)">
+              <div style="padding:4px 0 8px;font-weight:600">${esc(r.name)} — bakım geçmişi</div>
+              ${(logsByItem[r.id] || []).length ? (logsByItem[r.id]).map(l => `
+                <div class="list-item">
+                  <span>${fmtDate(l.done_on)}${l.performed_by ? ` · ${esc(l.performed_by)}` : ""}${l.note ? ` — <span style="color:var(--muted)">${esc(l.note)}</span>` : ""}${l.cost != null ? ` · <span style="color:var(--muted)">${Number(l.cost).toLocaleString("tr-TR", { minimumFractionDigits: 2 })} ₺</span>` : ""}</span>
+                  <div class="row-actions"><button data-del-log="${l.id}">Sil</button></div>
+                </div>`).join("") : `<p style="color:var(--muted);font-size:13px;margin:0">Henüz kayıt yok.</p>`}
+            </td></tr>` : ""}
+          `).join("")}
+        </tbody>
+      </table>
+      </div>` : `<p style="color:var(--muted);margin-top:10px">${rows.length ? "Bu filtrede kalem yok." : "Henüz bakım kalemi eklenmedi — yukarıdan ekle ya da örnek kalemleri yükle."}</p>`}
+    </div>
+  `;
+
+  wireDate3("b-last");
+  if (logItemId) wireDate3("bl-date");
+
+  content.querySelectorAll("[data-filter]").forEach(el => el.onclick = () => rerender({ filter: el.dataset.filter, editingId: null, logItemId: null, historyItemId: null }));
+
+  const seedBtn = document.getElementById("b-seed");
+  if (seedBtn) seedBtn.onclick = async () => {
+    seedBtn.disabled = true;
+    const base = (items || []).length;
+    const { error } = await sb.from("maintenance_items").insert(missingSeed.map((s, i) => ({ school_id: school.id, ...s, sort_order: base + i })));
+    if (error) { alert(error.message); seedBtn.disabled = false; return; }
+    await rerender({});
+  };
+
+  document.getElementById("b-save").onclick = async () => {
+    const msg = document.getElementById("b-msg");
+    const name = document.getElementById("b-name").value.trim();
+    const category = document.getElementById("b-category").value;
+    const period_months = parseInt(document.getElementById("b-period").value, 10);
+    const responsible = document.getElementById("b-responsible").value.trim() || null;
+    const contact = document.getElementById("b-contact").value.trim() || null;
+    const last_done_on = document.getElementById("b-last").value || null;
+    const notes = document.getElementById("b-notes").value.trim() || null;
+    if (!name) { msg.innerHTML = `<div class="msg err">Bakım adı gerekli.</div>`; return; }
+    if (!period_months || period_months < 1) { msg.innerHTML = `<div class="msg err">Periyot en az 1 ay olmalı.</div>`; return; }
+    if (last_done_on && last_done_on > todayISO) { msg.innerHTML = `<div class="msg err">Son yapılma tarihi bugünden ileri olamaz.</div>`; return; }
+    const payload = { school_id: school.id, name, category, period_months, responsible, contact, last_done_on, notes };
+    const { error } = editItem
+      ? await sb.from("maintenance_items").update(payload).eq("id", editItem.id)
+      : await sb.from("maintenance_items").insert(payload);
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    await rerender({ editingId: null });
+  };
+  const cancelBtn = document.getElementById("b-cancel");
+  if (cancelBtn) cancelBtn.onclick = () => rerender({ editingId: null });
+
+  const printBtn = document.getElementById("b-print");
+  if (printBtn) printBtn.onclick = () => window.print();
+
+  content.querySelectorAll("[data-edit-bakim]").forEach(b => b.onclick = () => { rerender({ editingId: b.dataset.editBakim, logItemId: null, historyItemId: null }); window.scrollTo({ top: 0, behavior: "smooth" }); });
+  content.querySelectorAll("[data-del-bakim]").forEach(b => b.onclick = async () => {
+    const r = rows.find(x => x.id === b.dataset.delBakim);
+    const n = logsByItem[b.dataset.delBakim]?.length || 0;
+    if (!confirm(`"${r?.name}" kalemini${n ? ` ve ${n} bakım geçmişi kaydını` : ""} silmek istediğine emin misin?`)) return;
+    await sb.from("maintenance_items").delete().eq("id", b.dataset.delBakim);
+    await rerender({ editingId: null, logItemId: null, historyItemId: null });
+  });
+  content.querySelectorAll("[data-log-for]").forEach(b => b.onclick = () => rerender({ logItemId: logItemId === b.dataset.logFor ? null : b.dataset.logFor, historyItemId: null }));
+  content.querySelectorAll("[data-history-for]").forEach(b => b.onclick = () => rerender({ historyItemId: historyItemId === b.dataset.historyFor ? null : b.dataset.historyFor, logItemId: null }));
+
+  const blSave = document.getElementById("bl-save");
+  if (blSave) blSave.onclick = async () => {
+    const msg = document.getElementById("bl-msg");
+    const done_on = document.getElementById("bl-date").value;
+    const performed_by = document.getElementById("bl-by").value.trim() || null;
+    const note = document.getElementById("bl-note").value.trim() || null;
+    const costRaw = document.getElementById("bl-cost").value;
+    const cost = costRaw === "" ? null : Number(costRaw);
+    if (!done_on) { msg.innerHTML = `<div class="msg err">Tarih gerekli.</div>`; return; }
+    if (done_on > todayISO) { msg.innerHTML = `<div class="msg err">Tarih bugünden ileri olamaz.</div>`; return; }
+    const item = rows.find(x => x.id === logItemId);
+    const { error } = await sb.from("maintenance_logs").insert({ school_id: school.id, item_id: logItemId, done_on, performed_by, note, cost });
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    // Geriye dönük (eski tarihli) bir kayıt giriliyorsa son yapılma tarihi geri gitmesin.
+    const newLast = !item.last_done_on || done_on > item.last_done_on ? done_on : item.last_done_on;
+    await sb.from("maintenance_items").update({ last_done_on: newLast }).eq("id", logItemId);
+    await rerender({ logItemId: null, historyItemId: logItemId });
+  };
+  const blCancel = document.getElementById("bl-cancel");
+  if (blCancel) blCancel.onclick = () => rerender({ logItemId: null });
+
+  content.querySelectorAll("[data-del-log]").forEach(b => b.onclick = async () => {
+    if (!confirm("Bu bakım geçmişi kaydını silmek istediğine emin misin?")) return;
+    await sb.from("maintenance_logs").delete().eq("id", b.dataset.delLog);
+    await rerender({});
+  });
+}
+
+/* Sonraki 12 ay: hangi bakım hangi ayda bekleniyor (rolling — takvim yılına bağlı değil). */
+function renderBakimPlan(rows, content, rerender) {
+  const now = new Date();
+  const months = Array.from({ length: 12 }, (_, i) => new Date(now.getFullYear(), now.getMonth() + i, 1));
+  const key = (d) => `${d.getFullYear()}-${d.getMonth()}`;
+  const colKeys = months.map(key);
+  const sorted = rows.slice().sort((a, b) => (a.next || "9999").localeCompare(b.next || "9999") || a.name.localeCompare(b.name, "tr"));
+  const perCol = colKeys.map(k => sorted.filter(r => r.next && key(new Date(r.next + "T00:00:00")) === k).length);
+  content.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0">Sonraki 12 Ay</h3>
+      <p style="color:var(--muted);font-size:12.5px">Her kalemin sonraki bakım tarihinin düştüğü ay. Gecikmiş kalemler ilk sütunda kırmızı, kayıt girilmemiş kalemler listede "—" ile görünür.</p>
+      ${rows.length ? `
+      <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Bakım</th>${months.map((d, i) => `<th style="text-align:center">${AY_KISA[d.getMonth()]}<div style="font-weight:400;font-size:10px">${String(d.getFullYear()).slice(2)}${perCol[i] ? ` · ${perCol[i]}` : ""}</div></th>`).join("")}</tr></thead>
+        <tbody>
+          ${sorted.map(r => {
+            const nextKey = r.next ? key(new Date(r.next + "T00:00:00")) : null;
+            const overdue = r.status === "gecikti";
+            return `<tr>
+              <td style="white-space:nowrap"><strong>${esc(r.name)}</strong><div style="font-size:11px;color:var(--muted)">${bakimPeriodLabel(r.period_months)}${r.next ? ` · ${fmtDate(r.next)}` : " · kayıt yok"}</div></td>
+              ${colKeys.map((k, i) => {
+                if (overdue && i === 0) return `<td style="text-align:center;color:var(--crit);font-weight:700" title="${r.next ? fmtDate(r.next) : ""}">!</td>`;
+                return `<td style="text-align:center">${nextKey === k ? `<span class="pill ${BAKIM_STATUS_PILL[r.status]}" title="${fmtDate(r.next)}">●</span>` : ""}</td>`;
+              }).join("")}
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table>
+      </div>` : `<p style="color:var(--muted)">Henüz bakım kalemi yok.</p>`}
+    </div>
+  `;
+}
+
+/* Kalıcı denetim izi: tüm tamamlanan bakımlar, kronolojik. Teftişte "ne zaman yapıldı" sorusunun cevabı. */
+function renderBakimGecmis(school, rows, logs, content, rerender) {
+  const nameById = Object.fromEntries(rows.map(r => [r.id, r.name]));
+  const total = logs.reduce((s, l) => s + (l.cost != null ? Number(l.cost) : 0), 0);
+  content.innerHTML = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <h3 style="margin:0">Bakım Geçmişi (${logs.length})</h3>
+        ${logs.length ? `<button class="secondary" id="bg-print" style="width:auto;padding:7px 12px;font-size:12.5px">Yazdır</button>` : ""}
+      </div>
+      <p style="color:var(--muted);font-size:12.5px">Her "✓ Yapıldı" kaydı buraya düşer ve kalem silinmedikçe kalır — denetim/teftiş için kalıcı kayıt defteri.${total ? ` Toplam kayıtlı maliyet: <strong>${total.toLocaleString("tr-TR", { minimumFractionDigits: 2 })} ₺</strong>` : ""}</p>
+      ${logs.length ? `
+      <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Tarih</th><th>Bakım</th><th>Yapan</th><th>Açıklama</th><th>Maliyet</th><th></th></tr></thead>
+        <tbody>
+          ${logs.map(l => `<tr>
+            <td style="white-space:nowrap">${fmtDate(l.done_on)}</td>
+            <td>${esc(nameById[l.item_id] || "(silinmiş kalem)")}</td>
+            <td>${esc(l.performed_by || "—")}</td>
+            <td>${esc(l.note || "")}</td>
+            <td style="white-space:nowrap">${l.cost != null ? Number(l.cost).toLocaleString("tr-TR", { minimumFractionDigits: 2 }) + " ₺" : "—"}</td>
+            <td class="row-actions"><button data-del-log="${l.id}">Sil</button></td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+      </div>` : `<p style="color:var(--muted)">Henüz tamamlanmış bakım kaydı yok.</p>`}
+    </div>
+  `;
+  const printBtn = document.getElementById("bg-print");
+  if (printBtn) printBtn.onclick = () => window.print();
+  content.querySelectorAll("[data-del-log]").forEach(b => b.onclick = async () => {
+    if (!confirm("Bu bakım geçmişi kaydını silmek istediğine emin misin?")) return;
+    await sb.from("maintenance_logs").delete().eq("id", b.dataset.delLog);
+    await rerender({});
+  });
+}
+
 /* ============ LGS KOÇLUK & TAKİP ============ */
 
 function lgsHeader(profile, school, activeTab) {
@@ -5369,6 +5747,15 @@ const KILAVUZ_SECTIONS = [
   { id: "planlama", title: "Planlama İşleri", html: `
     <p>Kurul, komisyon ya da kulüp oluştur; üyelerini öğretmen listesinden seç ya da (veli, öğrenci temsilcisi gibi öğretmen olmayanlar için) elle yaz. Her kurul için ayrı toplantı/faaliyet kaydı (tarih, gündem, kararlar) tutulur.</p>
   ` },
+  { id: "bakim", title: "Periyodik Bakım Takibi", html: `
+    <p>Okulun periyodik bakım/kontrol kalemlerini (asansör, yangın tüpü, su deposu, doğalgaz, paratoner, jeneratör…) tek yerden takip eder: <strong>son yapılma tarihi + periyot → sonraki tarih</strong>, kalan gün ve durum (Gecikti / Yaklaşıyor ≤30 gün / Uygun) otomatik hesaplanır. Gecikmiş kalem sayısı ana ekrandaki kartta rozet olarak görünür.</p>
+    <ol>
+      <li>İlk açılışta "Örnek kalemleri ekle" ile sık rastlanan kalemleri yükle, sonra düzenle/sil. <strong>Periyotlar öneridir</strong> — asansör, yangın tesisatı, doğalgaz, elektrik/topraklama gibi kalemlerde yürürlükteki mevzuatın ve yetkili kuruluşun belirlediği süreyi esas al, gerekirse periyodu değiştir.</li>
+      <li>Bir bakım yapıldığında ilgili satırda <strong>"✓ Yapıldı"</strong> de, tarih/yapan/not/maliyet gir — hem sonraki tarih otomatik ilerler hem de kayıt <strong>Bakım Geçmişi</strong>'ne kalıcı olarak düşer (teftişte "ne zaman yapıldı, kim yaptı" sorusunun cevabı).</li>
+      <li><strong>Yıllık Plan</strong> sekmesi sonraki 12 ayda hangi bakımın hangi aya düştüğünü gösterir — bütçe ve firma randevusu planlaması için.</li>
+    </ol>
+    <p>"Yazdır" ile hem çizelgeyi hem geçmişi kâğıda dökebilirsin.</p>
+  ` },
   { id: "pano", title: "Okul Panosu", html: `
     <p>Koridora asılacak ikinci bir ekran için duyuru, medya (fotoğraf/video yükleme ya da YouTube-Vimeo linki) ve pekiştireç (ayın öğrencisi vb.) yönetimi.</p>
     <ol>
@@ -5428,6 +5815,8 @@ const SSS_ITEMS = [
   { cat: "LGS Koçluk", q: "Zayıflık Analizi'ndeki \"öncelik skoru\" nasıl hesaplanıyor?", a: `Ham "en düşük net" sıralaması değildir — son denemelerin yakınlık ağırlıklı trendi ile dersin (ya da tanımlıysa konunun) LGS'deki soru ağırlığı birlikte hesaba katılır. Az soru gelen bir ders, çok soru gelen bir dersin önüne geçemez.` },
   { cat: "LGS Koçluk", q: "Konu bazlı hata etiketlemesi zorunlu mu?", a: `Hayır, tamamen opsiyoneldir. Konu tanımlamazsan sistem ders bazlı çalışmaya devam eder; tanımlarsan Zayıflık Analizi ve Haftalık Görevler'deki öneriler konu seviyesinde daha spesifik hale gelir (ör. "Matematik çalış" yerine "Kesirler çalış").` },
   { cat: "LGS Koçluk", q: "Kayıt Geçmişi'ni kim görebilir?", a: `İdareci okul genelindeki tüm değişiklikleri, öğretmen ise sadece kendi yaptığı işlemleri görür.` },
+  { cat: "Periyodik Bakım", q: "Örnek kalemlerdeki periyotlar yasal zorunluluk mu?", a: `Hayır. Örnek periyotlar sahadan gelen yaygın uygulamayı yansıtır, yasal süre değildir. Asansör, yangın tesisatı, doğalgaz, elektrik/topraklama gibi kalemlerde yürürlükteki mevzuatın ve yetkili muayene kuruluşunun belirlediği süre esastır — farklıysa "Düzenle" ile periyodu değiştir.` },
+  { cat: "Periyodik Bakım", q: "Eski tarihli bir bakımı sonradan girersem sonraki tarih geriye kayar mı?", a: `Hayır. "✓ Yapıldı" ile girilen tarih, kalemin mevcut son yapılma tarihinden eskiyse sadece Bakım Geçmişi'ne kaydedilir; sonraki bakım tarihi her zaman en güncel yapılma tarihinden hesaplanır.` },
   { cat: "Genel", q: "Bir öğrenciyi/dersi/denemeyi silme yetkisi kimde?", a: `Kalıcı/idari işlemler (ekleme, silme, ders/deneme tanımlama) sadece idareciye açıktır. Öğretmen kendi öğrencisinin bazı bilgilerini güncelleyebilir ama silemez, yeni öğrenci ekleyemez.` },
   { cat: "Genel", q: "Girdiğim veriler nerede saklanıyor, güvenli mi?", a: `Akademik/idari veriler (öğrenci, deneme, nöbet, evrak vb.) Supabase üzerinde, okul bazlı izole (başka bir okulun verisi hiçbir şekilde görünmez) şekilde saklanır. Hassas kabul edilen Personel İşleri ve Sınav Kelebek ise hiç sunucuya gitmez, sadece kullandığın cihazda kalır.` },
 ];
