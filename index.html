@@ -7914,8 +7914,9 @@ function renderPanoItemRow(i) {
 async function renderPano(profile, school, content, typeFilter = "hepsi", statusFilter = "hepsi", editingId = null) {
   const [{ data: items }, { data: schoolRow }] = await Promise.all([
     sb.from("pano_items").select("*").eq("school_id", school.id).order("sort_order"),
-    sb.from("schools").select("display_token").eq("id", school.id).single(),
+    sb.from("schools").select("display_token, pano_pin_hash, pano_pin_updated_at").eq("id", school.id).single(),
   ]);
+  const pinSet = !!schoolRow?.pano_pin_hash;
   const editItem = editingId ? (items || []).find(i => i.id === editingId) : null;
   const formType = editItem?.type || "duyuru";
 
@@ -7938,6 +7939,18 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
         <button class="secondary" id="regen-token" style="margin-top:10px">Yeniden Oluştur <span style="color:var(--muted);font-weight:400">(eski link geçersiz olur)</span></button>
       ` : `<button class="primary" id="gen-token" style="width:100%">Görüntüleme Linki Oluştur</button>`}
     </div>
+
+    ${displayLink ? `
+    <div class="card" style="margin-bottom:16px;${pinSet ? "" : "border-color:var(--warn)"}">
+      <h3 style="margin-top:0">Ekran PIN'i <span class="pill ${pinSet ? "good" : "warn"}" style="margin-left:6px">${pinSet ? "Tanımlı" : "Tanımlı değil"}</span></h3>
+      <p style="color:var(--muted);font-size:12.5px;margin-bottom:10px">Pano öğrenci adı ve fotoğrafı (ayın öğrencisi vb.) gösterebilir. MEB Bilgi İşlem Genel Müdürlüğü'nün 29.06.2026 tarihli genelgesi (md.5) çevrim içi platformlarda öğrenci ve personel bilgisinin kamuya açık yayımlanmamasını istiyor; bu yüzden bağlantıyı bilen herkes değil, yalnızca PIN'i bilen koridor ekranı içeriği görebilmeli. PIN koridordaki cihazda bir kez girilir ve orada kalır; 15 dakikada 10 hatalı deneme ekranı kilitler.${pinSet && schoolRow.pano_pin_updated_at ? ` Son güncelleme: ${fmtDate(schoolRow.pano_pin_updated_at.slice(0, 10))}.` : ""}</p>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end">
+        <div><label>${pinSet ? "Yeni PIN" : "PIN"} <span style="color:var(--muted);font-weight:400">(4–8 rakam)</span></label><input id="pano-pin" inputmode="numeric" maxlength="8" placeholder="örn. 2468" autocomplete="off"></div>
+        <button class="primary" id="pano-pin-save" style="width:auto;margin:0;padding:9px 16px">${pinSet ? "PIN'i Değiştir" : "PIN'i Kaydet"}</button>
+      </div>
+      ${pinSet ? `<button class="secondary" id="pano-pin-clear" style="width:auto;margin-top:8px;padding:6px 12px;font-size:12.5px">PIN'i kaldır (önerilmez)</button>` : ""}
+      <div id="pano-pin-msg"></div>
+    </div>` : ""}
 
     ${displayLink ? `
     <div class="card" style="margin-bottom:16px">
@@ -8004,7 +8017,27 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
   const regenBtn = document.getElementById("regen-token");
   if (regenBtn) regenBtn.onclick = async () => {
     if (!confirm("Eski link artık çalışmayacak, koridordaki ekranı yeni linkle güncellemen gerekecek. Devam?")) return;
-    await sb.from("schools").update({ display_token: crypto.randomUUID() }).eq("id", school.id);
+    const newToken = crypto.randomUUID();
+    try { const oldPin = localStorage.getItem(`pano_pin_${schoolRow.display_token}`); if (oldPin) localStorage.setItem(`pano_pin_${newToken}`, oldPin); } catch { /* yoksay */ }
+    await sb.from("schools").update({ display_token: newToken }).eq("id", school.id);
+    await renderPano(profile, school, content, typeFilter, statusFilter);
+  };
+  const pinSaveBtn = document.getElementById("pano-pin-save");
+  if (pinSaveBtn) pinSaveBtn.onclick = async () => {
+    const msg = document.getElementById("pano-pin-msg");
+    const pin = document.getElementById("pano-pin").value.trim();
+    if (!/^[0-9]{4,8}$/.test(pin)) { msg.innerHTML = `<div class="msg err">PIN 4–8 rakamdan oluşmalı.</div>`; return; }
+    const { error } = await sb.rpc("set_pano_pin", { p_pin: pin });
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    try { localStorage.setItem(`pano_pin_${schoolRow.display_token}`, pin); } catch { /* önizleme PIN isteyecek */ }
+    await renderPano(profile, school, content, typeFilter, statusFilter);
+  };
+  const pinClearBtn = document.getElementById("pano-pin-clear");
+  if (pinClearBtn) pinClearBtn.onclick = async () => {
+    if (!confirm("PIN kaldırılırsa bağlantıyı bilen herkes panoyu görebilir; genelge gereği öğrenci bilgisi içeren içerik yayınlamamalısın. Yine de kaldırılsın mı?")) return;
+    const { error } = await sb.rpc("set_pano_pin", { p_pin: null });
+    if (error) { document.getElementById("pano-pin-msg").innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    try { localStorage.removeItem(`pano_pin_${schoolRow.display_token}`); } catch { /* yoksay */ }
     await renderPano(profile, school, content, typeFilter, statusFilter);
   };
   const previewRefreshBtn = document.getElementById("pano-preview-refresh");
@@ -8215,6 +8248,7 @@ const KILAVUZ_SECTIONS = [
     <p>"Yazdır" ile hem çizelgeyi hem geçmişi kâğıda dökebilirsin.</p>
   ` },
   { id: "pano", title: "Okul Panosu", html: `
+    <p><strong>Ekran PIN'i (kişisel veri koruması):</strong> Görüntüleme linkini oluşturduktan sonra "Ekran PIN'i" kartından 4–8 rakamlı bir PIN belirle. Koridordaki ekranda link ilk açıldığında PIN bir kez girilir ve o cihazda kalır; bağlantıyı ele geçiren başka biri içeriği göremez (15 dakikada 10 hatalı deneme ekranı kilitler). Dayanak: MEB Bilgi İşlem Genel Müdürlüğü'nün 29.06.2026 tarihli genelgesi md.5 — çevrim içi platformlarda öğrenci/personel bilgisi kamuya açık yayımlanamaz. Panelin canlı önizlemesi PIN'i kendiliğinden kullanır. PIN'i değiştirince koridor ekranı yeni PIN'i ister; ekrandaki 🔒 düğmesi PIN'i cihazdan siler.</p>
     <p>Koridora asılacak ikinci bir ekran için duyuru, medya (fotoğraf/video yükleme ya da YouTube-Vimeo linki) ve pekiştireç (ayın öğrencisi vb.) yönetimi.</p>
     <ol>
       <li>"Görüntüleme Linki Oluştur"a bas, çıkan bağlantıyı koridordaki ekranın tarayıcısına <strong>bir kere</strong> yapıştır ve açık bırak — giriş gerekmez.</li>
@@ -8277,6 +8311,7 @@ const SSS_ITEMS = [
   { cat: "Evrak Deposu", q: "Öğretmenlere verdiğim formlar (ders kesim, sınav kâğıdı teslim, proje, dönem sonu kontrol) nerede?", a: `Evrak Deposu'nda: "Ders Kesim Raporu", "Sınav Kâğıtları ve Cevap Anahtarı Teslim Tutanağı" (md.22/1-a), "Proje Ödevi Seçim ve Takip Formu" (md.22/2) ve "Dönem Sonu Öğretmen İş ve İşlemleri Kontrol Listesi". Tablo satırlarını "Sınıf | Ders | …" biçiminde dikey çubukla ayırarak gir; belge tabloyu kendisi çizer. "Maaş Değişiklik Bildirim Formu" ise aylık bildirim içindir; terfi satırları Personel İşleri'ndeki o ayın terfi kayıtlarından dolar.` },
   { cat: "Planlama İşleri", q: "Kurul ve komisyonları tek tek mi gireceğim?", a: `Hayır. "Ortaokul kurul/komisyon şablonunu yükle" düğmesi 25 kurul/komisyonu tek seferde ekler (mevcutlar korunur). Sonra her kurulun ayrıntısında beklenen üyelik yapısı (başkan, asil, yedek…) ve eksikler görünür; üyeleri Personel listesinden seçip rolünü aynı adla girersen sayaç dolar. ÖDDK yapısı yönetmelikten (md.57), diğerleri yaygın uygulamadır.` },
   { cat: "Sınav Kelebek", q: "Gözetmen ataması yapabiliyor muyum?", a: `Evet. Oturma planı oluştururken "Salon / derslik" ve "Gözetmen(ler)" alanlarını doldur; plan çıktısının başlığında salon ve gözetmen adı, altında gözetmen ve okul müdürü imza blokları yer alır. Birden fazla gözetmeni virgülle ayır.` },
+  { cat: "Okul Panosu", q: "Pano linkini bilen herkes öğrenci adlarını görebilir mi?", a: `PIN tanımladıysan hayır. Okul Panosu'ndaki "Ekran PIN'i" kartından 4–8 rakamlı PIN belirle; koridor ekranında link açılınca PIN bir kez girilir ve cihazda kalır, başka bir cihazdan açan kişi PIN'siz yalnızca okul adını görür. 15 dakikada 10 hatalı deneme kilitler. Bu, MEB'in 29.06.2026 tarihli kişisel veri genelgesinin (md.5) gereğidir; ayın öğrencisi gibi ad ve fotoğraf içeren içerik yayınlıyorsan PIN'siz kullanma. Fotoğraf için veli onayını da önceden al (genelge md.8).` },
   { cat: "Öğretmen Araçları", q: "Sınav analizine puanları nasıl gireceğim?", a: `e-Okul'daki puan listesini seçip kopyala, "Puan listesi" kutusuna yapıştır; satırlar "512 Ali Veli<sekme>85" gibi gelir, panel numarayı, adı ve puanı ayırır. Soru bazlı analiz istiyorsan her satırı "Ad Soyad | 10 | 8 | 5 …" biçiminde gir ve "Soru tam puanları" alanına 10,10,10… yaz; boş bırakırsan tam puan sorulara eşit bölünür. Veriler yalnızca bu tarayıcıda saklanır.` },
   { cat: "Öğretmen Araçları", q: "Analizdeki başarı eşiği ve aralıklar nereden geliyor?", a: `MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği md.21/1: Türkçe dışındaki derslerde 0–49,99 başarısız, 50,00 ve üzeri başarılı; Türkçe'de 70,00 eşiği. md.53/1: dönem ağırlıklı puan ortalaması 70,00–84,99 teşekkür, 85,00 ve üzeri takdir. Eşik alanı elle değiştirilebilir (lise için kendi yönetmeliğine göre gir).` },
   { cat: "Öğretmen Araçları", q: "Öğretmenler bu araçları kendi hesaplarından mı kullanıyor?", a: `Evet. Öğretmen davet koduyla giriş yapınca panelinde "Öğretmen Araçları" kartı çıkar; verileri kendi tarayıcısında kalır, idareci göremez. İdareci de ana ekrandan aynı araçları kullanabilir (örneğin ders okutan müdür yardımcısı). Kart, okulun modül listesinde "Öğretmen Araçları" açıksa görünür.` },
