@@ -1288,7 +1288,7 @@ function nobetTatilDoldur() {
   const s = document.getElementById("p-start")?.value, e = document.getElementById("p-end")?.value, inp = document.getElementById("p-holidays"), msg = document.getElementById("p-msg");
   if (!s || !e) { if (msg) msg.innerHTML = `<div class="msg err">Önce başlangıç ve bitiş tarihini gir.</div>`; return; }
   const days = takvimTatilGunleri(s, e);
-  inp.value = days.join(",");
+  inp.value = days.map(fmtDate).join(", ");
   if (msg) msg.innerHTML = `<div class="msg ok">${days.length} tatil günü MEB ${MEB_TAKVIM.yil} çalışma takviminden dolduruldu (${days.map(x => `${fmtDate(x)} ${tatilAdi(x)}`).slice(0, 4).join("; ")}${days.length > 4 ? "; …" : ""}). Okula özgü idari izin günlerini virgülle ekleyebilirsin.</div>`;
 }
 
@@ -2615,8 +2615,8 @@ async function renderDonem(profile, school, content, activePeriodId = null) {
       ${dateInputHtml("p-start", "")}
       <label>Bitiş</label>
       ${dateInputHtml("p-end", "")}
-      <label>Tatil / idari izin günleri <span style="color:var(--muted);font-weight:400">(virgülle ayır, örn. 2026-10-29,2026-11-24)</span></label>
-      <input id="p-holidays" placeholder="YYYY-AA-GG,YYYY-AA-GG">
+      <label>Tatil / idari izin günleri <span style="color:var(--muted);font-weight:400">(virgülle ayır, örn. 29.10.2026, 24.11.2026 — boş bırakırsan MEB takviminden dolar)</span></label>
+      <input id="p-holidays" placeholder="GG.AA.YYYY, GG.AA.YYYY">
       <button class="secondary" type="button" onclick="nobetTatilDoldur()" style="width:100%;margin-top:6px">MEB ${MEB_TAKVIM.yil} takviminden tatilleri doldur <span style="color:var(--muted);font-weight:400">(resmî tatiller, ara tatiller, yarıyıl — boş bırakırsan kayıtta otomatik dolar)</span></button>
       <button class="primary" id="p-save">Dönem Oluştur</button>
       <div id="p-msg"></div>
@@ -2642,7 +2642,11 @@ async function renderDonem(profile, school, content, activePeriodId = null) {
     const msg = document.getElementById("p-msg");
     if (!title || !starts_on || !ends_on) { msg.innerHTML = `<div class="msg err">Başlık, başlangıç ve bitiş gerekli.</div>`; return; }
     if (ends_on < starts_on) { msg.innerHTML = `<div class="msg err">Bitiş tarihi (${fmtDate(ends_on)}) başlangıçtan (${fmtDate(starts_on)}) önce olamaz — yılı kontrol et.</div>`; return; }
-    const holiday_dates = holidayRaw ? holidayRaw.split(",").map(s => s.trim()).filter(Boolean) : takvimTatilGunleri(starts_on, ends_on);
+    const parseTr = s => { const m = s.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/); if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`; return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null; };
+    const rawList = holidayRaw ? holidayRaw.split(/[,;\n]/).map(s => s.trim()).filter(Boolean) : [];
+    const badTokens = rawList.filter(s => !parseTr(s));
+    if (badTokens.length) { msg.innerHTML = `<div class="msg err">Tatil tarihi okunamadı: ${esc(badTokens.join(", "))} — GG.AA.YYYY biçiminde yaz.</div>`; return; }
+    const holiday_dates = rawList.length ? [...new Set(rawList.map(parseTr))].sort() : takvimTatilGunleri(starts_on, ends_on);
     const { data, error } = await sb.from("duty_periods").insert({ school_id: school.id, title, starts_on, ends_on, holiday_dates }).select().single();
     if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
     await renderDonem(profile, school, content, data.id);
@@ -2728,7 +2732,7 @@ async function renderSchedule(profile, school, period, area, devretId = null, ge
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <div>
           <h3 style="margin:0">${esc(period.title)}</h3>
-          <p style="color:var(--muted);font-size:12.5px;margin:4px 0 0">${period.starts_on} — ${period.ends_on}${period.holiday_dates?.length ? ` · ${period.holiday_dates.length} tatil günü hariç` : ""}</p>
+          <p style="color:var(--muted);font-size:12.5px;margin:4px 0 0">${fmtDate(period.starts_on)} — ${fmtDate(period.ends_on)}${period.holiday_dates?.length ? ` · <span title="${esc(period.holiday_dates.slice().sort().map(h => `${fmtDate(h)}${tatilAdi(h) ? " " + tatilAdi(h) : ""}`).join(", "))}" style="text-decoration:underline dotted;cursor:help">${period.holiday_dates.length} tatil günü hariç</span>` : ""}</p>
         </div>
         <button class="primary" id="gen-btn" style="margin:0;width:auto;padding:10px 18px">${assignments?.length ? "Yeniden Oluştur" : "Çizelge Oluştur"}</button>
       </div>
