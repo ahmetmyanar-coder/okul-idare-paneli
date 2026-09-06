@@ -182,6 +182,7 @@ const MODULES = [
   { name: "Planlama İşleri", desc: "Kurul, komisyon ve kulüplerin üye listesi ve toplantı/faaliyet kayıtları." },
   { name: "Periyodik Bakım Takibi", desc: "Asansör, yangın tüpü, su deposu, doğalgaz… bakım periyotları, gecikme uyarısı, denetim izi." },
   { name: "Öğrenci Disiplin Dosyası", desc: "Olay tutanağından ÖDDK kararına, veli tebliğine ve e-Okul'a kadar dosya akışı; ifade/karar/tebliğ belgeleri ve süre takibi (yönetmeliğe göre)." },
+  { name: "Ek Ders Onay Çizelgesi", desc: "Yönetici ve öğretmenlerin haftalık ders/ek ders/yönetim/nöbet saatleri; Karar'a göre sınır denetimi, yatay çizelge ve olur yazısı." },
   { name: "Okul Panosu", desc: "Koridor ekranı için duyuru, medya ve pekiştireç (ayın öğrencisi vb.) yönetimi." },
   { name: "Kullanma Kılavuzu", desc: "Her modülün nasıl kullanılacağı, adım adım." },
   { name: "Sıkça Sorulan Sorular", desc: "Aranabilir soru-cevap listesi." },
@@ -729,6 +730,8 @@ function renderDashboard(profile, school) {
   if (bakimCard) bakimCard.onclick = () => renderBakimModule(profile, school);
   const disCard = document.querySelector('[data-mod="Öğrenci Disiplin Dosyası"]');
   if (disCard) disCard.onclick = () => renderDisiplinModule(profile, school);
+  const ekdCard = document.querySelector('[data-mod="Ek Ders Onay Çizelgesi"]');
+  if (ekdCard) ekdCard.onclick = () => renderEkdersModule(profile, school);
   const panoCard = document.querySelector('[data-mod="Okul Panosu"]');
   if (panoCard) panoCard.onclick = () => renderPanoModule(profile, school);
   const kilavuzCard = document.querySelector('[data-mod="Kullanma Kılavuzu"]');
@@ -3934,6 +3937,384 @@ async function renderCommitteeDetail(school, committee, el) {
   });
 }
 
+/* ============ EK DERS ÜCRET ONAY ÇİZELGESİ ============ */
+/**
+ * Dayanak — tamamı birincil kaynaktan birebir okundu (MEB Personel Genel Müdürlüğü'nün Temmuz 2026 tarihli
+ * konsolide Karar metni, Karar + 8. Dönem Toplu Sözleşme metni ve Mevzuat Bilgi Sistemi'ndeki 657 metni):
+ *  - 2006/11350 sayılı Karar md.5: aylık karşılığı ders — yöneticiler 6, okul öncesi ve sınıf öğretmenleri 18,
+ *    genel bilgi ve meslek dersleri öğretmenleri 15, atölye ve laboratuvar öğretmenleri 20 saat.
+ *  - md.6/1: ek ders — yöneticiler 6'ya kadar; genel bilgi/meslek 6'sı zorunlu 15'e kadar; atölye 20'si zorunlu 24'e kadar.
+ *    md.6/2 (10/07/2026 değişik): okul öncesi ve sınıf öğretmenlerinde aylık karşılığı dışında fiilen okutulan her saat
+ *    zorunlu ek ders; haftada anaokulu/uygulama sınıfı 24, diğer ana sınıfları ve sınıf öğretmenleri 12 saati geçemez.
+ *    md.6/3: mesleki çalışma — yılda dört haftayı geçmemek üzere haftada 15 saat.
+ *    md.6/5: Öğrenci Sosyal ve Kişilik Hizmetleri (sınıf/şube rehber öğretmenliği veya danışman öğretmenlik) haftada 2 saat;
+ *    ikisi birden verilemez. (8. Dönem TS md.27 sınıf/okul öncesi/özel eğitim öğretmenleri ve şefleri de kapsama aldı.)
+ *  - md.10/1-c: ders niteliğinde yönetim görevi — anadolu/fen/sosyal bilimler/spor liseleri, mesleki-teknik, özel eğitim ve
+ *    okul öncesi kurumlarında müdür ve müdür başyardımcısı 25, müdür yardımcısı 20; diğer örgün kurumlarda 20 / 18.
+ *    md.10/1-d: rehber öğretmen ders yılı süresince 18. md.10/2: birden fazlası uyanlara yalnızca fazla olanı.
+ *  - md.11: hazırlık ve planlama — md.10'dakiler hariç; fiilen okutulan her 10 saat için 1 saat, haftada en çok 3.
+ *  - md.12: sınav görevi — her komisyon üyeliği/gözcülük 5 saat; yılda 12 komisyon, 15 gözcülük sınırı; yöneticilere ödenmez.
+ *  - md.17: ders dışı eğitim çalışmaları (egzersiz) — gündüz ücreti, haftada en çok 6 saat; yıllık toplam okulun ders saatinin %5'i.
+ *  - md.25: ek ders ancak fiilen yapılmışsa ödenir; belgeyi düzenleyen ve onaylayanlar müteselsilen sorumludur;
+ *    md.10/14/16 ücretleri izinli ve raporlu sürelerde ödenmez.
+ *  - 8. Dönem Toplu Sözleşme (2026-2027) md.19: nöbet — müdür yardımcıları ve öğretmenlere haftada 3 saati geçmemek üzere.
+ *    md.8: yüksek lisans %7, doktora %20 artırım — yalnızca fiilen girilen dersler ve md.10 yönetim görevi için;
+ *    hazırlık-planlama, sosyal kişilik, sınav, nöbet, belleticilik için uygulanmaz.
+ *  - 657 sayılı DMK md.176: gündüz 140; yarıyıl/yaz tatili, cumartesi-pazar ve 18.00 sonrası 150 gösterge × aylık katsayı;
+ *    özel eğitim kurumları/cezaevi %25, Destekleme ve Yetiştirme Kursları %100 fazlasıyla.
+ * Memur aylık katsayısı bu dosyada TUTULMAZ; her dönem Hazine ve Maliye Bakanlığı genelgesinden kullanıcı girer.
+ * Aylık ödeme MEBBİS Ek Ders Modülünde fiilen yapılan gün/saat üzerinden hesaplanır; panel haftalık plan × birim ücret tahmini verir.
+ */
+const EKDERS_GOREV = {
+  mudur:       { label: "Müdür",                          aylik: 6,  ekMax: 6,  yonetim: { diger: 20, anadolu_ozel: 25 }, hazirlik: false, sinav: false, nobet: false },
+  mudur_bas:   { label: "Müdür Başyardımcısı",            aylik: 6,  ekMax: 6,  yonetim: { diger: 20, anadolu_ozel: 25 }, hazirlik: false, sinav: false, nobet: false },
+  mudur_yrd:   { label: "Müdür Yardımcısı",               aylik: 6,  ekMax: 6,  yonetim: { diger: 18, anadolu_ozel: 20 }, hazirlik: false, sinav: false, nobet: true },
+  ogretmen:    { label: "Öğretmen (genel bilgi/meslek)",  aylik: 15, ekMax: 15, ekZorunlu: 6,  yonetim: { diger: 0, anadolu_ozel: 0 }, hazirlik: true, sinav: true, nobet: true },
+  sinif:       { label: "Sınıf Öğretmeni",                aylik: 18, ekMax: 12, yonetim: { diger: 0, anadolu_ozel: 0 }, hazirlik: true, sinav: true, nobet: true },
+  okul_oncesi: { label: "Okul Öncesi Öğretmeni",          aylik: 18, ekMax: 12, ekMaxAnaokulu: 24, yonetim: { diger: 0, anadolu_ozel: 0 }, hazirlik: true, sinav: true, nobet: true },
+  atolye:      { label: "Atölye / Laboratuvar Öğretmeni", aylik: 20, ekMax: 24, ekZorunlu: 20, yonetim: { diger: 0, anadolu_ozel: 0 }, hazirlik: true, sinav: true, nobet: true },
+  rehber:      { label: "Rehber Öğretmen",                aylik: 0,  ekMax: 0,  yonetim: { diger: 18, anadolu_ozel: 18 }, hazirlik: false, sinav: true, nobet: true },
+};
+const EKDERS_COLS = [
+  { k: "aylik_karsiligi",   label: "Aylık Karşılığı Ders Görevi",              auto: true },
+  { k: "ek_ders",           label: "Ek Ders Görevi (zorunlu + isteğe bağlı)",  rate: "gunduz", artirim: true },
+  { k: "yonetim_gorevi",    label: "Ders Niteliğinde Yönetim Görevi",          rate: "gunduz", artirim: true },
+  { k: "hazirlik_planlama", label: "Hazırlık ve Planlama Görevi",              rate: "gunduz" },
+  { k: "nobet",             label: "Nöbet Görevi",                             rate: "gunduz" },
+  { k: "sosyal_kisilik",    label: "Öğrenci Sosyal ve Kişilik Hizmetleri",     rate: "gunduz" },
+  { k: "egzersiz",          label: "Ders Dışı Eğitim Çalışması (Egzersiz)",    rate: "gunduz" },
+  { k: "dyk_gunduz",        label: "DYK Kursu (Gündüz)",                       rate: "dyk_gunduz" },
+  { k: "dyk_gece",          label: "DYK Kursu (Gece / Hafta sonu)",            rate: "dyk_gece" },
+  { k: "sinav_gorevi",      label: "Sınav Görevi (saat)",                      rate: "gunduz" },
+  { k: "mesleki_calisma",   label: "Mesleki Çalışma",                          rate: "gunduz" },
+  { k: "diger_gunduz",      label: "Diğer (Gündüz)",                           rate: "gunduz" },
+  { k: "diger_gece",        label: "Diğer (Gece / Hafta sonu / Tatil)",        rate: "gece" },
+];
+const EKDERS_GOSTERGE = { gunduz: 140, gece: 150, dyk_gunduz: 280, dyk_gece: 300 };   // 657 md.176 (DYK %100 fazlası)
+const EKDERS_ARTIRIM = { yok: 0, yl: 0.07, doktora: 0.20 };                            // 8. Dönem TS md.8
+const EKDERS_LU_LABEL = { yok: "—", yl: "YL", doktora: "Dr." };
+
+function ekdersDefaultKategori(school) { return school.okul_turu === "okul_oncesi" ? "anadolu_ozel" : "diger"; }
+function ekdersEkMax(gorev, okulTuru) { const g = EKDERS_GOREV[gorev] || EKDERS_GOREV.ogretmen; return gorev === "okul_oncesi" && okulTuru === "okul_oncesi" ? g.ekMaxAnaokulu : g.ekMax; }
+function ekdersDerive(row, kategori) {
+  const g = EKDERS_GOREV[row.gorev] || EKDERS_GOREV.ogretmen;
+  const lh = Math.max(0, +row.lesson_hours || 0);
+  const aylik = Math.min(lh, g.aylik);
+  return { aylik_karsiligi: aylik, ek_ders: Math.max(0, lh - aylik), hazirlik_planlama: g.hazirlik ? Math.min(3, Math.floor(lh / 10)) : 0, yonetim_gorevi: g.yonetim[kategori] ?? 0 };
+}
+function ekdersWarnings(row, kategori, okulTuru) {
+  const g = EKDERS_GOREV[row.gorev] || EKDERS_GOREV.ogretmen, w = [];
+  const lh = +row.lesson_hours || 0, ekMax = ekdersEkMax(row.gorev, okulTuru), hazMax = Math.floor(lh / 10);
+  if ((+row.ek_ders || 0) > ekMax) w.push(`Ek ders ${row.ek_ders} > haftalık üst sınır ${ekMax} (Karar md.6)`);
+  if (g.ekZorunlu && lh >= g.aylik && (+row.ek_ders || 0) < g.ekZorunlu) w.push(`${g.ekZorunlu} saat ek ders zorunlu (md.6/1)`);
+  if (!g.hazirlik && (+row.hazirlik_planlama || 0) > 0) w.push("Md.10 kapsamındakilere (yönetici/rehber öğretmen) hazırlık-planlama ödenmez (md.11)");
+  else if ((+row.hazirlik_planlama || 0) > Math.min(3, hazMax)) w.push(`Hazırlık-planlama: fiilen okutulan her 10 saat için 1, en çok 3 → bu satırda ${Math.min(3, hazMax)} (md.11)`);
+  if ((+row.nobet || 0) > 3) w.push("Nöbet haftada 3 saati geçemez (8. Dönem TS md.19)");
+  if (!g.nobet && (+row.nobet || 0) > 0) w.push("Nöbet ücreti müdür yardımcıları ve öğretmenlere ödenir (TS md.19)");
+  if ((+row.sosyal_kisilik || 0) > 2) w.push("Öğrenci sosyal ve kişilik hizmetleri haftada 2 saattir (md.6/5)");
+  if ((+row.egzersiz || 0) > 6) w.push("Ders dışı eğitim çalışması haftada 6 saati geçemez (md.17)");
+  if (!g.sinav && (+row.sinav_gorevi || 0) > 0) w.push("Yöneticilere sınav görevi ücreti ödenmez (md.12/2-c)");
+  if ((+row.sinav_gorevi || 0) % 5 !== 0) w.push("Sınav görevi her görev için 5 saattir; 5'in katı olmalı (md.12)");
+  if ((+row.mesleki_calisma || 0) > 15) w.push("Mesleki çalışma haftada 15 saattir (md.6/3)");
+  const yonMax = g.yonetim[kategori] ?? 0;
+  if ((+row.yonetim_gorevi || 0) > yonMax) w.push(`Ders niteliğinde yönetim görevi bu görev için en çok ${yonMax} saat (md.10)`);
+  if (row.gorev === "rehber" && lh > 0) w.push("Rehber öğretmenin ders yükü md.10/1-d kapsamı dışında — kontrol et");
+  return w;
+}
+function ekdersRowTotals(row, katsayi) {
+  const art = EKDERS_ARTIRIM[row.lisansustu] || 0;
+  let hours = 0, amount = 0;
+  EKDERS_COLS.forEach(c => {
+    if (c.auto) return;
+    const h = +row[c.k] || 0; hours += h;
+    amount += h * EKDERS_GOSTERGE[c.rate] * (c.artirim ? 1 + art : 1) * (katsayi || 0);
+  });
+  return { hours, amount };
+}
+const ekdersFmtTL = n => n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const ekdersParseK = v => { const n = parseFloat(String(v || "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : null; };
+
+function ekdersCizelgeHtml(school, sheet, rows) {
+  const k = sheet.katsayi ? +sheet.katsayi : null;
+  const totals = rows.map(r => ekdersRowTotals(r, k));
+  const sum = key => rows.reduce((a, r) => a + (+r[key] || 0), 0);
+  return `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"><title>Ek Ders Ücret Onay Çizelgesi</title>
+<style>@page{size:A4 landscape;margin:10mm}body{font-family:"Times New Roman",serif;font-size:9pt;color:#000;margin:0}h2{text-align:center;font-size:12pt;margin:0 0 6px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #000;padding:2px 3px;text-align:center;vertical-align:middle}th{font-size:7.5pt;background:#eee}td.l{text-align:left}table.meta td{border:none;text-align:left;padding:1px 4px}table.sig td{border:none;text-align:center;font-size:9.5pt;padding-top:26px}.note{font-size:7.5pt;margin-top:6px;text-align:justify}</style></head><body>
+<h2>MİLLÎ EĞİTİM BAKANLIĞI<br>EK DERS ÜCRET ONAY ÇİZELGESİ</h2>
+<table class="meta"><tr><td><b>Okul:</b> ${esc(school.name)}</td><td><b>İl / İlçe:</b> ${esc(school.il || "")} / ${esc(school.ilce || "")}</td><td><b>Dönem:</b> ${sheet.period_start ? fmtDate(sheet.period_start) : "…"} – ${sheet.period_end ? fmtDate(sheet.period_end) : "…"}</td><td><b>Düzenleme tarihi:</b> ${fmtDate(toLocalISO(new Date()))}</td></tr></table>
+<table><thead><tr><th>SN</th><th>Adı Soyadı</th><th>Görevi</th><th>Branşı</th><th>Haftalık Okuttuğu Ders</th>${EKDERS_COLS.map(c => `<th>${esc(c.label)}</th>`).join("")}<th>Lisans-üstü</th><th>Ücretli Toplam (saat/hafta)</th>${k ? "<th>Tahmini Haftalık Tutar (TL)</th>" : ""}<th>Açıklama</th></tr></thead>
+<tbody>${rows.map((r, i) => `<tr><td>${i + 1}</td><td class="l">${esc(r.full_name)}</td><td>${esc(EKDERS_GOREV[r.gorev]?.label || r.gorev)}</td><td>${esc(r.brans || "")}</td><td>${+r.lesson_hours || 0}</td>${EKDERS_COLS.map(c => `<td>${+r[c.k] || ""}</td>`).join("")}<td>${r.lisansustu === "yok" ? "" : EKDERS_LU_LABEL[r.lisansustu] || ""}</td><td><b>${totals[i].hours}</b></td>${k ? `<td>${ekdersFmtTL(totals[i].amount)}</td>` : ""}<td class="l">${esc(r.aciklama || "")}</td></tr>`).join("")}
+<tr><td colspan="4"><b>TOPLAM</b></td><td><b>${sum("lesson_hours")}</b></td>${EKDERS_COLS.map(c => `<td><b>${sum(c.k) || ""}</b></td>`).join("")}<td></td><td><b>${totals.reduce((a, t) => a + t.hours, 0)}</b></td>${k ? `<td><b>${ekdersFmtTL(totals.reduce((a, t) => a + t.amount, 0))}</b></td>` : ""}<td></td></tr></tbody></table>
+<p class="note">Dayanak: 2006/11350 sayılı Bakanlar Kurulu Kararı (md. 5, 6, 10, 11, 12, 17, 25), 2026 ve 2027 Yıllarını Kapsayan 8. Dönem Toplu Sözleşme (md. 8, 19, 27) ve 657 sayılı Kanun md. 176. Ek ders ücreti yalnızca fiilen yapılan görevler için ödenir (md.25).${k ? ` Tahmini tutar: haftalık saat × gösterge (gündüz 140; gece/hafta sonu/tatil 150; DYK 280/300; lisansüstü artırımı yalnızca ek ders ve yönetim görevinde) × ${k.toLocaleString("tr-TR", { maximumFractionDigits: 6 })} katsayısı. Kesin hesap MEBBİS Ek Ders Modülünde fiilen yapılan gün/saat üzerinden yapılır.` : ""}</p>
+<table class="sig"><tr><td>${officialSignatureName(school.mudur_adi)}<br>Okul Müdürü</td><td>OLUR<br>…/…/……<br><br>…………………<br>${esc(sheet.olur_makam || "İlçe Millî Eğitim Müdürü")}</td></tr></table>
+</body></html>`;
+}
+function ekdersOnayHtml(school, sheet, rows) {
+  const k = sheet.katsayi ? +sheet.katsayi : null;
+  const kTxt = k ? k.toLocaleString("tr-TR", { maximumFractionDigits: 6 }) : null;
+  const tl = g => k ? ` (${g.toLocaleString("tr-TR")} × ${kTxt} = ${ekdersFmtTL(g * k)} TL)` : "";
+  const makam = sheet.olur_makam || "İlçe Millî Eğitim Müdürü";
+  const hitap = /kaymakam/i.test(makam) ? "KAYMAKAMLIK MAKAMINA" : /^il\b|il millî|il milli/i.test(makam) && !/ilçe/i.test(makam) ? "İL MİLLÎ EĞİTİM MÜDÜRLÜĞÜNE" : "İLÇE MİLLÎ EĞİTİM MÜDÜRLÜĞÜNE";
+  const period = sheet.period_start && sheet.period_end ? `${fmtDate(sheet.period_start)} – ${fmtDate(sheet.period_end)} tarihleri arasında` : "ekli çizelgede belirtilen dönemde";
+  const yonetici = rows.filter(r => ["mudur", "mudur_bas", "mudur_yrd"].includes(r.gorev)).length, ogretmen = rows.length - yonetici;
+  return docWrapper(school, `
+    <p style="margin-top:20px"><strong>${hitap}</strong></p>
+    <p style="font-size:10.5pt"><strong>İlgi:</strong> a) 16/12/2006 tarihli ve 26378 sayılı Resmî Gazete'de yayımlanan 2006/11350 sayılı Bakanlar Kurulu Kararı (Millî Eğitim Bakanlığı Yönetici ve Öğretmenlerinin Ders ve Ek Ders Saatlerine İlişkin Karar),<br>b) 2026 ve 2027 Yıllarını Kapsayan 8. Dönem Toplu Sözleşme (Eğitim, Öğretim ve Bilim Hizmet Kolu),<br>c) 657 sayılı Devlet Memurları Kanunu'nun 176 ncı maddesi.</p>
+    <p style="text-align:justify;text-indent:1.25cm">Okulumuzda görev yapan ve ekli çizelgede durumları belirtilen ${yonetici} yönetici ve ${ogretmen} öğretmene, ilgi (a) Karar ile ilgi (b) Toplu Sözleşme hükümleri gereğince ${period} isimleri karşısında belirtilen aylık karşılığı ders, ek ders ve ek ders görevinden sayılan (ders niteliğinde yönetim, hazırlık ve planlama, nöbet, öğrenci sosyal ve kişilik hizmetleri, ders dışı eğitim çalışmaları, sınav ve mesleki çalışma) görevlerinin verilmesi; kendilerine ders görevi verilenlere ilgi (c) madde gereğince ders saati başına gündüz öğretimi için 140${tl(140)}, yarıyıl ve yaz tatilleri, cumartesi ve pazar günleri ile saat 18.00'den sonra başlayan öğretim faaliyetleri için 150${tl(150)} gösterge rakamının memur aylık katsayısı ile çarpımı üzerinden; Destekleme ve Yetiştirme Kursları kapsamındaki görevler için %100 fazlasıyla${k ? ` (gündüz ${ekdersFmtTL(280 * k)} TL, gece ${ekdersFmtTL(300 * k)} TL)` : ""}, özel eğitim kapsamındaki görevler için %25 fazlasıyla${tl(175)}; yüksek lisans yapmış olanlara fiilen girdikleri dersler ve ders niteliğinde yönetim görevi için %7${tl(149.8)}, doktora yapmış olanlara %20${tl(168)} artırımlı olmak üzere, görevlerin fiilen yapılması kaydıyla ek ders ücreti ödenmesi hususunu olurlarınıza arz ederim.</p>
+    <table style="width:100%;margin-top:30px"><tr><td style="text-align:center"><strong>${officialSignatureName(school.mudur_adi)}</strong><br>Okul Müdürü</td></tr></table>
+    <p style="margin-top:34px;text-align:right"><strong>OLUR</strong><br>…/…/……<br><br>…………………<br>${esc(makam)}</p>
+    <p style="margin-top:20px"><strong>Ek:</strong> Ek Ders Ücret Onay Çizelgesi (${rows.length} kişi)</p>
+  `, { konu: "Ek Ders Ücret Onayı", tarih: toLocalISO(new Date()) });
+}
+
+async function renderEkdersModule(profile, school, sheetId = null) {
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Ek Ders Ücret Onay Çizelgesi</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Yönetici ve öğretmenlerin haftalık aylık karşılığı ders, ek ders ve ek ders görevinden sayılan saatleri; 2006/11350 sayılı Karar, 8. Dönem Toplu Sözleşme ve 657/176'ya göre otomatik sınır denetimi, yatay çizelge ve olur yazısı. Katsayıyı her dönem Hazine ve Maliye Bakanlığı genelgesinden gir — panel varsayılan katsayı vermez.</div>
+      <div id="ekd-content"></div>
+    </div>`;
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  const content = document.getElementById("ekd-content");
+  content.innerHTML = `<div class="card">Yükleniyor…</div>`;
+  if (sheetId) await renderEkdersSheet(profile, school, content, sheetId);
+  else await renderEkdersList(profile, school, content);
+}
+
+async function renderEkdersList(profile, school, content) {
+  const { data: sheets } = await sb.from("ekders_sheets").select("*, ekders_rows(count)").eq("school_id", school.id).order("created_at", { ascending: false });
+  const now = new Date(), y = now.getFullYear(), eoy = now.getMonth() + 1 >= 9 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
+  const defKat = ekdersDefaultKategori(school);
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Yeni Çizelge</h3>
+      <label>Başlık</label><input id="es-title" value="${esc(eoy)} Eğitim-Öğretim Yılı Ek Ders Ücret Onay Çizelgesi">
+      <div style="display:grid;grid-template-columns:auto auto 1fr;gap:12px;align-items:end">
+        <div><label>Dönem başlangıcı</label>${dateInputHtml("es-start", "")}</div>
+        <div><label>Dönem bitişi</label>${dateInputHtml("es-end", "")}</div>
+        <div><label>Memur aylık katsayısı <span style="color:var(--muted);font-weight:400">(dönem genelgesinden; boş bırakılabilir)</span></label><input id="es-katsayi" inputmode="decimal" placeholder="örn. 1,234567"></div>
+      </div>
+      <label>Kurum kategorisi <span style="color:var(--muted);font-weight:400">(Karar md.10/1-c yönetim görevi saatleri)</span></label>
+      <select id="es-kategori">
+        <option value="diger" ${defKat === "diger" ? "selected" : ""}>Diğer örgün eğitim kurumları (ilkokul, ortaokul, genel lise…) — müdür 20 / müdür yrd. 18 saat</option>
+        <option value="anadolu_ozel" ${defKat === "anadolu_ozel" ? "selected" : ""}>Anadolu/fen/sosyal bilimler/spor lisesi, mesleki-teknik, özel eğitim, okul öncesi — müdür 25 / müdür yrd. 20 saat</option>
+      </select>
+      <label>Olur makamı (imza bloğu)</label><input id="es-olur" value="İlçe Millî Eğitim Müdürü">
+      <button class="primary" id="es-save">Çizelgeyi Oluştur</button>
+      <div id="es-msg"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Çizelgeler</h3>
+      ${(sheets || []).length ? sheets.map(s => `<div class="list-item"><span><strong>${esc(s.title)}</strong><div style="font-size:11.5px;color:var(--muted)">${s.period_start ? fmtDate(s.period_start) : "…"} – ${s.period_end ? fmtDate(s.period_end) : "…"} · ${s.ekders_rows?.[0]?.count ?? 0} kişi · katsayı ${s.katsayi ? (+s.katsayi).toLocaleString("tr-TR", { maximumFractionDigits: 6 }) : "girilmedi"}</div></span><div class="row-actions"><button data-open-sheet="${s.id}">Aç</button><button data-del-sheet="${s.id}">Sil</button></div></div>`).join("") : `<p style="color:var(--muted)">Henüz çizelge yok.</p>`}
+    </div>`;
+  wireDate3("es-start"); wireDate3("es-end");
+  content.querySelectorAll("[data-open-sheet]").forEach(b => b.onclick = () => renderEkdersModule(profile, school, b.dataset.openSheet));
+  content.querySelectorAll("[data-del-sheet]").forEach(b => b.onclick = async () => {
+    const s = sheets.find(x => x.id === b.dataset.delSheet);
+    if (!confirm(`"${s.title}" çizelgesini tüm satırlarıyla silmek istediğine emin misin?`)) return;
+    await sb.from("ekders_sheets").delete().eq("id", s.id);
+    await renderEkdersList(profile, school, content);
+  });
+  document.getElementById("es-save").onclick = async () => {
+    const msg = document.getElementById("es-msg");
+    const title = document.getElementById("es-title").value.trim();
+    if (!title) { msg.innerHTML = `<div class="msg err">Başlık gerekli.</div>`; return; }
+    const kRaw = document.getElementById("es-katsayi").value.trim();
+    if (kRaw && !ekdersParseK(kRaw)) { msg.innerHTML = `<div class="msg err">Katsayı sayı olmalı (örn. 1,234567).</div>`; return; }
+    const { data, error } = await sb.from("ekders_sheets").insert({
+      school_id: school.id, title, period_start: document.getElementById("es-start").value || null, period_end: document.getElementById("es-end").value || null,
+      katsayi: ekdersParseK(kRaw), kurum_kategori: document.getElementById("es-kategori").value, olur_makam: document.getElementById("es-olur").value.trim() || null, created_by: profile.id,
+    }).select().single();
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    await renderEkdersModule(profile, school, data.id);
+  };
+}
+
+async function renderEkdersSheet(profile, school, content, sheetId) {
+  const [{ data: sheet }, { data: dbRows }] = await Promise.all([
+    sb.from("ekders_sheets").select("*").eq("id", sheetId).single(),
+    sb.from("ekders_rows").select("*").eq("sheet_id", sheetId).order("sort_order").order("created_at"),
+  ]);
+  if (!sheet) { content.innerHTML = `<div class="card">Çizelge bulunamadı.</div>`; return; }
+  let rows = (dbRows || []).map(r => ({ ...r }));
+  const removed = [];
+  let dirty = false;
+  const k = sheet.katsayi ? +sheet.katsayi : null, kat = sheet.kurum_kategori, okulTuru = school.okul_turu;
+  const inp = 'style="margin:0;padding:4px;font-size:12.5px"';
+  const numInput = (i, key, val, ro = false) => `<input type="number" min="0" step="1" data-r="${i}" data-k="${key}" value="${+val || 0}" ${ro ? "readonly" : ""} style="width:52px;margin:0;padding:4px;text-align:center;font-size:12.5px${ro ? ";background:var(--surface-2);color:var(--muted)" : ""}">`;
+  const rowHtml = (r, i) => {
+    const t = ekdersRowTotals(r, k), w = ekdersWarnings(r, kat, okulTuru);
+    return `<tr data-row="${i}">
+      <td>${i + 1}</td>
+      <td><input data-r="${i}" data-k="full_name" value="${esc(r.full_name)}" style="width:150px;margin:0;padding:4px;font-size:12.5px"></td>
+      <td><select data-r="${i}" data-k="gorev" style="width:170px;margin:0;padding:4px;font-size:12px">${Object.entries(EKDERS_GOREV).map(([id, g]) => `<option value="${id}" ${r.gorev === id ? "selected" : ""}>${g.label}</option>`).join("")}</select></td>
+      <td><input data-r="${i}" data-k="brans" value="${esc(r.brans || "")}" style="width:110px;margin:0;padding:4px;font-size:12.5px"></td>
+      <td>${numInput(i, "lesson_hours", r.lesson_hours)}</td>
+      ${EKDERS_COLS.map(c => `<td>${numInput(i, c.k, r[c.k], !!c.auto)}</td>`).join("")}
+      <td><select data-r="${i}" data-k="lisansustu" style="width:78px;margin:0;padding:4px;font-size:12px">${Object.entries(EKDERS_LU_LABEL).map(([id, l]) => `<option value="${id}" ${r.lisansustu === id ? "selected" : ""}>${l}${id === "yl" ? " %7" : id === "doktora" ? " %20" : ""}</option>`).join("")}</select></td>
+      <td class="ekd-hours" style="text-align:center"><strong>${t.hours}</strong></td>
+      <td class="ekd-amount" style="text-align:right;white-space:nowrap">${k ? ekdersFmtTL(t.amount) : "—"}</td>
+      <td><input data-r="${i}" data-k="aciklama" value="${esc(r.aciklama || "")}" style="width:120px;margin:0;padding:4px;font-size:12px"></td>
+      <td class="ekd-warn" style="min-width:180px;font-size:11px;color:var(--crit)">${w.map(esc).join("<br>")}</td>
+      <td><button data-del-row="${i}" style="margin:0;padding:4px 8px;font-size:12px">Sil</button></td>
+    </tr>`;
+  };
+  const footHtml = () => {
+    const tot = rows.map(r => ekdersRowTotals(r, k));
+    const sum = key => rows.reduce((a, r) => a + (+r[key] || 0), 0);
+    return `<tr style="font-weight:600"><td colspan="4">Toplam (${rows.length} kişi)</td><td style="text-align:center">${sum("lesson_hours")}</td>${EKDERS_COLS.map(c => `<td style="text-align:center">${sum(c.k)}</td>`).join("")}<td></td><td style="text-align:center">${tot.reduce((a, t) => a + t.hours, 0)}</td><td style="text-align:right;white-space:nowrap">${k ? ekdersFmtTL(tot.reduce((a, t) => a + t.amount, 0)) : "—"}</td><td colspan="3"></td></tr>`;
+  };
+
+  content.innerHTML = `
+    <button class="navlink" id="ekd-back-list">← Çizelge listesi</button>
+    <div class="card" style="margin-bottom:14px">
+      <h3 style="margin-top:0">${esc(sheet.title)}</h3>
+      <div style="display:grid;grid-template-columns:auto auto 1fr 1fr;gap:12px;align-items:end">
+        <div><label>Dönem başlangıcı</label>${dateInputHtml("ek-start", sheet.period_start || "")}</div>
+        <div><label>Dönem bitişi</label>${dateInputHtml("ek-end", sheet.period_end || "")}</div>
+        <div><label>Memur aylık katsayısı</label><input id="ek-katsayi" inputmode="decimal" value="${k ? String(k).replace(".", ",") : ""}" placeholder="dönem genelgesinden"></div>
+        <div><label>Olur makamı</label><input id="ek-olur" value="${esc(sheet.olur_makam || "İlçe Millî Eğitim Müdürü")}"></div>
+      </div>
+      <label>Kurum kategorisi (md.10/1-c)</label>
+      <select id="ek-kategori">
+        <option value="diger" ${kat === "diger" ? "selected" : ""}>Diğer örgün eğitim kurumları — müdür 20 / müdür yrd. 18 saat</option>
+        <option value="anadolu_ozel" ${kat === "anadolu_ozel" ? "selected" : ""}>Anadolu/fen/sosyal bilimler/spor lisesi, mesleki-teknik, özel eğitim, okul öncesi — müdür 25 / müdür yrd. 20 saat</option>
+      </select>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+        <button class="secondary" id="ek-save-settings" style="width:auto;margin:0;padding:8px 14px">Ayarları kaydet</button>
+      </div>
+      <div id="ek-smsg"></div>
+      <p style="font-size:12px;color:var(--muted);margin:10px 0 0">Katsayı girilmezse tutar sütunu boş kalır; saat sınırları yine denetlenir. Katsayı Ocak ve Temmuz'da Hazine ve Maliye Bakanlığı genelgesiyle değişir; panel değer önermez.</p>
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <h3 style="margin:0">Satırlar <span id="ek-dirty" style="font-size:12px;color:var(--warn);font-weight:400"></span></h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="secondary" id="ek-fill" style="width:auto;margin:0;padding:7px 12px;font-size:12.5px" title="Personel İşleri'ndeki öğretmen/yöneticileri ekler; Ders Dağıtım'daki haftalık ders yükü ve Nöbet Programı'ndaki nöbetler otomatik dolar">Personelden doldur</button>
+          <button class="secondary" id="ek-add" style="width:auto;margin:0;padding:7px 12px;font-size:12.5px">Boş satır ekle</button>
+          <button class="primary" id="ek-save-rows" style="width:auto;margin:0;padding:7px 14px;font-size:12.5px">Satırları kaydet</button>
+        </div>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin:8px 0 10px">Haftalık ders ve görev değişince aylık karşılığı, ek ders, hazırlık-planlama ve yönetim görevi Karar'a göre yeniden hesaplanır; gri hücre otomatik, diğerleri elle düzeltilebilir. Kırmızı uyarılar Karar/Toplu Sözleşme sınırlarıdır; kaydetmeyi engellemez, sorumluluk md.25 gereği düzenleyen ve onaylayandadır.</p>
+      <div class="table-wrap" id="ek-table-wrap"></div>
+      <div id="ek-rmsg"></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <h3 style="margin:0;flex:1">Belgeler</h3>
+        <button class="secondary" id="ek-doc-cizelge" style="width:auto;margin:0;padding:7px 12px;font-size:12.5px">Çizelge (yatay A4)</button>
+        <button class="secondary" id="ek-doc-onay" style="width:auto;margin:0;padding:7px 12px;font-size:12.5px">Olur yazısı</button>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin:8px 0 0">Belgeler ekrandaki güncel satırlarla üretilir (kaydedilmemiş değişiklikler dâhil).</p>
+      <div id="ekd-preview" style="margin-top:12px"></div>
+    </div>`;
+  wireDate3("ek-start"); wireDate3("ek-end");
+
+  const drawTable = () => {
+    document.getElementById("ek-table-wrap").innerHTML = rows.length ? `<table class="data" style="font-size:12.5px"><thead><tr><th>#</th><th>Adı Soyadı</th><th>Görevi</th><th>Branşı</th><th title="Ders Dağıtım'dan; elle düzeltilebilir">Haftalık ders</th>${EKDERS_COLS.map(c => `<th title="${esc(c.label)}">${esc(c.label.split(" (")[0].replace("Öğrenci Sosyal ve Kişilik Hizmetleri", "Sos. Kişilik").replace("Ders Niteliğinde Yönetim Görevi", "Yönetim").replace("Hazırlık ve Planlama Görevi", "Haz.-Plan.").replace("Aylık Karşılığı Ders Görevi", "Aylık karş.").replace("Ders Dışı Eğitim Çalışması", "Egzersiz").replace("Ek Ders Görevi", "Ek ders").replace("Mesleki Çalışma", "Mesleki").replace("Nöbet Görevi", "Nöbet").replace("Sınav Görevi", "Sınav"))}${c.label.includes("(Gece") ? " gece" : c.label.includes("(Gündüz)") ? " gündüz" : ""}</th>`).join("")}<th>Lisansüstü</th><th>Ücretli saat</th><th>Tahmini ₺/hafta</th><th>Açıklama</th><th>Uyarı</th><th></th></tr></thead><tbody>${rows.map(rowHtml).join("")}${footHtml()}</tbody></table>` : `<p style="color:var(--muted)">Satır yok — "Personelden doldur" ile başla.</p>`;
+    wireRows();
+  };
+  const setDirty = (v) => { dirty = v; document.getElementById("ek-dirty").textContent = v ? "(kaydedilmemiş değişiklik var)" : ""; };
+  const refreshRow = (i) => {
+    const tr = content.querySelector(`tr[data-row="${i}"]`); if (!tr) return;
+    const t = ekdersRowTotals(rows[i], k), w = ekdersWarnings(rows[i], kat, okulTuru);
+    tr.querySelector(".ekd-hours").innerHTML = `<strong>${t.hours}</strong>`;
+    tr.querySelector(".ekd-amount").textContent = k ? ekdersFmtTL(t.amount) : "—";
+    tr.querySelector(".ekd-warn").innerHTML = w.map(esc).join("<br>");
+    const foot = content.querySelector("tbody tr:last-child"); if (foot) foot.outerHTML = footHtml();
+  };
+  const wireRows = () => {
+    content.querySelectorAll("[data-r]").forEach(el => {
+      el.oninput = el.onchange = () => {
+        const i = +el.dataset.r, key = el.dataset.k, r = rows[i];
+        r[key] = el.type === "number" ? Math.max(0, parseInt(el.value, 10) || 0) : el.value;
+        if (key === "lesson_hours" || key === "gorev") {
+          Object.assign(r, ekdersDerive(r, kat));
+          ["aylik_karsiligi", "ek_ders", "hazirlik_planlama", "yonetim_gorevi"].forEach(dk => { const t = content.querySelector(`[data-r="${i}"][data-k="${dk}"]`); if (t) t.value = r[dk]; });
+        }
+        setDirty(true); refreshRow(i);
+      };
+    });
+    content.querySelectorAll("[data-del-row]").forEach(b => b.onclick = () => {
+      const i = +b.dataset.delRow; if (rows[i].id) removed.push(rows[i].id); rows.splice(i, 1); setDirty(true); drawTable();
+    });
+  };
+  drawTable();
+
+  document.getElementById("ekd-back-list").onclick = () => { if (dirty && !confirm("Kaydedilmemiş değişiklikler var. Yine de çıkılsın mı?")) return; renderEkdersModule(profile, school); };
+  document.getElementById("ek-add").onclick = () => {
+    const r = { id: null, teacher_id: null, full_name: "", gorev: "ogretmen", brans: null, lesson_hours: 0, lisansustu: "yok", aciklama: null };
+    EKDERS_COLS.forEach(c => r[c.k] = 0); Object.assign(r, ekdersDerive(r, kat)); rows.push(r); setDirty(true); drawTable();
+    const first = content.querySelector(`[data-r="${rows.length - 1}"][data-k="full_name"]`); if (first) first.focus();
+  };
+  document.getElementById("ek-fill").onclick = async () => {
+    const msg = document.getElementById("ek-rmsg");
+    const [{ data: teachers }, { data: profs }, { data: csh }, { data: duties }] = await Promise.all([
+      sb.from("teachers").select("id, full_name, branch, is_idareci").eq("school_id", school.id).order("full_name"),
+      sb.from("profiles").select("id, full_name, role").eq("school_id", school.id).neq("role", "ogretmen"),
+      sb.from("class_subject_hours").select("teacher_id, weekly_hours").eq("school_id", school.id),
+      sb.from("duty_assignments").select("teacher_id").gte("duty_date", toLocalISO(new Date(Date.now() - 45 * 86400000))),
+    ]);
+    const hoursBy = {}; (csh || []).forEach(x => { if (x.teacher_id) hoursBy[x.teacher_id] = (hoursBy[x.teacher_id] || 0) + (+x.weekly_hours || 0); });
+    const dutySet = new Set((duties || []).map(d => d.teacher_id));
+    const norm = s => (s || "").trim().toLocaleLowerCase("tr-TR");
+    const ids = new Set(rows.map(r => r.teacher_id).filter(Boolean)), names = new Set(rows.map(r => norm(r.full_name)));
+    const guess = t => t.is_idareci ? "mudur_yrd" : /rehber|pdr|psikolojik/i.test(t.branch || "") ? "rehber" : /sınıf öğretmen|sinif ogretmen/i.test(t.branch || "") ? "sinif" : /okul öncesi|anaokul|ana sınıfı/i.test(t.branch || "") ? "okul_oncesi" : "ogretmen";
+    const mk = b => { const r = { id: null, teacher_id: b.teacher_id || null, full_name: b.full_name, gorev: b.gorev, brans: b.brans || null, lesson_hours: b.lesson_hours || 0, lisansustu: "yok", aciklama: null }; EKDERS_COLS.forEach(c => r[c.k] = 0); Object.assign(r, ekdersDerive(r, kat)); r.nobet = b.nobet ? 3 : 0; return r; };
+    let added = 0;
+    (profs || []).forEach(p => {
+      if (names.has(norm(p.full_name)) || (teachers || []).some(t => norm(t.full_name) === norm(p.full_name))) return;
+      rows.push(mk({ full_name: p.full_name, gorev: p.role === "mudur" ? "mudur" : "mudur_yrd" })); names.add(norm(p.full_name)); added++;
+    });
+    (teachers || []).forEach(t => {
+      if (ids.has(t.id) || names.has(norm(t.full_name))) return;
+      const g = guess(t);
+      rows.push(mk({ teacher_id: t.id, full_name: t.full_name, gorev: g, brans: t.branch, lesson_hours: hoursBy[t.id] || 0, nobet: dutySet.has(t.id) && EKDERS_GOREV[g].nobet }));
+      ids.add(t.id); names.add(norm(t.full_name)); added++;
+    });
+    drawTable(); if (added) setDirty(true);
+    msg.innerHTML = `<div class="msg ${added ? "ok" : ""}">${added ? `${added} kişi eklendi — ders yükü Ders Dağıtım'dan, nöbet Nöbet Programı'ndan (son 45 gün) dolduruldu. Kontrol edip kaydet.` : "Eklenecek yeni personel yok (hepsi listede)."}</div>`;
+  };
+  const payloadOf = (r, i) => {
+    const p = { school_id: school.id, sheet_id: sheetId, teacher_id: r.teacher_id || null, full_name: (r.full_name || "").trim() || "—", gorev: r.gorev || "ogretmen", brans: (r.brans || "").trim() || null, lesson_hours: +r.lesson_hours || 0, lisansustu: r.lisansustu || "yok", aciklama: (r.aciklama || "").trim() || null, sort_order: i };
+    EKDERS_COLS.forEach(c => p[c.k] = +r[c.k] || 0);
+    return p;
+  };
+  document.getElementById("ek-save-rows").onclick = async () => {
+    const msg = document.getElementById("ek-rmsg");
+    const results = await Promise.all([
+      ...rows.filter(r => r.id).map(r => sb.from("ekders_rows").update(payloadOf(r, rows.indexOf(r))).eq("id", r.id)),
+      rows.some(r => !r.id) ? sb.from("ekders_rows").insert(rows.filter(r => !r.id).map(r => payloadOf(r, rows.indexOf(r)))) : Promise.resolve({}),
+      removed.length ? sb.from("ekders_rows").delete().in("id", removed) : Promise.resolve({}),
+    ]);
+    const err = results.find(x => x && x.error);
+    if (err) { msg.innerHTML = `<div class="msg err">${esc(err.error.message)}</div>`; return; }
+    await sb.from("ekders_sheets").update({ updated_at: new Date().toISOString() }).eq("id", sheetId);
+    await renderEkdersSheet(profile, school, content, sheetId);
+  };
+  document.getElementById("ek-save-settings").onclick = async () => {
+    const msg = document.getElementById("ek-smsg");
+    const kRaw = document.getElementById("ek-katsayi").value.trim();
+    if (kRaw && !ekdersParseK(kRaw)) { msg.innerHTML = `<div class="msg err">Katsayı sayı olmalı (örn. 1,234567).</div>`; return; }
+    const newKat = document.getElementById("ek-kategori").value;
+    const patch = { period_start: document.getElementById("ek-start").value || null, period_end: document.getElementById("ek-end").value || null, katsayi: ekdersParseK(kRaw), kurum_kategori: newKat, olur_makam: document.getElementById("ek-olur").value.trim() || null, updated_at: new Date().toISOString() };
+    const { error } = await sb.from("ekders_sheets").update(patch).eq("id", sheetId);
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (newKat !== kat && rows.length) {
+      rows.forEach(r => { r.yonetim_gorevi = (EKDERS_GOREV[r.gorev] || EKDERS_GOREV.ogretmen).yonetim[newKat] ?? 0; });
+      await Promise.all(rows.filter(r => r.id).map(r => sb.from("ekders_rows").update({ yonetim_gorevi: r.yonetim_gorevi }).eq("id", r.id)));
+    }
+    if (dirty && !confirm("Satırlarda kaydedilmemiş değişiklik var; ayarlar kaydedildi. Sayfa yenilenirse satır değişiklikleri kaybolur. Devam edilsin mi?")) return;
+    await renderEkdersSheet(profile, school, content, sheetId);
+  };
+  const liveSheet = () => ({ ...sheet, katsayi: ekdersParseK(document.getElementById("ek-katsayi").value) ?? null, period_start: document.getElementById("ek-start").value || null, period_end: document.getElementById("ek-end").value || null, olur_makam: document.getElementById("ek-olur").value.trim() || null, kurum_kategori: document.getElementById("ek-kategori").value });
+  const fname = (suffix) => `${sheet.title.slice(0, 60)} ${suffix}`;
+  document.getElementById("ek-doc-cizelge").onclick = () => disShowPreview(document.getElementById("ekd-preview"), ekdersCizelgeHtml(school, liveSheet(), rows), fname("Çizelge"));
+  document.getElementById("ek-doc-onay").onclick = () => disShowPreview(document.getElementById("ekd-preview"), ekdersOnayHtml(school, liveSheet(), rows), fname("Olur Yazısı"));
+}
+
 /* ============ ÖĞRENCİ DİSİPLİN DOSYASI (ortaokul — Öğrenci Davranışlarını Değerlendirme Kurulu) ============ */
 
 /**
@@ -6478,6 +6859,17 @@ const KILAVUZ_SECTIONS = [
   { id: "planlama", title: "Planlama İşleri", html: `
     <p>Kurul, komisyon ya da kulüp oluştur; üyelerini öğretmen listesinden seç ya da (veli, öğrenci temsilcisi gibi öğretmen olmayanlar için) elle yaz. Her kurul için ayrı toplantı/faaliyet kaydı (tarih, gündem, kararlar) tutulur.</p>
   ` },
+  { id: "ekders", title: "Ek Ders Onay Çizelgesi", html: `
+    <p>Yönetici ve öğretmenlerin haftalık <strong>aylık karşılığı ders, ek ders ve ek ders görevinden sayılan</strong> saatlerini tek çizelgede toplar; 2006/11350 sayılı Karar, 8. Dönem Toplu Sözleşme ve 657/176'ya göre sınırları denetler; yatay A4 çizelge ve olur yazısı üretir. Sayıların tamamı birincil kaynaktan doğrulanmıştır; memur aylık katsayısı ise panelde tutulmaz, her dönem Hazine ve Maliye Bakanlığı genelgesinden sen girersin.</p>
+    <ol>
+      <li><strong>Çizelge oluştur</strong>: başlık, dönem aralığı, katsayı (isteğe bağlı), kurum kategorisi (md.10/1-c: ortaokul/ilkokul/genel lise "diğer"; anadolu/fen/mesleki/özel eğitim/okul öncesi ayrı) ve olur makamı.</li>
+      <li><strong>Personelden doldur</strong>: Personel İşleri'ndeki herkes eklenir; haftalık ders yükü Ders Dağıtım'dan, nöbet Nöbet Programı'ndan (son 45 günde nöbeti olanlara 3 saat) gelir. Görev tahmini branştan yapılır (rehber, sınıf, okul öncesi, müdür yardımcısı); gerekirse düzelt.</li>
+      <li><strong>Otomatik hesap</strong>: aylık karşılığı (md.5: yönetici 6, sınıf/okul öncesi 18, branş 15, atölye 20), ek ders (kalan saat; md.6 üst sınırı aşarsa uyarı), hazırlık-planlama (md.11: her 10 saate 1, en çok 3; yönetici ve rehber öğretmene yok), ders niteliğinde yönetim görevi (md.10: ortaokulda müdür 20, müdür yrd. 18, rehber öğretmen 18).</li>
+      <li><strong>Elle girilenler</strong>: sosyal ve kişilik hizmetleri (2 saat), egzersiz (≤6), DYK gündüz/gece, sınav görevi (her görev 5 saat), mesleki çalışma (15), diğer gündüz/gece; lisansüstü (YL %7, doktora %20 — yalnızca ek ders ve yönetim görevine uygulanır).</li>
+      <li><strong>Belgeler</strong>: "Çizelge (yatay A4)" tüm sütunlar + toplamlar + imza/OLUR bloğu; "Olur yazısı" 657/176 birim ücretlerini katsayıyla hesaplayıp (140, 150, %25 → 175, DYK 280/300, YL 149,8, doktora 168) resmî yazı formatında verir. Yazdır veya Word'e al.</li>
+    </ol>
+    <p style="color:var(--muted)">Tahmini tutar, haftalık plan × birim ücrettir; kesin aylık ödeme MEBBİS Ek Ders Modülünde fiilen yapılan gün/saat üzerinden hesaplanır (md.25: ek ders fiilen yapılmadan ödenmez, düzenleyen ve onaylayan müteselsilen sorumludur).</p>
+  ` },
   { id: "disiplin", title: "Öğrenci Disiplin Dosyası", html: `
     <p>Ortaokul öğrencileri için <strong>MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği Madde 54–65</strong>'e göre kurulmuş dosya akışı: Olay &amp; Tutanak → Uyarma Süreci (Madde 54/3) → İfadeler (Madde 60) → Kurul &amp; Karar (Madde 59-60) → Onay (Madde 56/6, 62/1) → Veliye Tebliğ (Madde 62) → İtiraz Penceresi (Madde 56/11-12) → e-Okul &amp; Kapanış (Madde 56/13, 62/3). Aşama çubuğundaki her adımın üzerine gelince ilgili hüküm görünür.</p>
     <ol>
@@ -6557,6 +6949,9 @@ const SSS_ITEMS = [
   { cat: "LGS Koçluk", q: "Zayıflık Analizi'ndeki \"öncelik skoru\" nasıl hesaplanıyor?", a: `Ham "en düşük net" sıralaması değildir — son denemelerin yakınlık ağırlıklı trendi ile dersin (ya da tanımlıysa konunun) LGS'deki soru ağırlığı birlikte hesaba katılır. Az soru gelen bir ders, çok soru gelen bir dersin önüne geçemez.` },
   { cat: "LGS Koçluk", q: "Konu bazlı hata etiketlemesi zorunlu mu?", a: `Hayır, tamamen opsiyoneldir. Konu tanımlamazsan sistem ders bazlı çalışmaya devam eder; tanımlarsan Zayıflık Analizi ve Haftalık Görevler'deki öneriler konu seviyesinde daha spesifik hale gelir (ör. "Matematik çalış" yerine "Kesirler çalış").` },
   { cat: "LGS Koçluk", q: "Kayıt Geçmişi'ni kim görebilir?", a: `İdareci okul genelindeki tüm değişiklikleri, öğretmen ise sadece kendi yaptığı işlemleri görür.` },
+  { cat: "Ek Ders", q: "Katsayıyı neden panel vermiyor?", a: `Memur aylık katsayısı her yıl Ocak ve Temmuz'da Hazine ve Maliye Bakanlığı genelgesiyle değişir; panelde sabit bir sayı tutmak yanlış ödeme riski yaratır. Dönem genelgesindeki katsayıyı çizelge ayarlarına gir; girilmezse tutar sütunu boş kalır ama saat sınırları yine denetlenir. Gösterge rakamları (140/150, %25, %100) 657 sayılı Kanun md.176'dan sabittir.` },
+  { cat: "Ek Ders", q: "Müdür yardımcısına hazırlık-planlama neden 0 çıkıyor?", a: `Karar md.11 hazırlık ve planlama ücretini "10 uncu maddede sayılanlar hariç" öğretmenlere verir; müdür, müdür başyardımcısı, müdür yardımcısı ve rehber öğretmen md.10 kapsamında ders niteliğinde yönetim görevi ücreti aldığından hazırlık-planlama alamaz. Elle girersen kırmızı uyarı çıkar.` },
+  { cat: "Ek Ders", q: "Aylık ücreti neden hesaplamıyor?", a: `Md.25 gereği ek ders yalnızca fiilen yapılan görevler için ödenir; aylık tutar o ayki fiilî gün/saat, izin-rapor ve tatil günlerine göre MEBBİS Ek Ders Modülünde hesaplanır. Panel haftalık planlanan saat × birim ücret tahmini verir; onay çizelgesi de zaten haftalık saatler üzerinden düzenlenir.` },
   { cat: "Disiplin Dosyası", q: "Davranış türünü seçince yaptırım kendiliğinden belirleniyor mu?", a: `Hayır. Madde 55 listesi sadece ön eşleştirme/bilgi içindir; yaptırımı, Madde 56/1'deki hususları (davranışın niteliği, öğrencinin genel durumu, yaşı, başarısı, daha önce yaptırım alıp almadığı) dikkate alarak kurul takdir eder. Uyarma ve kınamayı kurul verir (Madde 56/4); okul değiştirme ilçe kurulunun onayıyla uygulanır (Madde 56/6).` },
   { cat: "Disiplin Dosyası", q: "İtiraz süresi nasıl hesaplanıyor, resmî tatiller dahil mi?", a: `Madde 56/11: veli, tebliğ tarihinden itibaren 5 iş günü içinde okul müdürlüğüne itiraz edebilir. Panel iş günü hesabında Cumartesi/Pazar'ı atlar ama resmî tatilleri bilmez — araya bayram/idari tatil giriyorsa son günü kendin bir gün ileri al. İtiraz sonuçlanana kadar yaptırım uygulanmaz (Madde 56/12).` },
   { cat: "Disiplin Dosyası", q: "Yaptırım sonradan kaldırılabilir mi?", a: `Evet. Madde 62/3: davranışı tekrarlamayan ve olumlu davranışları gözlenen öğrencinin yaptırımı, kurulun dönem sonu toplantısında alacağı kararla kaldırılabilir; karar 5 iş günü içinde e-Okul'daki dosyadan çıkarılır. Dosyada "Yaptırımın kaldırılma tarihi" alanına işle.` },
