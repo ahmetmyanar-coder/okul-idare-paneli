@@ -184,6 +184,7 @@ const MODULES = [
   { name: "Öğrenci Disiplin Dosyası", desc: "Olay tutanağından ÖDDK kararına, veli tebliğine ve e-Okul'a kadar dosya akışı; ifade/karar/tebliğ belgeleri ve süre takibi (yönetmeliğe göre)." },
   { name: "Ek Ders Onay Çizelgesi", desc: "Yönetici ve öğretmenlerin haftalık ders/ek ders/yönetim/nöbet saatleri; Karar'a göre sınır denetimi, yatay çizelge ve olur yazısı." },
   { name: "Ders Denetimi", desc: "Müdürün öğretmen ders denetimi: ölçüt tablosu, güçlü/geliştirilecek yönler, 1 aylık takip, öğretmen geçmişi ve basılı form." },
+  { name: "Öğretmen Araçları", desc: "Öğretmen hesaplarının da gördüğü araçlar: sınav analizi, dereceli puanlama ölçeği, sınıf oturma planı, öğretmen belgeleri (tarayıcıda saklanır)." },
   { name: "Okul Panosu", desc: "Koridor ekranı için duyuru, medya ve pekiştireç (ayın öğrencisi vb.) yönetimi." },
   { name: "Kullanma Kılavuzu", desc: "Her modülün nasıl kullanılacağı, adım adım." },
   { name: "Sıkça Sorulan Sorular", desc: "Aranabilir soru-cevap listesi." },
@@ -333,6 +334,11 @@ function renderTeacherDashboard(profile, school) {
           <h3>LGS Koçluk</h3>
           <p>Koçluk ettiğin 8. sınıf öğrencilerinin deneme takibi, zayıflık analizi ve haftalık görevleri.</p>
         </div>` : ""}
+        ${isModuleEnabled(school, "Öğretmen Araçları") ? `
+        <div class="mod clickable" data-mod="Öğretmen Araçları">
+          <h3>Öğretmen Araçları</h3>
+          <p>Sınav analizi, değerlendirme ölçeği (rubrik), sınıf oturma planı ve belgelerin (ders kesim, sınav kâğıdı teslim, proje, dönem sonu kontrol).</p>
+        </div>` : ""}
       </div>
     </div>
   `;
@@ -348,6 +354,8 @@ function renderTeacherDashboard(profile, school) {
   if (requestsCard) requestsCard.onclick = () => renderTeacherRequests(profile, school);
   const lgsTeacherCard = document.querySelector('[data-mod="LGS Koçluk"]');
   if (lgsTeacherCard) lgsTeacherCard.onclick = () => renderLgsModule(profile, school, "ogrenciler");
+  const oaTeacherCard = document.querySelector('[data-mod="Öğretmen Araçları"]');
+  if (oaTeacherCard) oaTeacherCard.onclick = () => renderOgretmenAraclari(profile, school);
   maybeShowPlatformAdminLink(profile);
 }
 
@@ -760,6 +768,8 @@ function renderDashboard(profile, school) {
   if (ekdCard) ekdCard.onclick = () => renderEkdersModule(profile, school);
   const denCard = document.querySelector('[data-mod="Ders Denetimi"]');
   if (denCard) denCard.onclick = () => renderDenetimModule(profile, school);
+  const oaCard = document.querySelector('[data-mod="Öğretmen Araçları"]');
+  if (oaCard) oaCard.onclick = () => renderOgretmenAraclari(profile, school);
   const panoCard = document.querySelector('[data-mod="Okul Panosu"]');
   if (panoCard) panoCard.onclick = () => renderPanoModule(profile, school);
   const kilavuzCard = document.querySelector('[data-mod="Kullanma Kılavuzu"]');
@@ -4318,6 +4328,405 @@ async function renderCommitteeDetail(school, committee, el) {
   });
 }
 
+/* ============ ÖĞRETMEN ARAÇLARI (yalnızca tarayıcıda — öğrenci verisi sunucuya gönderilmez) ============ */
+/**
+ * Sınav analizi, dereceli puanlama ölçeği (rubrik), sınıf oturma planı ve öğretmen belgeleri.
+ * Öğrenci adları ve puanları localStorage'da, hesap+okul bazında saklanır (Kelebek/Personel ile aynı gizlilik ilkesi).
+ * Doğrulanmış eşikler (MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği): md.21/1 — Türkçe dışındaki derslerde
+ * 0-49,99 başarısız, 50,00+ başarılı; Türkçe'de 0-69,99 başarısız, 70,00+ başarılı. md.53/1 — dönem ağırlıklı puan
+ * ortalaması 70,00-84,99 Teşekkür, 85,00+ Takdir. md.22/3 — ders etkinliklerine katılım puanı sayısı (haftalık 2 ve altı → 2, üstü → 3).
+ * md.22/2 — ortaokulda ders yılında en az bir proje; verildiği dönemde değerlendirilir. Liseler için eşik alanı elle değiştirilir.
+ */
+function oaKey(school, profile) { return `ogretmen_araclari_${school.id}_${profile.id}`; }
+function loadOA(school, profile) {
+  try { const raw = localStorage.getItem(oaKey(school, profile)); const d = raw ? JSON.parse(raw) : {}; return { analyses: d.analyses || [], rubrics: d.rubrics || [], seatings: d.seatings || [] }; }
+  catch { return { analyses: [], rubrics: [], seatings: [] }; }
+}
+function saveOA(school, profile, data) {
+  try { localStorage.setItem(oaKey(school, profile), JSON.stringify(data)); return true; }
+  catch (e) { lastLocalStorageError = e; return false; }
+}
+const OA_TOOLS = [
+  { id: "analiz", label: "Sınav Analizi", desc: "Puan listesini yapıştır: ortalama, medyan, standart sapma, başarı oranı, puan dağılımı, soru bazında başarı ve basılı analiz raporu." },
+  { id: "olcek", label: "Değerlendirme Ölçeği", desc: "Proje/performans için dereceli puanlama anahtarı: ölçütleri ve puanları belirle, sınıfı puanla, ölçek ve puan çizelgesini yazdır." },
+  { id: "oturma", label: "Sınıf Oturma Planı", desc: "Sınıf listesinden alfabetik/rastgele oturma planı; öne alınacaklar ve yan yana oturmayacaklar kuralı; basılı plan." },
+  { id: "belgeler", label: "Belgelerim", desc: "Ders kesim raporu, sınav kâğıdı teslim tutanağı, proje seçim formu ve dönem sonu kontrol listesi." },
+];
+const OA_BANDS = [[0, 49.99, "0 – 49,99 (başarısız)"], [50, 69.99, "50 – 69,99"], [70, 84.99, "70 – 84,99 (teşekkür aralığı)"], [85, 100, "85 – 100 (takdir aralığı)"]];
+const oaNum = s => { const n = parseFloat(String(s).trim().replace(",", ".")); return Number.isFinite(n) ? n : null; };
+const oaFmt = n => (Math.round(n * 100) / 100).toLocaleString("tr-TR", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+/* "No Ad Soyad p1 p2 …" / "Ad Soyad<TAB>puan" / "Ad Soyad | 10 | 8 | …" satırlarını çözer. */
+function oaParseScores(text) {
+  const rows = [], errors = [];
+  splitLines(text).forEach((line, i) => {
+    let parts = line.split(/\t|\||;/).map(x => x.trim()).filter(Boolean);
+    if (parts.length === 1) {
+      const m = line.trim().match(/^(.*?\S)\s+((?:[\d]+(?:[.,]\d+)?\s*)+)$/);
+      if (!m) { errors.push(`Satır ${i + 1}: puan bulunamadı — "${line.trim().slice(0, 40)}"`); return; }
+      parts = [m[1], ...m[2].trim().split(/\s+/)];
+    }
+    let name = parts[0], nums = parts.slice(1).map(oaNum);
+    if (nums.some(n => n === null)) { errors.push(`Satır ${i + 1}: sayı olmayan puan — "${line.trim().slice(0, 40)}"`); return; }
+    let no = null;
+    const lead = name.match(/^(\d{1,6})\s+(.+)$/);
+    if (lead) { no = lead[1]; name = lead[2]; }
+    else if (/^\d+$/.test(name) && parts.length > 2) { no = name; name = parts[1]; nums = parts.slice(2).map(oaNum); }
+    if (!nums.length) { errors.push(`Satır ${i + 1}: puan yok`); return; }
+    rows.push({ no, name, scores: nums, total: nums.length === 1 ? nums[0] : nums.reduce((a, b) => a + b, 0) });
+  });
+  return { rows, errors };
+}
+function oaStats(values) {
+  const n = values.length; if (!n) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const mean = values.reduce((a, b) => a + b, 0) / n;
+  const median = n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+  const sd = Math.sqrt(values.reduce((a, v) => a + (v - mean) ** 2, 0) / n);
+  return { n, mean, median, sd, min: sorted[0], max: sorted[n - 1] };
+}
+function oaAnalyze(rows, opts) {
+  const totals = rows.map(r => r.total);
+  const st = oaStats(totals);
+  const pass = rows.filter(r => r.total >= opts.threshold).length;
+  const bands = OA_BANDS.map(([lo, hi, label]) => ({ label, count: rows.filter(r => r.total >= lo && r.total <= hi).length }));
+  const qCount = rows.length && rows.every(r => r.scores.length === rows[0].scores.length) && rows[0].scores.length > 1 ? rows[0].scores.length : 0;
+  let questions = [];
+  if (qCount) {
+    const maxes = opts.qMax && opts.qMax.length === qCount ? opts.qMax : Array(qCount).fill(opts.fullScore / qCount);
+    questions = Array.from({ length: qCount }, (_, q) => {
+      const vals = rows.map(r => r.scores[q]); const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const pct = maxes[q] ? mean / maxes[q] * 100 : 0;
+      const fullCount = vals.filter(v => maxes[q] && v >= maxes[q]).length, zeroCount = vals.filter(v => v === 0).length;
+      return { q: q + 1, max: maxes[q], mean, pct, fullCount, zeroCount };
+    });
+  }
+  return { st, pass, passPct: rows.length ? pass / rows.length * 100 : 0, bands, questions, qCount };
+}
+function oaAnalysisReportHtml(school, a) {
+  const R = oaAnalyze(a.rows, a);
+  const cell = "border:1px solid #999;padding:3px 6px;font-size:10.5pt";
+  const weak = R.questions.filter(q => q.pct < 50);
+  return docWrapper(school, `
+    <h3 style="text-align:center;text-decoration:underline;margin-top:22px">SINAV ANALİZ RAPORU</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:10.5pt;margin-bottom:8px">
+      <tr><td style="${cell};width:22%">Ders</td><td style="${cell}">${esc(a.ders)}</td><td style="${cell};width:22%">Sınıf / Şube</td><td style="${cell}">${esc(a.sinif)}</td></tr>
+      <tr><td style="${cell}">Sınav</td><td style="${cell}">${esc(a.name)}</td><td style="${cell}">Tarih</td><td style="${cell}">${a.date ? fmtDate(a.date) : "…"}</td></tr>
+      <tr><td style="${cell}">Öğretmen</td><td style="${cell}">${esc(a.teacher || "")}</td><td style="${cell}">Tam puan / Başarı eşiği</td><td style="${cell}">${oaFmt(a.fullScore)} / ${oaFmt(a.threshold)}</td></tr>
+    </table>
+    <p style="margin:8px 0 4px"><strong>GENEL SONUÇLAR</strong></p>
+    <table style="width:100%;border-collapse:collapse;font-size:10.5pt">
+      <tr><th style="${cell}">Sınava giren</th><th style="${cell}">Ortalama</th><th style="${cell}">Medyan</th><th style="${cell}">Standart sapma</th><th style="${cell}">En yüksek</th><th style="${cell}">En düşük</th><th style="${cell}">Başarılı (≥ ${oaFmt(a.threshold)})</th><th style="${cell}">Başarı oranı</th></tr>
+      <tr><td style="${cell};text-align:center">${R.st.n}</td><td style="${cell};text-align:center">${oaFmt(R.st.mean)}</td><td style="${cell};text-align:center">${oaFmt(R.st.median)}</td><td style="${cell};text-align:center">${oaFmt(R.st.sd)}</td><td style="${cell};text-align:center">${oaFmt(R.st.max)}</td><td style="${cell};text-align:center">${oaFmt(R.st.min)}</td><td style="${cell};text-align:center">${R.pass}</td><td style="${cell};text-align:center">%${oaFmt(R.passPct)}</td></tr>
+    </table>
+    <p style="margin:10px 0 4px"><strong>PUAN DAĞILIMI</strong></p>
+    <table style="width:100%;border-collapse:collapse;font-size:10.5pt"><tr>${R.bands.map(b => `<th style="${cell}">${esc(b.label)}</th>`).join("")}</tr><tr>${R.bands.map(b => `<td style="${cell};text-align:center">${b.count} öğrenci (%${oaFmt(R.st.n ? b.count / R.st.n * 100 : 0)})</td>`).join("")}</tr></table>
+    ${R.qCount ? `<p style="margin:10px 0 4px"><strong>SORU BAZINDA BAŞARI</strong></p>
+    <table style="width:100%;border-collapse:collapse;font-size:10pt"><tr><th style="${cell}">Soru</th><th style="${cell}">Tam puan</th><th style="${cell}">Ortalama</th><th style="${cell}">Başarı %</th><th style="${cell}">Tam puan alan</th><th style="${cell}">Sıfır alan</th><th style="${cell}">Durum</th></tr>
+    ${R.questions.map(q => `<tr><td style="${cell};text-align:center">${q.q}</td><td style="${cell};text-align:center">${oaFmt(q.max)}</td><td style="${cell};text-align:center">${oaFmt(q.mean)}</td><td style="${cell};text-align:center">%${oaFmt(q.pct)}</td><td style="${cell};text-align:center">${q.fullCount}</td><td style="${cell};text-align:center">${q.zeroCount}</td><td style="${cell};text-align:center">${q.pct < 50 ? "Geliştirilmeli" : q.pct < 70 ? "Orta" : "İyi"}</td></tr>`).join("")}</table>
+    ${weak.length ? `<p style="font-size:10.5pt;margin-top:6px"><strong>Başarısı %50'nin altındaki sorular:</strong> ${weak.map(q => q.q).join(", ")} — bu soruların kazanımları için tekrar/telafi planlanmalıdır.</p>` : ""}` : ""}
+    ${a.includeList ? `<p style="margin:10px 0 4px"><strong>ÖĞRENCİ PUANLARI</strong></p><table style="width:100%;border-collapse:collapse;font-size:10pt"><tr><th style="${cell}">S.N.</th><th style="${cell}">No</th><th style="${cell};text-align:left">Öğrenci</th>${R.qCount ? R.questions.map(q => `<th style="${cell}">S${q.q}</th>`).join("") : ""}<th style="${cell}">Puan</th><th style="${cell}">Durum</th></tr>${a.rows.slice().sort((x, y) => y.total - x.total).map((r, i) => `<tr><td style="${cell};text-align:center">${i + 1}</td><td style="${cell};text-align:center">${esc(r.no || "")}</td><td style="${cell}">${esc(r.name)}</td>${R.qCount ? r.scores.map(s => `<td style="${cell};text-align:center">${oaFmt(s)}</td>`).join("") : ""}<td style="${cell};text-align:center"><strong>${oaFmt(r.total)}</strong></td><td style="${cell};text-align:center">${r.total >= a.threshold ? "Başarılı" : "Başarısız"}</td></tr>`).join("")}</table>` : ""}
+    <p style="margin:10px 0 4px"><strong>DEĞERLENDİRME VE ALINACAK ÖNLEMLER</strong></p>
+    <p style="text-align:justify;white-space:pre-wrap;min-height:60px">${esc(a.notes || "")}</p>
+    <p style="font-size:9.5pt;color:#444">Başarı eşiği ${R.st ? "" : ""}MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği md.21/1'e göre Türkçe dışındaki derslerde 50,00, Türkçe'de 70,00 puandır; 70,00–84,99 teşekkür, 85,00+ takdir aralığıdır (md.53/1). Standart sapma popülasyon formülüyle hesaplanmıştır.</p>
+    <table style="width:100%;margin-top:26px"><tr><td style="text-align:center">${esc(a.teacher || "…………………")}<br>${esc(a.ders)} Öğretmeni</td><td style="text-align:center">Görüldü<br>…/…/……<br>${officialSignatureName(school.mudur_adi)}<br>Okul Müdürü</td></tr></table>
+  `, { konu: `Sınav Analiz Raporu (${a.ders} — ${a.sinif})`, tarih: a.date || toLocalISO(new Date()) });
+}
+
+const OA_RUBRIC_TEMPLATES = {
+  proje: { label: "Proje", criteria: [["Konuya uygunluk ve içerik doğruluğu", 25], ["Araştırma ve kaynak kullanımı", 20], ["Özgünlük ve yaratıcılık", 15], ["Sunum, düzen ve Türkçeyi doğru kullanma", 20], ["Zamanında teslim ve süreç takibi", 20]] },
+  performans: { label: "Performans çalışması", criteria: [["Hazırlık ve planlama", 20], ["İçerik ve doğruluk", 30], ["Sunum ve iletişim", 25], ["Zamanı etkili kullanma", 10], ["Ürün kalitesi", 15]] },
+  katilim: { label: "Ders etkinliklerine katılım", criteria: [["Derse hazırlıklı gelme", 20], ["Soru sorma ve cevap verme", 20], ["Etkinliklere katılım", 25], ["Grup çalışmasına katkı", 20], ["Ders araç-gereçlerini kullanma", 15]] },
+};
+function oaRubricHtml(school, r) {
+  const cell = "border:1px solid #999;padding:3px 6px;font-size:10.5pt";
+  const total = r.criteria.reduce((a, c) => a + (+c.max || 0), 0);
+  return docWrapper(school, `
+    <h3 style="text-align:center;text-decoration:underline;margin-top:22px">DERECELİ PUANLAMA ANAHTARI VE PUAN ÇİZELGESİ</h3>
+    <p><strong>Ders:</strong> ${esc(r.ders)} &nbsp; <strong>Sınıf:</strong> ${esc(r.sinif)} &nbsp; <strong>Çalışma:</strong> ${esc(r.name)} (${esc(OA_RUBRIC_TEMPLATES[r.type]?.label || r.type)}) &nbsp; <strong>Dönem:</strong> ${esc(r.donem || "")}</p>
+    <table style="width:100%;border-collapse:collapse;font-size:10.5pt"><tr><th style="${cell}">No</th><th style="${cell};text-align:left">Ölçüt</th><th style="${cell}">Tam puan</th><th style="${cell};text-align:left">Açıklama</th></tr>
+    ${r.criteria.map((c, i) => `<tr><td style="${cell};text-align:center">${i + 1}</td><td style="${cell}">${esc(c.name)}</td><td style="${cell};text-align:center">${c.max}</td><td style="${cell}">${esc(c.desc || "")}</td></tr>`).join("")}
+    <tr><td colspan="2" style="${cell};text-align:right"><strong>Toplam</strong></td><td style="${cell};text-align:center"><strong>${total}</strong></td><td style="${cell}"></td></tr></table>
+    <p style="margin:12px 0 4px"><strong>PUAN ÇİZELGESİ</strong></p>
+    <table style="width:100%;border-collapse:collapse;font-size:10pt"><tr><th style="${cell}">S.N.</th><th style="${cell};text-align:left">Öğrenci</th>${r.criteria.map((c, i) => `<th style="${cell}">Ö${i + 1}<br><span style="font-weight:400">(${c.max})</span></th>`).join("")}<th style="${cell}">Toplam</th></tr>
+    ${r.students.map((s, i) => { const sc = r.scores[i] || []; const t = sc.reduce((a, v) => a + (+v || 0), 0); return `<tr><td style="${cell};text-align:center">${i + 1}</td><td style="${cell}">${esc(s)}</td>${r.criteria.map((c, j) => `<td style="${cell};text-align:center">${sc[j] === "" || sc[j] == null ? "" : oaFmt(+sc[j])}</td>`).join("")}<td style="${cell};text-align:center"><strong>${oaFmt(t)}</strong></td></tr>`; }).join("")}</table>
+    <p style="font-size:9.5pt;color:#444;margin-top:8px">${r.type === "proje" ? "Ortaokulda öğrenciye ders yılında en az bir proje hazırlatılır; proje verildiği dönemde değerlendirilir, vermeyen öğrencinin proje puanı sıfırdır (Yönetmelik md.22/2)." : r.type === "katilim" ? "Her dönemde haftalık ders saati 2 ve altındaki derslerde 2, üstündekilerde 3 ders etkinliklerine katılım puanı verilir (Yönetmelik md.22/3)." : "Ölçek, çalışma öğrencilere verilirken duyurulur; puanlama ölçütlere göre yapılır."}</p>
+    <table style="width:100%;margin-top:22px"><tr><td style="text-align:center">${esc(r.teacher || "…………………")}<br>${esc(r.ders)} Öğretmeni</td></tr></table>
+  `, { konu: `Dereceli Puanlama Anahtarı (${r.ders} — ${r.name})`, tarih: toLocalISO(new Date()) });
+}
+
+/* Oturma planı: satır×sütun (her sütun bir sıra grubu, sütun içinde seatsPerDesk kişi). */
+function oaBuildSeating(students, opts) {
+  let list = students.slice();
+  if (opts.order === "alfabetik") list.sort((a, b) => a.localeCompare(b, "tr"));
+  else if (opts.order === "rastgele") { for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; } }
+  const front = (opts.front || []).filter(n => list.includes(n));
+  list = [...front, ...list.filter(n => !front.includes(n))];
+  const capacity = opts.rows * opts.cols * opts.perDesk;
+  const seats = [];
+  for (let r = 0; r < opts.rows; r++) for (let c = 0; c < opts.cols; c++) for (let k = 0; k < opts.perDesk; k++) seats.push({ row: r, col: c, k, name: null });
+  list.slice(0, capacity).forEach((n, i) => seats[i].name = n);
+  // yan yana oturmayacaklar: aynı sırada (row,col) ya da bitişik sütunda aynı satırda olanları ayır (basit onarım)
+  const pairs = opts.apart || [];
+  const adjacent = (a, b) => a.row === b.row && Math.abs(a.col - b.col) <= (a.col === b.col ? 0 : 1);
+  for (let iter = 0; iter < 200 && pairs.length; iter++) {
+    let fixed = true;
+    for (const [x, y] of pairs) {
+      const sx = seats.find(s => s.name === x), sy = seats.find(s => s.name === y);
+      if (!sx || !sy || !adjacent(sx, sy)) continue;
+      fixed = false;
+      const candidates = seats.filter(s => s.name && s.name !== x && s.name !== y && !adjacent(s, sx) && !pairs.some(([p, q]) => (p === s.name && adjacent(sy, sx)) || (q === s.name && adjacent(sy, sx))));
+      const target = candidates[Math.floor(Math.random() * candidates.length)];
+      if (target) { const tmp = target.name; target.name = sy.name; sy.name = tmp; }
+    }
+    if (fixed) break;
+  }
+  const overflow = list.slice(capacity);
+  const violations = pairs.filter(([x, y]) => { const sx = seats.find(s => s.name === x), sy = seats.find(s => s.name === y); return sx && sy && adjacent(sx, sy); });
+  return { seats, overflow, violations };
+}
+function oaSeatingHtml(school, p) {
+  const cell = "border:1px solid #999;padding:6px 4px;font-size:10pt;text-align:center;vertical-align:top";
+  const grid = [];
+  for (let r = 0; r < p.rows; r++) { const row = []; for (let c = 0; c < p.cols; c++) row.push(p.seats.filter(s => s.row === r && s.col === c).map(s => s.name || "—")); grid.push(row); }
+  return docWrapper(school, `
+    <h3 style="text-align:center;text-decoration:underline;margin-top:22px">SINIF OTURMA PLANI</h3>
+    <p style="text-align:center;margin-top:-4px"><strong>${esc(p.sinif)}</strong>${p.teacher ? ` — ${esc(p.teacher)}` : ""}${p.date ? ` — ${fmtDate(p.date)}` : ""}</p>
+    <div style="border:2px solid #000;padding:4px;text-align:center;font-weight:bold;margin:8px 0 10px;letter-spacing:4px">TAHTA</div>
+    <table style="width:100%;border-collapse:separate;border-spacing:6px 6px">${grid.map(row => `<tr>${row.map(desk => `<td style="${cell};width:${Math.floor(100 / p.cols)}%">${desk.map(n => `<div>${esc(n)}</div>`).join("")}</td>`).join("")}</tr>`).join("")}</table>
+    <p style="font-size:9.5pt;color:#444">Satır 1 tahtaya en yakın sıradır; ${p.perDesk === 2 ? "her sıra iki kişiliktir" : "sıralar tek kişiliktir"}. ${p.front?.length ? `Öne alınanlar: ${p.front.map(esc).join(", ")}.` : ""}</p>
+    <table style="width:100%;margin-top:18px"><tr><td style="text-align:center">${esc(p.teacher || "…………………")}<br>Sınıf/Şube Rehber Öğretmeni</td></tr></table>
+  `, { konu: `Sınıf Oturma Planı (${p.sinif})`, tarih: p.date || toLocalISO(new Date()) });
+}
+
+async function renderOgretmenAraclari(profile, school, tool = "analiz", state = {}) {
+  const isTeacher = profile.role === "ogretmen";
+  const back = () => isTeacher ? renderTeacherDashboard(profile, school) : renderDashboard(profile, school);
+  if (!localStorageAvailable()) {
+    app.innerHTML = `<div class="wrap wide"><button class="navlink" id="back-dash">← Panele dön</button><div class="eyebrow">Öğretmen Araçları</div><h1>${esc(school.name)}</h1>${localStorageBlockedNotice()}</div>`;
+    document.getElementById("back-dash").onclick = back; return;
+  }
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Öğretmen Araçları</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">🔒 Öğrenci adları ve puanları yalnızca bu tarayıcıda, senin hesabına bağlı saklanır; sunucuya gönderilmez. Listeyi e-Okul'dan kopyalayıp yapıştırman yeterli.</div>
+      <div class="subtabs" style="flex-wrap:wrap">${OA_TOOLS.map(t => `<div class="subtab ${t.id === tool ? "active" : ""}" data-oa-tab="${t.id}">${t.label}</div>`).join("")}</div>
+      <div id="oa-content"></div>
+    </div>`;
+  document.getElementById("back-dash").onclick = back;
+  document.querySelectorAll("[data-oa-tab]").forEach(el => el.onclick = () => renderOgretmenAraclari(profile, school, el.dataset.oaTab));
+  const content = document.getElementById("oa-content");
+  const data = loadOA(school, profile);
+  const rerender = (patch = {}) => renderOgretmenAraclari(profile, school, tool, { ...state, ...patch });
+  const teacherName = isTeacher ? (profile.full_name || "") : "";
+  const showDoc = (html, name) => disShowPreview(document.getElementById("oa-preview"), html, name);
+
+  if (tool === "analiz") {
+    const editing = state.editId ? data.analyses.find(a => a.id === state.editId) : null;
+    const a = editing || { name: "1. Dönem 1. Sınav", ders: "", sinif: "", date: toLocalISO(new Date()), fullScore: 100, threshold: 50, qMaxText: "", text: "", notes: "", includeList: true, teacher: teacherName };
+    content.innerHTML = `
+      <div class="card" style="margin-bottom:14px">
+        <h3 style="margin-top:0">${editing ? "Analizi Düzenle" : "Yeni Sınav Analizi"}</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;align-items:end">
+          <div><label>Sınav adı</label><input id="oa-name" value="${esc(a.name)}"></div>
+          <div><label>Ders</label><input id="oa-ders" value="${esc(a.ders)}" placeholder="örn. Matematik"></div>
+          <div><label>Sınıf / şube</label><input id="oa-sinif" value="${esc(a.sinif)}" placeholder="örn. 7-B"></div>
+          <div><label>Tarih</label>${dateInputHtml("oa-date", a.date || "")}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 2fr 1fr;gap:12px;align-items:end">
+          <div><label>Tam puan</label><input id="oa-full" type="number" min="1" value="${a.fullScore}"></div>
+          <div><label>Başarı eşiği <span style="color:var(--muted);font-weight:400">(md.21: 50; Türkçe 70)</span></label><input id="oa-thr" type="number" min="0" value="${a.threshold}"></div>
+          <div><label>Soru tam puanları <span style="color:var(--muted);font-weight:400">(soru bazlı girişte; virgülle, boşsa eşit)</span></label><input id="oa-qmax" value="${esc(a.qMaxText || "")}" placeholder="örn. 10,10,10,10,10,10,10,10,10,10"></div>
+          <div><label>Öğretmen</label><input id="oa-teacher" value="${esc(a.teacher || "")}"></div>
+        </div>
+        <label>Puan listesi <span style="color:var(--muted);font-weight:400">— her satır: <code>Ad Soyad  puan</code> ya da soru bazlı <code>Ad Soyad | 10 | 8 | 5 …</code>; başında okul numarası olabilir; e-Okul'dan kopyala-yapıştır (sekmeyle ayrılmış) desteklenir</span></label>
+        <textarea id="oa-text" rows="8" ${DIS_TA} placeholder="512 Ali Veli\t85\n513 Ayşe Kaya\t60">${esc(a.text)}</textarea>
+        <label>Değerlendirme ve alınacak önlemler <span style="color:var(--muted);font-weight:400">(rapora geçer)</span></label>
+        <textarea id="oa-notes" rows="3" ${DIS_TA}>${esc(a.notes || "")}</textarea>
+        <div class="check-row"><input type="checkbox" id="oa-list" ${a.includeList ? "checked" : ""}><label for="oa-list">Raporda öğrenci puan listesini de yazdır</label></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <button class="primary" id="oa-run" style="width:auto;margin:0;padding:9px 16px">Analiz Et ve Kaydet</button>
+          ${editing ? `<button class="secondary" id="oa-cancel" style="width:auto;margin:0;padding:9px 16px">Vazgeç</button>` : ""}
+        </div>
+        <div id="oa-msg"></div>
+        <div id="oa-result" style="margin-top:12px"></div>
+        <div id="oa-preview" style="margin-top:12px"></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Kayıtlı Analizler (${data.analyses.length})</h3>
+        ${data.analyses.length ? data.analyses.slice().sort((x, y) => (y.date || "").localeCompare(x.date || "")).map(x => { const R = oaAnalyze(x.rows, x); return `<div class="list-item"><span><strong>${esc(x.name)}</strong> · ${esc(x.ders)} ${esc(x.sinif)}<div style="font-size:11.5px;color:var(--muted)">${x.date ? fmtDate(x.date) : ""} · ${R.st ? `${R.st.n} öğrenci · ort. ${oaFmt(R.st.mean)} · başarı %${oaFmt(R.passPct)}` : ""}</div></span><div class="row-actions"><button data-oa-report="${x.id}">Rapor</button><button data-oa-edit="${x.id}">Düzenle</button><button data-oa-del="${x.id}">Sil</button></div></div>`; }).join("") : `<p style="color:var(--muted)">Henüz analiz yok.</p>`}
+      </div>`;
+    wireDate3("oa-date");
+    const cancel = document.getElementById("oa-cancel"); if (cancel) cancel.onclick = () => rerender({ editId: null });
+    const renderResult = (an) => {
+      const R = oaAnalyze(an.rows, an);
+      document.getElementById("oa-result").innerHTML = `
+        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;margin-bottom:8px"><span><strong>${R.st.n}</strong> öğrenci</span><span>Ortalama <strong>${oaFmt(R.st.mean)}</strong></span><span>Medyan <strong>${oaFmt(R.st.median)}</strong></span><span>Std. sapma <strong>${oaFmt(R.st.sd)}</strong></span><span>En yüksek <strong>${oaFmt(R.st.max)}</strong></span><span>En düşük <strong>${oaFmt(R.st.min)}</strong></span><span>Başarı <strong>%${oaFmt(R.passPct)}</strong> (${R.pass}/${R.st.n})</span></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${R.bands.map(b => `<span class="pill ${b.label.startsWith("0") ? "crit" : b.label.startsWith("85") ? "good" : b.label.startsWith("70") ? "good" : "warn"}">${esc(b.label)}: ${b.count}</span>`).join("")}</div>
+        ${R.qCount ? `<div class="table-wrap" style="margin-top:10px"><table class="data"><thead><tr><th>Soru</th><th>Tam</th><th>Ort.</th><th>Başarı</th><th>Durum</th></tr></thead><tbody>${R.questions.map(q => `<tr><td>S${q.q}</td><td>${oaFmt(q.max)}</td><td>${oaFmt(q.mean)}</td><td>%${oaFmt(q.pct)}</td><td><span class="pill ${q.pct < 50 ? "crit" : q.pct < 70 ? "warn" : "good"}">${q.pct < 50 ? "Geliştirilmeli" : q.pct < 70 ? "Orta" : "İyi"}</span></td></tr>`).join("")}</tbody></table></div>` : ""}
+        <button class="secondary" id="oa-open-report" style="margin-top:10px">Analiz Raporunu Aç / Yazdır</button>`;
+      document.getElementById("oa-open-report").onclick = () => showDoc(oaAnalysisReportHtml(school, an), `Sınav Analizi ${an.ders} ${an.sinif}`);
+    };
+    document.getElementById("oa-run").onclick = () => {
+      const msg = document.getElementById("oa-msg");
+      const v = id => document.getElementById(id).value.trim();
+      const parsed = oaParseScores(v("oa-text"));
+      if (!parsed.rows.length) { msg.innerHTML = `<div class="msg err">Puan listesi okunamadı. ${parsed.errors.slice(0, 2).map(esc).join(" · ")}</div>`; return; }
+      const fullScore = +v("oa-full") || 100, threshold = +v("oa-thr") || 50;
+      const qMax = v("oa-qmax") ? v("oa-qmax").split(/[,;\s]+/).map(oaNum).filter(n => n !== null) : null;
+      const over = parsed.rows.filter(r => r.total > fullScore);
+      const an = { id: a.id || uid(), name: v("oa-name") || "Sınav", ders: v("oa-ders"), sinif: v("oa-sinif"), date: document.getElementById("oa-date").value || null, fullScore, threshold, qMax, qMaxText: v("oa-qmax"), text: v("oa-text"), rows: parsed.rows, notes: v("oa-notes"), includeList: document.getElementById("oa-list").checked, teacher: v("oa-teacher"), createdAt: a.createdAt || new Date().toISOString() };
+      if (editing) data.analyses = data.analyses.map(x => x.id === an.id ? an : x); else data.analyses.push(an);
+      if (!saveOA(school, profile, data)) { msg.innerHTML = localStorageSaveErrHtml(); return; }
+      msg.innerHTML = `<div class="msg ok">Analiz kaydedildi.${parsed.errors.length ? ` ${parsed.errors.length} satır atlandı: ${parsed.errors.slice(0, 2).map(esc).join(" · ")}` : ""}${over.length ? ` Uyarı: ${over.length} öğrencinin puanı tam puanı aşıyor.` : ""}</div>`;
+      renderResult(an);
+    };
+    if (editing && editing.rows) renderResult(editing);
+    content.querySelectorAll("[data-oa-report]").forEach(b => b.onclick = () => { const x = data.analyses.find(y => y.id === b.dataset.oaReport); showDoc(oaAnalysisReportHtml(school, x), `Sınav Analizi ${x.ders} ${x.sinif}`); });
+    content.querySelectorAll("[data-oa-edit]").forEach(b => b.onclick = () => rerender({ editId: b.dataset.oaEdit }));
+    content.querySelectorAll("[data-oa-del]").forEach(b => b.onclick = () => { if (!confirm("Bu analiz silinsin mi?")) return; data.analyses = data.analyses.filter(x => x.id !== b.dataset.oaDel); saveOA(school, profile, data); rerender({ editId: null }); });
+    return;
+  }
+
+  if (tool === "olcek") {
+    const editing = state.editId ? data.rubrics.find(r => r.id === state.editId) : null;
+    const type = state.type || editing?.type || "proje";
+    const r = editing || { name: "", ders: "", sinif: "", donem: "1. Dönem", type, criteria: OA_RUBRIC_TEMPLATES[type].criteria.map(([name, max]) => ({ name, max, desc: "" })), students: [], scores: [], teacher: teacherName, studentsText: "" };
+    const crit = state.criteria || r.criteria;
+    content.innerHTML = `
+      <div class="card" style="margin-bottom:14px">
+        <h3 style="margin-top:0">${editing ? "Ölçeği Düzenle" : "Yeni Değerlendirme Ölçeği"}</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;align-items:end">
+          <div><label>Tür</label><select id="or-type">${Object.entries(OA_RUBRIC_TEMPLATES).map(([k, t]) => `<option value="${k}" ${type === k ? "selected" : ""}>${t.label}</option>`).join("")}</select></div>
+          <div><label>Çalışma adı</label><input id="or-name" value="${esc(r.name)}" placeholder="örn. Oran-orantı projesi"></div>
+          <div><label>Ders</label><input id="or-ders" value="${esc(r.ders)}"></div>
+          <div><label>Sınıf / şube</label><input id="or-sinif" value="${esc(r.sinif)}"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label>Dönem</label><input id="or-donem" value="${esc(r.donem || "")}"></div>
+          <div><label>Öğretmen</label><input id="or-teacher" value="${esc(r.teacher || "")}"></div>
+        </div>
+        <h3>Ölçütler <span style="font-size:12px;color:var(--muted);font-weight:400">(toplam <span id="or-total">${crit.reduce((a, c) => a + (+c.max || 0), 0)}</span> puan)</span></h3>
+        <div id="or-crit">${crit.map((c, i) => `<div style="display:grid;grid-template-columns:2fr 80px 2fr auto;gap:8px;align-items:center;margin-bottom:6px"><input class="or-cname" data-i="${i}" value="${esc(c.name)}" placeholder="Ölçüt" style="margin:0"><input class="or-cmax" data-i="${i}" type="number" min="0" value="${c.max}" style="margin:0"><input class="or-cdesc" data-i="${i}" value="${esc(c.desc || "")}" placeholder="Açıklama (opsiyonel)" style="margin:0"><button class="or-cdel" data-i="${i}" style="margin:0;padding:6px 10px">×</button></div>`).join("")}</div>
+        <button class="secondary" id="or-cadd" style="width:auto;margin:6px 0 0;padding:6px 12px;font-size:12.5px">+ Ölçüt ekle</button>
+        <label style="margin-top:14px">Öğrenci listesi <span style="color:var(--muted);font-weight:400">(her satıra bir öğrenci; okul numarası başta olabilir)</span></label>
+        <textarea id="or-students" rows="5" ${DIS_TA}>${esc(r.studentsText || r.students.join("\n"))}</textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <button class="secondary" id="or-grid" style="width:auto;margin:0;padding:8px 14px">Puan tablosunu oluştur</button>
+          <button class="primary" id="or-save" style="width:auto;margin:0;padding:8px 14px">Kaydet</button>
+          <button class="secondary" id="or-print" style="width:auto;margin:0;padding:8px 14px">Ölçek ve çizelgeyi yazdır</button>
+          ${editing ? `<button class="secondary" id="or-cancel" style="width:auto;margin:0;padding:8px 14px">Vazgeç</button>` : ""}
+        </div>
+        <div id="or-msg"></div>
+        <div id="or-table" class="table-wrap" style="margin-top:12px"></div>
+        <div id="oa-preview" style="margin-top:12px"></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Kayıtlı Ölçekler (${data.rubrics.length})</h3>
+        ${data.rubrics.length ? data.rubrics.map(x => `<div class="list-item"><span><strong>${esc(x.name || "(adsız)")}</strong> · ${esc(OA_RUBRIC_TEMPLATES[x.type]?.label || x.type)} · ${esc(x.ders)} ${esc(x.sinif)}<div style="font-size:11.5px;color:var(--muted)">${x.criteria.length} ölçüt · ${x.students.length} öğrenci</div></span><div class="row-actions"><button data-or-print="${x.id}">Yazdır</button><button data-or-edit="${x.id}">Düzenle</button><button data-or-del="${x.id}">Sil</button></div></div>`).join("") : `<p style="color:var(--muted)">Henüz ölçek yok.</p>`}
+      </div>`;
+    const readCrit = () => [...content.querySelectorAll(".or-cname")].map((el, i) => ({ name: el.value.trim(), max: +content.querySelector(`.or-cmax[data-i="${i}"]`).value || 0, desc: content.querySelector(`.or-cdesc[data-i="${i}"]`).value.trim() }));
+    const readStudents = () => splitLines(document.getElementById("or-students").value).map(l => l.replace(/^\d{1,6}\s+/, "").trim()).filter(Boolean);
+    const updateTotal = () => { document.getElementById("or-total").textContent = readCrit().reduce((a, c) => a + c.max, 0); };
+    content.querySelectorAll(".or-cmax").forEach(el => el.oninput = updateTotal);
+    content.querySelectorAll(".or-cdel").forEach(b => b.onclick = () => { const c = readCrit(); c.splice(+b.dataset.i, 1); rerender({ criteria: c, type: document.getElementById("or-type").value }); });
+    document.getElementById("or-cadd").onclick = () => rerender({ criteria: [...readCrit(), { name: "", max: 10, desc: "" }], type: document.getElementById("or-type").value });
+    document.getElementById("or-type").onchange = (ev) => { if (!editing && confirm("Ölçütler seçilen türün şablonuyla değiştirilsin mi?")) rerender({ type: ev.target.value, criteria: null }); };
+    let scores = (r.scores || []).map(s => s.slice());
+    const drawGrid = () => {
+      const students = readStudents(), c = readCrit();
+      if (!students.length) { document.getElementById("or-table").innerHTML = `<p style="color:var(--muted)">Önce öğrenci listesini gir.</p>`; return; }
+      document.getElementById("or-table").innerHTML = `<table class="data"><thead><tr><th>#</th><th>Öğrenci</th>${c.map((x, i) => `<th title="${esc(x.name)}">Ö${i + 1} <span style="font-weight:400;color:var(--muted)">/${x.max}</span></th>`).join("")}<th>Toplam</th></tr></thead><tbody>${students.map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s)}</td>${c.map((x, j) => `<td><input type="number" min="0" max="${x.max}" step="0.5" class="or-score" data-i="${i}" data-j="${j}" value="${scores[i]?.[j] ?? ""}" style="width:64px;margin:0;padding:4px;text-align:center"></td>`).join("")}<td class="or-sum" data-i="${i}"><strong>${oaFmt((scores[i] || []).reduce((a, v) => a + (+v || 0), 0))}</strong></td></tr>`).join("")}</tbody></table>`;
+      content.querySelectorAll(".or-score").forEach(el => el.oninput = () => { const i = +el.dataset.i, j = +el.dataset.j; scores[i] = scores[i] || []; scores[i][j] = el.value === "" ? "" : Math.min(+el.max, Math.max(0, +el.value)); if (el.value !== "" && +el.value > +el.max) el.value = el.max; content.querySelector(`.or-sum[data-i="${i}"]`).innerHTML = `<strong>${oaFmt(scores[i].reduce((a, v) => a + (+v || 0), 0))}</strong>`; });
+    };
+    document.getElementById("or-grid").onclick = drawGrid;
+    if (editing && editing.students.length) drawGrid();
+    const collect = () => ({ id: r.id || uid(), name: document.getElementById("or-name").value.trim(), ders: document.getElementById("or-ders").value.trim(), sinif: document.getElementById("or-sinif").value.trim(), donem: document.getElementById("or-donem").value.trim(), type: document.getElementById("or-type").value, criteria: readCrit().filter(c => c.name), students: readStudents(), studentsText: document.getElementById("or-students").value, scores, teacher: document.getElementById("or-teacher").value.trim() });
+    document.getElementById("or-save").onclick = () => {
+      const msg = document.getElementById("or-msg"); const x = collect();
+      if (!x.criteria.length) { msg.innerHTML = `<div class="msg err">En az bir ölçüt gerekli.</div>`; return; }
+      if (editing) data.rubrics = data.rubrics.map(y => y.id === x.id ? x : y); else data.rubrics.push(x);
+      if (!saveOA(school, profile, data)) { msg.innerHTML = localStorageSaveErrHtml(); return; }
+      msg.innerHTML = `<div class="msg ok">Ölçek kaydedildi (${x.criteria.length} ölçüt, ${x.students.length} öğrenci).</div>`;
+      if (!editing) rerender({ editId: x.id, criteria: null });
+    };
+    document.getElementById("or-print").onclick = () => showDoc(oaRubricHtml(school, collect()), `Ölçek ${document.getElementById("or-name").value.trim() || "puanlama"}`);
+    const cancel = document.getElementById("or-cancel"); if (cancel) cancel.onclick = () => rerender({ editId: null, criteria: null, type: null });
+    content.querySelectorAll("[data-or-print]").forEach(b => b.onclick = () => { const x = data.rubrics.find(y => y.id === b.dataset.orPrint); showDoc(oaRubricHtml(school, x), `Ölçek ${x.name}`); });
+    content.querySelectorAll("[data-or-edit]").forEach(b => b.onclick = () => rerender({ editId: b.dataset.orEdit, criteria: null, type: null }));
+    content.querySelectorAll("[data-or-del]").forEach(b => b.onclick = () => { if (!confirm("Bu ölçek silinsin mi?")) return; data.rubrics = data.rubrics.filter(x => x.id !== b.dataset.orDel); saveOA(school, profile, data); rerender({ editId: null, criteria: null, type: null }); });
+    return;
+  }
+
+  if (tool === "oturma") {
+    const last = state.plan || null;
+    content.innerHTML = `
+      <div class="card" style="margin-bottom:14px">
+        <h3 style="margin-top:0">Yeni Oturma Planı</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end">
+          <div><label>Sınıf / şube</label><input id="os-sinif" value="${esc(state.sinif || "")}" placeholder="örn. 7-B"></div>
+          <div><label>Öğretmen</label><input id="os-teacher" value="${esc(state.teacher || teacherName)}"></div>
+          <div><label>Tarih</label>${dateInputHtml("os-date", state.date || toLocalISO(new Date()))}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;align-items:end">
+          <div><label>Sıra (satır) sayısı</label><input id="os-rows" type="number" min="1" value="${state.rows || 6}"></div>
+          <div><label>Sütun (sıra grubu) sayısı</label><input id="os-cols" type="number" min="1" value="${state.cols || 3}"></div>
+          <div><label>Sırada kaç kişi</label><select id="os-per"><option value="2" ${(state.perDesk || 2) === 2 ? "selected" : ""}>2 (ikili sıra)</option><option value="1" ${state.perDesk === 1 ? "selected" : ""}>1 (tekli)</option></select></div>
+          <div><label>Düzen</label><select id="os-order"><option value="alfabetik">Alfabetik</option><option value="rastgele" ${state.order === "rastgele" ? "selected" : ""}>Rastgele</option><option value="liste" ${state.order === "liste" ? "selected" : ""}>Listedeki sıra</option></select></div>
+        </div>
+        <label>Öğrenci listesi <span style="color:var(--muted);font-weight:400">(her satıra bir öğrenci; okul numarası başta olabilir)</span></label>
+        <textarea id="os-students" rows="6" ${DIS_TA}>${esc(state.studentsText || "")}</textarea>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label>Öne alınacaklar <span style="color:var(--muted);font-weight:400">(görme/işitme vb.; her satıra bir ad)</span></label><textarea id="os-front" rows="3" ${DIS_TA}>${esc(state.frontText || "")}</textarea></div>
+          <div><label>Yan yana oturmayacaklar <span style="color:var(--muted);font-weight:400">(her satır: Ad Soyad | Ad Soyad)</span></label><textarea id="os-apart" rows="3" ${DIS_TA}>${esc(state.apartText || "")}</textarea></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <button class="primary" id="os-run" style="width:auto;margin:0;padding:9px 16px">Planı Oluştur</button>
+          ${last ? `<button class="secondary" id="os-save" style="width:auto;margin:0;padding:9px 16px">Kaydet</button><button class="secondary" id="os-print" style="width:auto;margin:0;padding:9px 16px">Yazdır</button>` : ""}
+        </div>
+        <div id="os-msg"></div>
+        ${last ? `<div style="margin-top:12px"><div style="border:2px solid var(--line);border-radius:6px;padding:4px;text-align:center;font-weight:600;letter-spacing:3px;margin-bottom:6px">TAHTA</div><div class="table-wrap"><table class="data"><tbody>${Array.from({ length: last.rows }, (_, r) => `<tr>${Array.from({ length: last.cols }, (_, c) => `<td style="text-align:center;vertical-align:top">${last.seats.filter(s => s.row === r && s.col === c).map(s => `<div>${esc(s.name || "—")}</div>`).join("")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>${last.overflow.length ? `<div class="msg err">Yer kalmadı: ${last.overflow.map(esc).join(", ")} — sıra/sütun sayısını artır.</div>` : ""}${last.violations.length ? `<div class="msg err">${last.violations.length} çift ayrılamadı: ${last.violations.map(([x, y]) => `${esc(x)} – ${esc(y)}`).join("; ")}</div>` : ""}</div>` : ""}
+        <div id="oa-preview" style="margin-top:12px"></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Kayıtlı Planlar (${data.seatings.length})</h3>
+        ${data.seatings.length ? data.seatings.map(x => `<div class="list-item"><span><strong>${esc(x.sinif)}</strong><div style="font-size:11.5px;color:var(--muted)">${x.date ? fmtDate(x.date) : ""} · ${x.seats.filter(s => s.name).length} öğrenci · ${x.rows}×${x.cols}</div></span><div class="row-actions"><button data-os-print="${x.id}">Yazdır</button><button data-os-del="${x.id}">Sil</button></div></div>`).join("") : `<p style="color:var(--muted)">Henüz plan yok.</p>`}
+      </div>`;
+    wireDate3("os-date");
+    const collectOpts = () => ({ sinif: document.getElementById("os-sinif").value.trim(), teacher: document.getElementById("os-teacher").value.trim(), date: document.getElementById("os-date").value || null, rows: +document.getElementById("os-rows").value || 1, cols: +document.getElementById("os-cols").value || 1, perDesk: +document.getElementById("os-per").value || 2, order: document.getElementById("os-order").value, studentsText: document.getElementById("os-students").value, frontText: document.getElementById("os-front").value, apartText: document.getElementById("os-apart").value });
+    document.getElementById("os-run").onclick = () => {
+      const o = collectOpts(); const msg = document.getElementById("os-msg");
+      const students = splitLines(o.studentsText).map(l => l.replace(/^\d{1,6}\s+/, "").trim()).filter(Boolean);
+      if (!students.length) { msg.innerHTML = `<div class="msg err">Öğrenci listesi gerekli.</div>`; return; }
+      const front = splitLines(o.frontText).map(s => s.trim()).filter(Boolean);
+      const apart = splitLines(o.apartText).map(l => l.split("|").map(s => s.trim())).filter(p => p.length === 2 && p[0] && p[1]);
+      const res = oaBuildSeating(students, { rows: o.rows, cols: o.cols, perDesk: o.perDesk, order: o.order, front, apart });
+      rerender({ ...o, plan: { id: uid(), sinif: o.sinif, teacher: o.teacher, date: o.date, rows: o.rows, cols: o.cols, perDesk: o.perDesk, front, seats: res.seats, overflow: res.overflow, violations: res.violations } });
+    };
+    if (last) {
+      document.getElementById("os-save").onclick = () => { data.seatings.push(last); if (!saveOA(school, profile, data)) { document.getElementById("os-msg").innerHTML = localStorageSaveErrHtml(); return; } rerender({ plan: null }); };
+      document.getElementById("os-print").onclick = () => showDoc(oaSeatingHtml(school, last), `Oturma Planı ${last.sinif}`);
+    }
+    content.querySelectorAll("[data-os-print]").forEach(b => b.onclick = () => { const x = data.seatings.find(y => y.id === b.dataset.osPrint); showDoc(oaSeatingHtml(school, x), `Oturma Planı ${x.sinif}`); });
+    content.querySelectorAll("[data-os-del]").forEach(b => b.onclick = () => { if (!confirm("Bu plan silinsin mi?")) return; data.seatings = data.seatings.filter(x => x.id !== b.dataset.osDel); saveOA(school, profile, data); rerender({ plan: null }); });
+    return;
+  }
+
+  if (tool === "belgeler") {
+    const keys = ["ders_kesim", "yazili_teslim", "proje_secim", "donem_sonu_kontrol"];
+    content.innerHTML = `
+      <div class="card" style="margin-bottom:14px">
+        <h3 style="margin-top:0">Belgelerim</h3>
+        <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px">Öğretmenin kendi düzenlediği belgeler; resmî yazı başlığı okul bilgisiyle gelir, imza öğretmenindir. Alanları doldur, "Belgeyi Oluştur" de, yazdır ya da Word'e al.</p>
+        <div class="grid">${keys.map(k => { const t = EVRAK_TEMPLATES.find(x => x.key === k); return t ? `<div class="mod clickable" data-oa-doc="${k}"><h3>${esc(t.title)}</h3><p>${esc(t.desc)}</p></div>` : ""; }).join("")}</div>
+        <div id="doc-form" style="margin-top:14px"></div>
+      </div>`;
+    content.querySelectorAll("[data-oa-doc]").forEach(el => el.onclick = () => { renderDocForm(school, el.dataset.oaDoc); document.getElementById("doc-form").scrollIntoView({ behavior: "smooth", block: "start" }); });
+  }
+}
+
 /* ============ DERS DENETİMİ (öğretmen ders denetim formu) ============ */
 /**
  * Dayanak: MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği md.39/3 (Ek: RG-17/1/2025-32785):
@@ -7755,6 +8164,15 @@ const KILAVUZ_SECTIONS = [
   { id: "planlama", title: "Planlama İşleri", html: `
     <p>Kurul, komisyon ya da kulüp oluştur; üyelerini öğretmen listesinden seç ya da (veli, öğrenci temsilcisi gibi öğretmen olmayanlar için) elle yaz. Her kurul için ayrı toplantı/faaliyet kaydı (tarih, gündem, kararlar) tutulur.</p>
   ` },
+  { id: "ogretmen-araclari", title: "Öğretmen Araçları", html: `
+    <p>Öğretmen hesaplarının kendi panelinden, idarecilerin ana ekrandan açtığı dört araç. Öğrenci adları ve puanları <strong>yalnızca tarayıcıda</strong>, hesap+okul bazında saklanır; sunucuya gönderilmez (Kelebek ve Personel İşleri ile aynı ilke).</p>
+    <ol>
+      <li><strong>Sınav Analizi</strong>: e-Okul'dan kopyaladığın "Ad Soyad – puan" listesini yapıştır (başta okul numarası olabilir; soru bazlı "Ad | 10 | 8 | …" girişi de olur). Ortalama, medyan, standart sapma, en yüksek/düşük, başarı oranı (eşik varsayılan 50; Türkçe için 70 — Yönetmelik md.21/1), puan dağılımı (0–49,99 / 50–69,99 / 70–84,99 teşekkür / 85+ takdir — md.53/1) ve soru bazında başarı yüzdesi; %50 altındaki sorular "Geliştirilmeli" işaretlenir. Değerlendirme notunla birlikte resmî başlıklı analiz raporu yazdırılır.</li>
+      <li><strong>Değerlendirme Ölçeği</strong>: proje, performans ya da ders etkinliklerine katılım için hazır ölçüt şablonları (düzenlenebilir, puanlar toplamı görünür), öğrenci listesi ve puan tablosu; "Dereceli Puanlama Anahtarı ve Puan Çizelgesi" olarak yazdır (md.22/2 proje, md.22/3 katılım puanı notlarıyla).</li>
+      <li><strong>Sınıf Oturma Planı</strong>: liste, satır×sütun, ikili/tekli sıra, alfabetik/rastgele düzen; öne alınacaklar (görme/işitme vb.) ve yan yana oturmayacak çiftler kuralı; tahta üstte olacak şekilde basılı plan.</li>
+      <li><strong>Belgelerim</strong>: ders kesim raporu, sınav kâğıtları teslim tutanağı, proje seçim formu ve dönem sonu kontrol listesi — Evrak Deposu'ndaki şablonların öğretmen sürümü.</li>
+    </ol>
+  ` },
   { id: "denetim", title: "Ders Denetimi", html: `
     <p>Okul müdürünün öğretmen ders denetimi için kayıt ve form modülü. Dayanak: <strong>MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği md.39/3</strong> (RG-17/1/2025-32785 ile eklendi: okul müdürü eğitim ve öğretim programlarının uygulanmasını denetler). Formun ölçütleri mevzuatta yazılı değildir; varsayılan 22 ölçüt (Planlama, Dersin İşlenişi, Sınıf Yönetimi, Ölçme-Değerlendirme, Kayıt ve Mesleki Sorumluluklar) okul uygulamasıdır ve "Ölçütler" sekmesinden değiştirilebilir.</p>
     <ol>
@@ -7859,6 +8277,9 @@ const SSS_ITEMS = [
   { cat: "Evrak Deposu", q: "Öğretmenlere verdiğim formlar (ders kesim, sınav kâğıdı teslim, proje, dönem sonu kontrol) nerede?", a: `Evrak Deposu'nda: "Ders Kesim Raporu", "Sınav Kâğıtları ve Cevap Anahtarı Teslim Tutanağı" (md.22/1-a), "Proje Ödevi Seçim ve Takip Formu" (md.22/2) ve "Dönem Sonu Öğretmen İş ve İşlemleri Kontrol Listesi". Tablo satırlarını "Sınıf | Ders | …" biçiminde dikey çubukla ayırarak gir; belge tabloyu kendisi çizer. "Maaş Değişiklik Bildirim Formu" ise aylık bildirim içindir; terfi satırları Personel İşleri'ndeki o ayın terfi kayıtlarından dolar.` },
   { cat: "Planlama İşleri", q: "Kurul ve komisyonları tek tek mi gireceğim?", a: `Hayır. "Ortaokul kurul/komisyon şablonunu yükle" düğmesi 25 kurul/komisyonu tek seferde ekler (mevcutlar korunur). Sonra her kurulun ayrıntısında beklenen üyelik yapısı (başkan, asil, yedek…) ve eksikler görünür; üyeleri Personel listesinden seçip rolünü aynı adla girersen sayaç dolar. ÖDDK yapısı yönetmelikten (md.57), diğerleri yaygın uygulamadır.` },
   { cat: "Sınav Kelebek", q: "Gözetmen ataması yapabiliyor muyum?", a: `Evet. Oturma planı oluştururken "Salon / derslik" ve "Gözetmen(ler)" alanlarını doldur; plan çıktısının başlığında salon ve gözetmen adı, altında gözetmen ve okul müdürü imza blokları yer alır. Birden fazla gözetmeni virgülle ayır.` },
+  { cat: "Öğretmen Araçları", q: "Sınav analizine puanları nasıl gireceğim?", a: `e-Okul'daki puan listesini seçip kopyala, "Puan listesi" kutusuna yapıştır; satırlar "512 Ali Veli<sekme>85" gibi gelir, panel numarayı, adı ve puanı ayırır. Soru bazlı analiz istiyorsan her satırı "Ad Soyad | 10 | 8 | 5 …" biçiminde gir ve "Soru tam puanları" alanına 10,10,10… yaz; boş bırakırsan tam puan sorulara eşit bölünür. Veriler yalnızca bu tarayıcıda saklanır.` },
+  { cat: "Öğretmen Araçları", q: "Analizdeki başarı eşiği ve aralıklar nereden geliyor?", a: `MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği md.21/1: Türkçe dışındaki derslerde 0–49,99 başarısız, 50,00 ve üzeri başarılı; Türkçe'de 70,00 eşiği. md.53/1: dönem ağırlıklı puan ortalaması 70,00–84,99 teşekkür, 85,00 ve üzeri takdir. Eşik alanı elle değiştirilebilir (lise için kendi yönetmeliğine göre gir).` },
+  { cat: "Öğretmen Araçları", q: "Öğretmenler bu araçları kendi hesaplarından mı kullanıyor?", a: `Evet. Öğretmen davet koduyla giriş yapınca panelinde "Öğretmen Araçları" kartı çıkar; verileri kendi tarayıcısında kalır, idareci göremez. İdareci de ana ekrandan aynı araçları kullanabilir (örneğin ders okutan müdür yardımcısı). Kart, okulun modül listesinde "Öğretmen Araçları" açıksa görünür.` },
   { cat: "Ders Denetimi", q: "Müdür ders denetimi yapabilir mi, dayanağı ne?", a: `Evet. MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği md.39/3 (17/1/2025'te eklendi) okul müdürüne "Bakanlık tarafından kabul edilen eğitim ve öğretim programlarının uygulanmasını denetleme" görevini verir. Form düzeni ve ölçütler mevzuatta yoktur; modüldeki liste okul uygulamasıdır ve düzenlenebilir.` },
   { cat: "Ders Denetimi", q: "Ölçütleri değiştirebilir miyim?", a: `Evet, "Ölçütler" sekmesinden ekleyebilir, düzenleyebilir ya da pasifleştirebilirsin. Pasif ölçüt yeni formlarda görünmez; eski kayıtlardaki puanlar silinmez, o kayıtların formunda görünmeye devam eder.` },
   { cat: "Ek Ders", q: "Katsayıyı neden panel vermiyor?", a: `Memur aylık katsayısı her yıl Ocak ve Temmuz'da Hazine ve Maliye Bakanlığı genelgesiyle değişir; panelde sabit bir sayı tutmak yanlış ödeme riski yaratır. Dönem genelgesindeki katsayıyı çizelge ayarlarına gir; girilmezse tutar sütunu boş kalır ama saat sınırları yine denetlenir. Gösterge rakamları (140/150, %25, %100) 657 sayılı Kanun md.176'dan sabittir.` },
