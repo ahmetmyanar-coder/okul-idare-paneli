@@ -183,6 +183,7 @@ const MODULES = [
   { name: "Periyodik Bakım Takibi", desc: "Asansör, yangın tüpü, su deposu, doğalgaz… bakım periyotları, gecikme uyarısı, denetim izi." },
   { name: "Öğrenci Disiplin Dosyası", desc: "Olay tutanağından ÖDDK kararına, veli tebliğine ve e-Okul'a kadar dosya akışı; ifade/karar/tebliğ belgeleri ve süre takibi (yönetmeliğe göre)." },
   { name: "Ek Ders Onay Çizelgesi", desc: "Yönetici ve öğretmenlerin haftalık ders/ek ders/yönetim/nöbet saatleri; Karar'a göre sınır denetimi, yatay çizelge ve olur yazısı." },
+  { name: "Ders Denetimi", desc: "Müdürün öğretmen ders denetimi: ölçüt tablosu, güçlü/geliştirilecek yönler, 1 aylık takip, öğretmen geçmişi ve basılı form." },
   { name: "Okul Panosu", desc: "Koridor ekranı için duyuru, medya ve pekiştireç (ayın öğrencisi vb.) yönetimi." },
   { name: "Kullanma Kılavuzu", desc: "Her modülün nasıl kullanılacağı, adım adım." },
   { name: "Sıkça Sorulan Sorular", desc: "Aranabilir soru-cevap listesi." },
@@ -266,6 +267,10 @@ function renderAuth(mode = "login") {
     if (error) {
       const tr = error.message === "Email not confirmed"
         ? "E-postana gelen onay bağlantısına tıklamadan giriş yapamazsın. Gelen kutunu (ve spam klasörünü) kontrol et."
+        : error.message === "Invalid login credentials"
+        ? "E-posta ya da şifre hatalı. E-postayı kayıt olduğun hâliyle (büyük/küçük harf ve boşluk olmadan) yaz; şifreni hatırlamıyorsan yöneticiye bildir."
+        : /rate limit|too many/i.test(error.message)
+        ? "Çok fazla deneme yapıldı; birkaç dakika bekleyip tekrar dene."
         : error.message;
       msg.innerHTML = `<div class="msg err">${tr}</div>`;
       return;
@@ -311,6 +316,7 @@ function renderTeacherDashboard(profile, school) {
         </div>
         <div id="topbar-actions" style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
           <button class="signout" id="signout">Çıkış yap</button>
+          <button class="signout" id="chpass" title="Hesabının şifresini değiştir">Şifre değiştir</button>
         </div>
       </div>
       <div class="grid">
@@ -334,6 +340,8 @@ function renderTeacherDashboard(profile, school) {
     await sb.auth.signOut();
     boot();
   };
+  const chpassBtn = document.getElementById("chpass");
+  if (chpassBtn) chpassBtn.onclick = changePasswordPrompt;
   const scheduleCard = document.querySelector('[data-mod="Nöbetim ve Programım"]');
   if (scheduleCard) scheduleCard.onclick = () => renderTeacherSchedule(profile, school, "nobet");
   const requestsCard = document.querySelector('[data-mod="Taleplerim"]');
@@ -600,6 +608,18 @@ function renderSchoolSetup(user) {
 
 const ROLE_LABELS = { mudur: "Müdür", mudur_yardimcisi: "Müdür Yardımcısı", ogretmen: "Öğretmen (Koç)" };
 
+/* Oturum açmış kullanıcının kendi şifresini değiştirmesi (Supabase updateUser). E-posta ile sıfırlama akışı SMTP kurulana kadar yok. */
+async function changePasswordPrompt() {
+  const p1 = prompt("Yeni şifre (en az 8 karakter):");
+  if (p1 === null) return;
+  if (p1.length < 8) { alert("Şifre en az 8 karakter olmalı."); return; }
+  const p2 = prompt("Yeni şifreyi bir kez daha yaz:");
+  if (p2 === null) return;
+  if (p1 !== p2) { alert("İki şifre aynı değil; değişiklik yapılmadı."); return; }
+  const { error } = await sb.auth.updateUser({ password: p1 });
+  alert(error ? `Şifre değiştirilemedi: ${error.message}` : "Şifre değiştirildi. Bir sonraki girişte yeni şifreni kullan.");
+}
+
 function accountLineHtml(profile) {
   return `
     <div class="account-line">
@@ -648,12 +668,14 @@ async function maybeShowPlatformAdminLink(profile) {
  * İlgili kart (Platform Yönetimi'nden kapatılmışsa) yoksa sessizce atlanır.
  */
 async function maybeShowPendingBadges(school) {
-  const [{ count: talepCount }, { data: aylikTasks }, { data: bakimItems }, { data: disCases }] = await Promise.all([
+  const [{ count: talepCount }, { data: aylikTasks }, { data: bakimItems }, { data: disCases }, { data: denFollowups }] = await Promise.all([
     sb.from("requests").select("id", { count: "exact", head: true }).eq("school_id", school.id).eq("status", "bekliyor"),
     sb.from("monthly_tasks").select("month").eq("school_id", school.id).eq("is_done", false),
     sb.from("maintenance_items").select("last_done_on, period_months").eq("school_id", school.id).eq("is_active", true),
     sb.from("discipline_cases").select("id, stage, sanction, decision_date, notified_on, ilce_sent_on, eokul_entered, created_at").eq("school_id", school.id).neq("stage", "tamam"),
+    sb.from("lesson_observations").select("followup_due").eq("school_id", school.id).eq("followup_done", false).not("followup_due", "is", null),
   ]);
+  const denOverdue = (denFollowups || []).filter(o => o.followup_due < toLocalISO(new Date())).length;
   const currentMonth = new Date().getMonth() + 1;
   const aylikPendingThisMonth = (aylikTasks || []).filter(t => t.month === currentMonth).length;
   const bakimToday = toLocalISO(new Date());
@@ -673,6 +695,7 @@ async function maybeShowPendingBadges(school) {
   addBadge("Aylık Yönetim Akışı", aylikPendingThisMonth);
   addBadge("Periyodik Bakım Takibi", bakimOverdue);
   addBadge("Öğrenci Disiplin Dosyası", disOverdue);
+  addBadge("Ders Denetimi", denOverdue);
 }
 
 function renderDashboard(profile, school) {
@@ -686,6 +709,7 @@ function renderDashboard(profile, school) {
         </div>
         <div id="topbar-actions" style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
           <button class="signout" id="signout">Çıkış yap</button>
+          <button class="signout" id="chpass" title="Hesabının şifresini değiştir">Şifre değiştir</button>
           <button class="secondary" id="idareciler-btn" style="font-size:12.5px;padding:7px 12px">İdareciler</button>
         </div>
       </div>
@@ -703,6 +727,8 @@ function renderDashboard(profile, school) {
     await sb.auth.signOut();
     boot();
   };
+  const chpassBtn = document.getElementById("chpass");
+  if (chpassBtn) chpassBtn.onclick = changePasswordPrompt;
   document.getElementById("idareciler-btn").onclick = () => renderIdareciYonetimi(profile, school);
   maybeShowPlatformAdminLink(profile);
   maybeShowPendingBadges(school);
@@ -732,6 +758,8 @@ function renderDashboard(profile, school) {
   if (disCard) disCard.onclick = () => renderDisiplinModule(profile, school);
   const ekdCard = document.querySelector('[data-mod="Ek Ders Onay Çizelgesi"]');
   if (ekdCard) ekdCard.onclick = () => renderEkdersModule(profile, school);
+  const denCard = document.querySelector('[data-mod="Ders Denetimi"]');
+  if (denCard) denCard.onclick = () => renderDenetimModule(profile, school);
   const panoCard = document.querySelector('[data-mod="Okul Panosu"]');
   if (panoCard) panoCard.onclick = () => renderPanoModule(profile, school);
   const kilavuzCard = document.querySelector('[data-mod="Kullanma Kılavuzu"]');
@@ -3937,6 +3965,293 @@ async function renderCommitteeDetail(school, committee, el) {
   });
 }
 
+/* ============ DERS DENETİMİ (öğretmen ders denetim formu) ============ */
+/**
+ * Dayanak: MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği md.39/3 (Ek: RG-17/1/2025-32785):
+ * "Okul müdürü, Bakanlık tarafından kabul edilen eğitim ve öğretim programlarının uygulanmasını denetler,
+ * eğitim ve öğretim faaliyetlerinin söz konusu programlarda belirtilen esaslara göre planlanıp uygulanmasına
+ * yönelik tedbirler alır." (MEB'in Kasım 2025 konsolide metninden birebir). Formun ölçütleri mevzuatla
+ * belirlenmiş değildir; aşağıdaki varsayılan liste okul tarafından "Ölçütler" sekmesinden düzenlenebilir.
+ * Ölçek: 1 Geliştirilmeli · 2 İyi · 3 Çok iyi · boş = gözlenmedi.
+ */
+const DENETIM_SEED = [
+  ["Planlama ve Hazırlık", "Ünitelendirilmiş yıllık plan ve günlük ders planı hazır; işlenen kazanımla uyumlu"],
+  ["Planlama ve Hazırlık", "Dersin kazanımı öğrencilere açıkça duyuruldu; ders bu kazanıma göre yapılandırıldı"],
+  ["Planlama ve Hazırlık", "Öğretim programı ve zümre kararlarına uygun ilerleme (konu–takvim uyumu)"],
+  ["Planlama ve Hazırlık", "Ders araç-gereci, materyal ve teknoloji (akıllı tahta, EBA vb.) önceden hazırlanmış"],
+  ["Dersin İşlenişi", "Alan ve program bilgisi doğru ve güncel; kavram hatası yok"],
+  ["Dersin İşlenişi", "Yöntem-teknik çeşitliliği; öğrenciyi etkin kılan etkinlikler"],
+  ["Dersin İşlenişi", "Türkçeyi doğru, akıcı ve anlaşılır kullanma; ses tonu ve beden dili"],
+  ["Dersin İşlenişi", "Öğrenci düzeyine uygun örnekler; günlük yaşamla ilişkilendirme"],
+  ["Dersin İşlenişi", "Süreyi etkili kullanma: giriş–gelişme–sonuç dengesi; derse zamanında başlama ve bitirme"],
+  ["Dersin İşlenişi", "Ders kitabı ve etkinlik kitabının amacına uygun kullanımı"],
+  ["Sınıf Yönetimi ve Etkileşim", "Sınıf hâkimiyeti; olumlu ve güvenli öğrenme iklimi"],
+  ["Sınıf Yönetimi ve Etkileşim", "Adil söz hakkı; katılımı düşük öğrencileri derse çekme"],
+  ["Sınıf Yönetimi ve Etkileşim", "Öğrenci sorularına yapıcı dönüt; hatayı öğrenme fırsatına çevirme"],
+  ["Sınıf Yönetimi ve Etkileşim", "Çocuk haklarını, millî, manevi ve evrensel değerleri gözeten tutum"],
+  ["Ölçme ve Değerlendirme", "Ders içinde kazanımı yoklayan sorular veya kısa uygulamalar"],
+  ["Ölçme ve Değerlendirme", "Ödev ve performans görevlerinin amaca uygunluğu; dönüt verilmesi"],
+  ["Ölçme ve Değerlendirme", "Sınav tarihleri, proje/performans konuları ve puanlama ölçeklerinin önceden duyurulması"],
+  ["Kayıt ve Mesleki Sorumluluklar", "e-Okul'da ders defteri/kazanım ve yoklama kayıtlarının güncelliği"],
+  ["Kayıt ve Mesleki Sorumluluklar", "Sınıf rehber öğretmenliği, kulüp ve sosyal etkinlik dosyalarının düzeni"],
+  ["Kayıt ve Mesleki Sorumluluklar", "Velilerle iletişim ve iş birliği (görüşme ve toplantı kayıtları)"],
+  ["Kayıt ve Mesleki Sorumluluklar", "Mesleki gelişim çalışmalarına katılım; zümre iş birliği"],
+  ["Kayıt ve Mesleki Sorumluluklar", "Proje ve okul çalışmalarına katkı (TÜBİTAK, eTwinning, sosyal sorumluluk vb.)"],
+];
+const DENETIM_SCALE = { 1: "Geliştirilmeli", 2: "İyi", 3: "Çok iyi" };
+const DENETIM_SCALE_PILL = { 1: "crit", 2: "warn", 3: "good" };
+function denetimDayanak(school) {
+  return ["ortaokul", "ilkokul", "okul_oncesi"].includes(school.okul_turu)
+    ? "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği md.39/3 (okul müdürü eğitim ve öğretim programlarının uygulanmasını denetler)"
+    : "Okul müdürünün eğitim ve öğretim programlarının uygulanmasını denetleme görevi (ilgili kurum yönetmeliği)";
+}
+function denetimSummary(obs, criteria) {
+  const s = { 1: 0, 2: 0, 3: 0, none: 0 };
+  criteria.forEach(c => { const v = obs.scores?.[c.id]; if (v === 1 || v === 2 || v === 3) s[v]++; else s.none++; });
+  return s;
+}
+function denetimFormHtml(school, obs, criteria) {
+  const bySection = {};
+  criteria.forEach(c => (bySection[c.section] ??= []).push(c));
+  const mark = (c, v) => obs.scores?.[c.id] === v ? "✓" : "";
+  const sum = denetimSummary(obs, criteria);
+  return docWrapper(school, `
+    <h3 style="text-align:center;text-decoration:underline;margin-top:22px">ÖĞRETMEN DERS DENETİM FORMU</h3>
+    <p style="font-size:10pt;margin:0 0 8px"><strong>Dayanak:</strong> ${esc(denetimDayanak(school))}</p>
+    <table style="width:100%;border-collapse:collapse;font-size:10.5pt;margin-bottom:8px">
+      <tr><td colspan="4" style="border:1px solid #999;padding:3px 5px;background:#eee"><strong>ÖĞRETMENİN KİMLİK VE GÖREV BİLGİLERİ</strong></td></tr>
+      <tr><td style="border:1px solid #999;padding:3px 5px;width:22%">Adı Soyadı</td><td style="border:1px solid #999;padding:3px 5px;width:28%">${esc(obs.teacher_name)}</td><td style="border:1px solid #999;padding:3px 5px;width:22%">Branşı</td><td style="border:1px solid #999;padding:3px 5px">${esc(obs.branch || "")}</td></tr>
+      <tr><td style="border:1px solid #999;padding:3px 5px">Meslekî Kıdemi</td><td style="border:1px solid #999;padding:3px 5px">${esc(obs.seniority || "")}</td><td style="border:1px solid #999;padding:3px 5px">Varsa Yöneticilik Görevi</td><td style="border:1px solid #999;padding:3px 5px">${esc(obs.admin_role || "")}</td></tr>
+      <tr><td style="border:1px solid #999;padding:3px 5px">Haftalık Ders Saati</td><td style="border:1px solid #999;padding:3px 5px">${obs.weekly_hours ?? ""}</td><td style="border:1px solid #999;padding:3px 5px">Son Mezun Olduğu Okul / Lisansüstü</td><td style="border:1px solid #999;padding:3px 5px">${esc(obs.education || "")}</td></tr>
+      <tr><td colspan="4" style="border:1px solid #999;padding:3px 5px;background:#eee"><strong>DENETİM BİLGİLERİ</strong></td></tr>
+      <tr><td style="border:1px solid #999;padding:3px 5px">Denetim Tarihi / Saati</td><td style="border:1px solid #999;padding:3px 5px">${fmtDate(obs.observed_on)} ${esc(obs.observed_time || "")}</td><td style="border:1px solid #999;padding:3px 5px">Denetlenen Ders / Sınıf-Şube</td><td style="border:1px solid #999;padding:3px 5px">${esc(obs.lesson || "")} / ${esc(obs.class_label || "")}</td></tr>
+      <tr><td style="border:1px solid #999;padding:3px 5px">Dersin Kazanımı</td><td colspan="3" style="border:1px solid #999;padding:3px 5px">${esc(obs.kazanim || "")}</td></tr>
+    </table>
+    <table style="width:100%;border-collapse:collapse;font-size:10pt">
+      <thead><tr><th style="border:1px solid #999;padding:3px;width:5%">No</th><th style="border:1px solid #999;padding:3px;text-align:left">Değerlendirme Ölçütü</th><th style="border:1px solid #999;padding:3px;width:11%">Geliştirilmeli</th><th style="border:1px solid #999;padding:3px;width:8%">İyi</th><th style="border:1px solid #999;padding:3px;width:9%">Çok İyi</th></tr></thead>
+      <tbody>${Object.entries(bySection).map(([sec, list]) => `<tr><td colspan="5" style="border:1px solid #999;padding:3px 5px;background:#f3f3f3"><strong>${esc(sec)}</strong></td></tr>${list.map((c, i) => `<tr><td style="border:1px solid #999;padding:3px;text-align:center">${criteria.indexOf(c) + 1}</td><td style="border:1px solid #999;padding:3px 5px">${esc(c.text)}</td><td style="border:1px solid #999;padding:3px;text-align:center">${mark(c, 1)}</td><td style="border:1px solid #999;padding:3px;text-align:center">${mark(c, 2)}</td><td style="border:1px solid #999;padding:3px;text-align:center">${mark(c, 3)}</td></tr>`).join("")}`).join("")}
+      <tr><td colspan="2" style="border:1px solid #999;padding:3px 5px;text-align:right"><strong>Toplam</strong></td><td style="border:1px solid #999;padding:3px;text-align:center"><strong>${sum[1]}</strong></td><td style="border:1px solid #999;padding:3px;text-align:center"><strong>${sum[2]}</strong></td><td style="border:1px solid #999;padding:3px;text-align:center"><strong>${sum[3]}</strong></td></tr></tbody>
+    </table>
+    ${obs.strengths ? `<p style="margin:10px 0 2px"><strong>Güçlü yönler:</strong></p><p style="text-align:justify;white-space:pre-wrap;margin:0">${esc(obs.strengths)}</p>` : ""}
+    ${obs.improvements ? `<p style="margin:8px 0 2px"><strong>Geliştirilmesi gereken yönler ve öneriler:</strong></p><p style="text-align:justify;white-space:pre-wrap;margin:0">${esc(obs.improvements)}</p>` : ""}
+    ${obs.general_note ? `<p style="margin:8px 0 2px"><strong>Genel değerlendirme:</strong></p><p style="text-align:justify;white-space:pre-wrap;margin:0">${esc(obs.general_note)}</p>` : ""}
+    <p style="text-align:justify;text-indent:1.25cm;margin-top:10px;font-size:10.5pt">Değerli öğretmenim; "Geliştirilmeli" olarak işaretlenen ölçütlerle ilgili gerekli çalışmaları yapmanızı ve sonucu hakkında ${obs.followup_due ? `<strong>${fmtDate(obs.followup_due)}</strong> tarihine kadar` : "en geç bir ay içinde"} tarafıma bilgi vermenizi rica ederim.</p>
+    <table style="width:100%;margin-top:28px"><tr>
+      <td style="width:50%;text-align:center;font-size:10.5pt">Tebellüğ ettim.<br>…/…/……<br><br>${esc(obs.teacher_name)}<br>Öğretmen</td>
+      <td style="width:50%;text-align:center;font-size:10.5pt"><br><br><br>${esc(obs.observer_name || officialSignatureName(school.mudur_adi))}<br>${obs.observer_name && obs.observer_name !== officialSignatureName(school.mudur_adi) ? "Denetleyen" : "Okul Müdürü"}</td>
+    </tr></table>
+  `, { konu: "Öğretmen Ders Denetim Formu", tarih: obs.observed_on });
+}
+
+async function denetimEnsureCriteria(school) {
+  let { data: criteria } = await sb.from("observation_criteria").select("*").eq("school_id", school.id).order("sort_order");
+  if (!criteria || !criteria.length) {
+    const { data: inserted } = await sb.from("observation_criteria").insert(DENETIM_SEED.map(([section, text], i) => ({ school_id: school.id, section, text, sort_order: i }))).select();
+    criteria = inserted || [];
+  }
+  return criteria;
+}
+
+async function renderDenetimModule(profile, school, state = { tab: "kayitlar" }) {
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Ders Denetimi</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Okul müdürünün öğretmen ders denetimi: ölçüt tablosu (Geliştirilmeli / İyi / Çok iyi), güçlü ve geliştirilecek yönler, bir aylık geri bildirim takibi, öğretmen bazında geçmiş ve resmî yazı başlıklı basılı form. Dayanak: ${esc(denetimDayanak(school))}.</div>
+      <div class="card" style="margin-bottom:14px"><div class="subtabs">
+        <div class="subtab ${state.tab === "kayitlar" ? "active" : ""}" data-tab="kayitlar">Denetim Kayıtları</div>
+        <div class="subtab ${state.tab === "yeni" ? "active" : ""}" data-tab="yeni">${state.editingId ? "Kaydı Düzenle" : "Yeni Denetim"}</div>
+        <div class="subtab ${state.tab === "ozet" ? "active" : ""}" data-tab="ozet">Öğretmen Özeti</div>
+        <div class="subtab ${state.tab === "olcutler" ? "active" : ""}" data-tab="olcutler">Ölçütler</div>
+      </div></div>
+      <div id="den-content"></div>
+    </div>`;
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  document.querySelectorAll("[data-tab]").forEach(el => el.onclick = () => renderDenetimModule(profile, school, { tab: el.dataset.tab }));
+  const content = document.getElementById("den-content");
+  content.innerHTML = `<div class="card">Yükleniyor…</div>`;
+  const [criteria, { data: obsList }, { data: teachers }] = await Promise.all([
+    denetimEnsureCriteria(school),
+    sb.from("lesson_observations").select("*").eq("school_id", school.id).order("observed_on", { ascending: false }).order("created_at", { ascending: false }),
+    sb.from("teachers").select("id, full_name, branch, hire_date, is_idareci").eq("school_id", school.id).order("full_name"),
+  ]);
+  const active = criteria.filter(c => c.is_active);
+  const today = toLocalISO(new Date());
+  const rerender = (patch = {}) => renderDenetimModule(profile, school, { ...state, ...patch });
+  const preview = () => document.getElementById("den-preview");
+  const openForm = (o) => disShowPreview(preview(), denetimFormHtml(school, o, criteria.filter(c => c.is_active || (o.scores && o.scores[c.id]))), `Ders Denetim Formu ${o.teacher_name} ${o.observed_on}`);
+
+  if (state.tab === "kayitlar") {
+    const list = obsList || [];
+    const overdue = list.filter(o => !o.followup_done && o.followup_due && o.followup_due < today);
+    content.innerHTML = `
+      ${overdue.length ? `<div class="card" style="border-color:var(--crit);margin-bottom:14px"><strong>${overdue.length} denetimin geri bildirim süresi doldu</strong> — öğretmenden "Geliştirilmeli" maddeler için bilgi alınmadı. Aşağıda kırmızı işaretli.</div>` : ""}
+      <div class="card">
+        <h3 style="margin-top:0">Denetim Kayıtları (${list.length})</h3>
+        ${list.length ? list.map(o => { const s = denetimSummary(o, active); const late = !o.followup_done && o.followup_due && o.followup_due < today; return `
+          <div class="list-item" style="align-items:flex-start">
+            <span>
+              <strong>${esc(o.teacher_name)}</strong> ${o.branch ? `<span style="color:var(--muted)">· ${esc(o.branch)}</span>` : ""}
+              <div style="font-size:12px;color:var(--muted)">${fmtDate(o.observed_on)}${o.observed_time ? " " + esc(o.observed_time) : ""} · ${esc(o.lesson || "—")} ${o.class_label ? esc(o.class_label) : ""}</div>
+              <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap"><span class="pill crit">${s[1]} geliştirilmeli</span><span class="pill warn">${s[2]} iyi</span><span class="pill good">${s[3]} çok iyi</span>${o.followup_done ? `<span class="pill good">Geri bildirim alındı</span>` : o.followup_due ? `<span class="pill ${late ? "crit" : "muted"}">Geri bildirim: ${fmtDate(o.followup_due)}${late ? " (geçti)" : ""}</span>` : ""}</div>
+            </span>
+            <div class="row-actions" style="flex-wrap:wrap;justify-content:flex-end"><button data-print="${o.id}">Form</button>${o.followup_done ? "" : `<button data-done="${o.id}">Geri bildirim alındı</button>`}<button data-edit="${o.id}">Düzenle</button><button data-del="${o.id}">Sil</button></div>
+          </div>`; }).join("") : `<p style="color:var(--muted)">Henüz denetim kaydı yok — "Yeni Denetim" sekmesinden başla.</p>`}
+        <div id="den-preview" style="margin-top:12px"></div>
+      </div>`;
+    content.querySelectorAll("[data-print]").forEach(b => b.onclick = () => openForm(list.find(o => o.id === b.dataset.print)));
+    content.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => rerender({ tab: "yeni", editingId: b.dataset.edit }));
+    content.querySelectorAll("[data-done]").forEach(b => b.onclick = async () => {
+      const note = prompt("Öğretmenin geri bildirimi / yapılan çalışma (isteğe bağlı):", "") ;
+      if (note === null) return;
+      await sb.from("lesson_observations").update({ followup_done: true, followup_note: note.trim() || null, updated_at: new Date().toISOString() }).eq("id", b.dataset.done);
+      await rerender();
+    });
+    content.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+      const o = list.find(x => x.id === b.dataset.del);
+      if (!confirm(`${o.teacher_name} — ${fmtDate(o.observed_on)} denetim kaydı silinsin mi?`)) return;
+      await sb.from("lesson_observations").delete().eq("id", o.id);
+      await rerender();
+    });
+    return;
+  }
+
+  if (state.tab === "yeni") {
+    const editing = state.editingId ? (obsList || []).find(o => o.id === state.editingId) : null;
+    const o = editing || { teacher_id: "", teacher_name: "", branch: "", seniority: "", admin_role: "", weekly_hours: null, education: "", observed_on: today, observed_time: "", lesson: "", class_label: "", kazanim: "", scores: {}, strengths: "", improvements: "", general_note: "", observer_name: officialSignatureName(school.mudur_adi), followup_due: addMonthsISO(today, 1) };
+    const bySection = {}; active.forEach(c => (bySection[c.section] ??= []).push(c));
+    content.innerHTML = `
+      <div class="card">
+        <h3 style="margin-top:0">${editing ? "Denetim Kaydını Düzenle" : "Yeni Ders Denetimi"}</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label>Öğretmen</label><select id="dn-teacher"><option value="">— Personel listesinden seç —</option>${(teachers || []).map(t => `<option value="${t.id}" ${o.teacher_id === t.id ? "selected" : ""}>${esc(t.full_name)}${t.branch ? ` (${esc(t.branch)})` : ""}</option>`).join("")}</select></div>
+          <div><label>Adı Soyadı <span style="color:var(--muted);font-weight:400">(listede yoksa yaz)</span></label><input id="dn-name" value="${esc(o.teacher_name)}"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px">
+          <div><label>Branşı</label><input id="dn-branch" value="${esc(o.branch || "")}"></div>
+          <div><label>Meslekî kıdemi</label><input id="dn-seniority" value="${esc(o.seniority || "")}" placeholder="örn. 12 yıl"></div>
+          <div><label>Yöneticilik görevi</label><input id="dn-admin" value="${esc(o.admin_role || "")}" placeholder="varsa"></div>
+          <div><label>Haftalık ders saati</label><input id="dn-hours" type="number" min="0" value="${o.weekly_hours ?? ""}"></div>
+        </div>
+        <label>Son mezun olduğu okul / lisansüstü</label><input id="dn-edu" value="${esc(o.education || "")}">
+        <div style="display:grid;grid-template-columns:auto 1fr 1fr 1fr;gap:12px;align-items:end">
+          <div><label>Denetim tarihi</label>${dateInputHtml("dn-date", o.observed_on)}</div>
+          <div><label>Saat / ders saati</label><input id="dn-time" value="${esc(o.observed_time || "")}" placeholder="örn. 3. ders (10.40)"></div>
+          <div><label>Ders</label><input id="dn-lesson" value="${esc(o.lesson || "")}" placeholder="örn. Matematik"></div>
+          <div><label>Sınıf / şube</label><input id="dn-class" value="${esc(o.class_label || "")}" placeholder="örn. 7-B"></div>
+        </div>
+        <label>Dersin kazanımı</label><input id="dn-kazanim" value="${esc(o.kazanim || "")}">
+        <h3>Değerlendirme Ölçütleri <span style="font-size:12px;color:var(--muted);font-weight:400">(1 Geliştirilmeli · 2 İyi · 3 Çok iyi · boş: gözlenmedi)</span></h3>
+        <div class="table-wrap"><table class="data"><thead><tr><th>#</th><th>Ölçüt</th><th style="text-align:center">Geliştirilmeli</th><th style="text-align:center">İyi</th><th style="text-align:center">Çok iyi</th><th></th></tr></thead><tbody>
+          ${Object.entries(bySection).map(([sec, list]) => `<tr><td colspan="6" style="background:var(--surface-2);font-weight:600">${esc(sec)}</td></tr>${list.map(c => `<tr><td>${active.indexOf(c) + 1}</td><td>${esc(c.text)}</td>${[1, 2, 3].map(v => `<td style="text-align:center"><input type="radio" name="sc-${c.id}" value="${v}" ${o.scores?.[c.id] === v ? "checked" : ""}></td>`).join("")}<td><button data-clear="${c.id}" style="margin:0;padding:2px 8px;font-size:11px" title="Gözlenmedi">×</button></td></tr>`).join("")}`).join("")}
+        </tbody></table></div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button class="secondary" id="dn-all3" style="width:auto;margin:0;padding:6px 12px;font-size:12.5px">Tümünü "Çok iyi" işaretle</button><button class="secondary" id="dn-all2" style="width:auto;margin:0;padding:6px 12px;font-size:12.5px">Tümünü "İyi" işaretle</button></div>
+        <label>Güçlü yönler</label><textarea id="dn-strengths" rows="2" ${DIS_TA}>${esc(o.strengths || "")}</textarea>
+        <label>Geliştirilmesi gereken yönler ve öneriler</label><textarea id="dn-improve" rows="3" ${DIS_TA}>${esc(o.improvements || "")}</textarea>
+        <label>Genel değerlendirme <span style="color:var(--muted);font-weight:400">(isteğe bağlı)</span></label><textarea id="dn-general" rows="2" ${DIS_TA}>${esc(o.general_note || "")}</textarea>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end">
+          <div><label>Denetleyen</label><input id="dn-observer" value="${esc(o.observer_name || "")}"></div>
+          <div><label>Geri bildirim son tarihi</label>${dateInputHtml("dn-followup", o.followup_due || "")}</div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+          <button class="primary" id="dn-save" style="width:auto;margin:0;padding:9px 16px">${editing ? "Kaydet" : "Kaydet ve Formu Aç"}</button>
+          ${editing ? `<button class="secondary" id="dn-cancel" style="width:auto;margin:0;padding:9px 16px">Vazgeç</button>` : ""}
+        </div>
+        <div id="dn-msg"></div>
+        <div id="den-preview" style="margin-top:12px"></div>
+      </div>`;
+    wireDate3("dn-date"); wireDate3("dn-followup");
+    const hoursCache = {};
+    document.getElementById("dn-teacher").onchange = async (ev) => {
+      const t = (teachers || []).find(x => x.id === ev.target.value); if (!t) return;
+      document.getElementById("dn-name").value = t.full_name;
+      document.getElementById("dn-branch").value = t.branch || "";
+      const ky = kidemYili(t.hire_date); if (ky !== null) document.getElementById("dn-seniority").value = `${ky} yıl`;
+      if (t.is_idareci) document.getElementById("dn-admin").value = "Müdür Yardımcısı";
+      if (hoursCache[t.id] === undefined) { const { data } = await sb.from("class_subject_hours").select("weekly_hours").eq("teacher_id", t.id); hoursCache[t.id] = (data || []).reduce((a, x) => a + (+x.weekly_hours || 0), 0); }
+      if (hoursCache[t.id]) document.getElementById("dn-hours").value = hoursCache[t.id];
+    };
+    document.getElementById("dn-date").addEventListener("change", () => { const d = document.getElementById("dn-date").value; if (d && !editing) { const f = document.getElementById("dn-followup"); f.value = addMonthsISO(d, 1); f.dispatchEvent(new Event("change")); } });
+    content.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => content.querySelectorAll(`input[name="sc-${b.dataset.clear}"]`).forEach(r => r.checked = false));
+    const setAll = v => active.forEach(c => { const r = content.querySelector(`input[name="sc-${c.id}"][value="${v}"]`); if (r) r.checked = true; });
+    document.getElementById("dn-all3").onclick = () => setAll(3);
+    document.getElementById("dn-all2").onclick = () => setAll(2);
+    const cancel = document.getElementById("dn-cancel"); if (cancel) cancel.onclick = () => rerender({ tab: "kayitlar", editingId: null });
+    document.getElementById("dn-save").onclick = async () => {
+      const msg = document.getElementById("dn-msg");
+      const v = id => document.getElementById(id).value.trim();
+      const teacher_name = v("dn-name"), observed_on = document.getElementById("dn-date").value;
+      if (!teacher_name || !observed_on) { msg.innerHTML = `<div class="msg err">Öğretmen adı ve denetim tarihi gerekli.</div>`; return; }
+      const scores = {}; active.forEach(c => { const r = content.querySelector(`input[name="sc-${c.id}"]:checked`); if (r) scores[c.id] = +r.value; });
+      const payload = { school_id: school.id, teacher_id: v("dn-teacher") || null, teacher_name, branch: v("dn-branch") || null, seniority: v("dn-seniority") || null, admin_role: v("dn-admin") || null, weekly_hours: v("dn-hours") ? +v("dn-hours") : null, education: v("dn-edu") || null, observed_on, observed_time: v("dn-time") || null, lesson: v("dn-lesson") || null, class_label: v("dn-class") || null, kazanim: v("dn-kazanim") || null, scores, strengths: v("dn-strengths") || null, improvements: v("dn-improve") || null, general_note: v("dn-general") || null, observer_name: v("dn-observer") || null, followup_due: document.getElementById("dn-followup").value || null, updated_at: new Date().toISOString() };
+      let saved, error;
+      if (editing) ({ data: saved, error } = await sb.from("lesson_observations").update(payload).eq("id", editing.id).select().single());
+      else ({ data: saved, error } = await sb.from("lesson_observations").insert({ ...payload, created_by: profile.id }).select().single());
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+      if (editing) { await rerender({ tab: "kayitlar", editingId: null }); return; }
+      msg.innerHTML = `<div class="msg ok">Kaydedildi. Form aşağıda — yazdırıp öğretmene tebliğ et; "Geliştirilmeli" maddeler için geri bildirim tarihi: ${saved.followup_due ? fmtDate(saved.followup_due) : "—"}.</div>`;
+      document.getElementById("dn-save").disabled = true;
+      openForm(saved);
+    };
+    return;
+  }
+
+  if (state.tab === "ozet") {
+    const list = obsList || [];
+    const byT = {};
+    list.forEach(o => { const key = o.teacher_id || "n:" + o.teacher_name; (byT[key] ??= { name: o.teacher_name, branch: o.branch, items: [] }).items.push(o); });
+    (teachers || []).forEach(t => { if (!byT[t.id]) byT[t.id] = { name: t.full_name, branch: t.branch, items: [] }; });
+    const rows = Object.values(byT).sort((a, b) => a.name.localeCompare(b.name, "tr"));
+    const weak = {}; list.forEach(o => Object.entries(o.scores || {}).forEach(([cid, v]) => { if (v === 1) weak[cid] = (weak[cid] || 0) + 1; }));
+    const weakTop = Object.entries(weak).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([cid, n]) => ({ c: criteria.find(x => x.id === cid), n })).filter(x => x.c);
+    content.innerHTML = `
+      <div class="card" style="margin-bottom:14px">
+        <h3 style="margin-top:0">Okul Geneli</h3>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px"><span><strong>${list.length}</strong> denetim</span><span><strong>${rows.filter(r => r.items.length).length}/${rows.length}</strong> öğretmen denetlendi</span><span><strong>${list.filter(o => !o.followup_done && o.followup_due && o.followup_due < today).length}</strong> geri bildirim gecikmiş</span></div>
+        ${weakTop.length ? `<p style="margin:10px 0 4px;font-size:13px"><strong>En çok "Geliştirilmeli" alan ölçütler</strong> (okul geneli — zümre/seminer konusu olabilir):</p>${weakTop.map(w => `<div class="list-item"><span>${esc(w.c.text)}<div style="font-size:11.5px;color:var(--muted)">${esc(w.c.section)}</div></span><span class="pill crit">${w.n}</span></div>`).join("")}` : ""}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Öğretmen Bazında</h3>
+        <div class="table-wrap"><table class="data"><thead><tr><th>Öğretmen</th><th>Branş</th><th>Denetim</th><th>Son denetim</th><th>Geliştirilmeli</th><th>İyi</th><th>Çok iyi</th><th>Geri bildirim</th></tr></thead><tbody>
+          ${rows.map(r => { const last = r.items[0]; const s = last ? denetimSummary(last, active) : null; const pend = r.items.filter(o => !o.followup_done && o.followup_due).length; return `<tr><td><strong>${esc(r.name)}</strong></td><td>${esc(r.branch || "")}</td><td style="text-align:center">${r.items.length || `<span class="pill muted">yok</span>`}</td><td>${last ? fmtDate(last.observed_on) : "—"}</td><td style="text-align:center">${s ? `<span class="pill ${s[1] ? "crit" : "muted"}">${s[1]}</span>` : ""}</td><td style="text-align:center">${s ? s[2] : ""}</td><td style="text-align:center">${s ? s[3] : ""}</td><td>${pend ? `<span class="pill warn">${pend} bekliyor</span>` : last ? `<span class="pill good">tamam</span>` : ""}</td></tr>`; }).join("")}
+        </tbody></table></div>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0">Ölçüt sayıları son denetime aittir. Denetlenmemiş öğretmenleri dönem planına al; "Geliştirilmeli" sayısı yüksek olanlarda ikinci bir denetim planla.</p>
+      </div>`;
+    return;
+  }
+
+  if (state.tab === "olcutler") {
+    const editing = state.editingCriterion ? criteria.find(c => c.id === state.editingCriterion) : null;
+    const sections = [...new Set(criteria.map(c => c.section))];
+    content.innerHTML = `
+      <div class="card" style="margin-bottom:14px">
+        <h3 style="margin-top:0">${editing ? "Ölçütü Düzenle" : "Yeni Ölçüt"}</h3>
+        <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px">
+          <div><label>Bölüm</label><input id="oc-section" list="oc-sections" value="${esc(editing?.section || sections[0] || "")}"><datalist id="oc-sections">${sections.map(s => `<option value="${esc(s)}">`).join("")}</datalist></div>
+          <div><label>Ölçüt metni</label><input id="oc-text" value="${esc(editing?.text || "")}"></div>
+        </div>
+        <div style="display:flex;gap:8px"><button class="primary" id="oc-save" style="width:auto;margin:0;padding:8px 14px">${editing ? "Kaydet" : "Ekle"}</button>${editing ? `<button class="secondary" id="oc-cancel" style="width:auto;margin:0;padding:8px 14px">Vazgeç</button>` : ""}</div>
+        <div id="oc-msg"></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Ölçütler (${active.length} aktif)</h3>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 8px">Pasif ölçüt yeni formlarda görünmez; eski kayıtlardaki puanlar korunur. Varsayılan liste okul uygulamasıdır, mevzuat metni değildir.</p>
+        ${criteria.map(c => `<div class="list-item" style="${c.is_active ? "" : "opacity:.55"}"><span><span style="font-size:11px;color:var(--muted)">${esc(c.section)}</span><br>${esc(c.text)}</span><div class="row-actions"><button data-oc-edit="${c.id}">Düzenle</button><button data-oc-toggle="${c.id}">${c.is_active ? "Pasifleştir" : "Aktifleştir"}</button></div></div>`).join("")}
+      </div>`;
+    const cancel = document.getElementById("oc-cancel"); if (cancel) cancel.onclick = () => rerender({ editingCriterion: null });
+    document.getElementById("oc-save").onclick = async () => {
+      const section = document.getElementById("oc-section").value.trim(), text = document.getElementById("oc-text").value.trim(), msg = document.getElementById("oc-msg");
+      if (!section || !text) { msg.innerHTML = `<div class="msg err">Bölüm ve ölçüt metni gerekli.</div>`; return; }
+      const { error } = editing ? await sb.from("observation_criteria").update({ section, text }).eq("id", editing.id) : await sb.from("observation_criteria").insert({ school_id: school.id, section, text, sort_order: criteria.length });
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+      await rerender({ editingCriterion: null });
+    };
+    content.querySelectorAll("[data-oc-edit]").forEach(b => b.onclick = () => rerender({ editingCriterion: b.dataset.ocEdit }));
+    content.querySelectorAll("[data-oc-toggle]").forEach(b => b.onclick = async () => { const c = criteria.find(x => x.id === b.dataset.ocToggle); await sb.from("observation_criteria").update({ is_active: !c.is_active }).eq("id", c.id); await rerender(); });
+  }
+}
+
 /* ============ EK DERS ÜCRET ONAY ÇİZELGESİ ============ */
 /**
  * Dayanak — tamamı birincil kaynaktan birebir okundu (MEB Personel Genel Müdürlüğü'nün Temmuz 2026 tarihli
@@ -6859,6 +7174,16 @@ const KILAVUZ_SECTIONS = [
   { id: "planlama", title: "Planlama İşleri", html: `
     <p>Kurul, komisyon ya da kulüp oluştur; üyelerini öğretmen listesinden seç ya da (veli, öğrenci temsilcisi gibi öğretmen olmayanlar için) elle yaz. Her kurul için ayrı toplantı/faaliyet kaydı (tarih, gündem, kararlar) tutulur.</p>
   ` },
+  { id: "denetim", title: "Ders Denetimi", html: `
+    <p>Okul müdürünün öğretmen ders denetimi için kayıt ve form modülü. Dayanak: <strong>MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği md.39/3</strong> (RG-17/1/2025-32785 ile eklendi: okul müdürü eğitim ve öğretim programlarının uygulanmasını denetler). Formun ölçütleri mevzuatta yazılı değildir; varsayılan 22 ölçüt (Planlama, Dersin İşlenişi, Sınıf Yönetimi, Ölçme-Değerlendirme, Kayıt ve Mesleki Sorumluluklar) okul uygulamasıdır ve "Ölçütler" sekmesinden değiştirilebilir.</p>
+    <ol>
+      <li><strong>Yeni Denetim</strong>: öğretmeni Personel listesinden seç — branş, kıdem (işe başlama tarihinden), yöneticilik görevi ve haftalık ders saati (Ders Dağıtım'dan) otomatik dolar. Tarih, saat, ders, sınıf, kazanım gir; her ölçütü Geliştirilmeli / İyi / Çok iyi işaretle (gözlenmeyeni boş bırak). Güçlü yönleri ve önerileri yaz. Geri bildirim tarihi denetim tarihinden bir ay sonrasına kurulur.</li>
+      <li><strong>Form</strong>: resmî yazı başlıklı basılı form (kimlik/görev bilgileri, denetim bilgileri, ölçüt tablosu ve toplamlar, notlar, "Geliştirilmeli maddeler için … tarihine kadar bilgi veriniz" ricası, öğretmen tebellüğ ve denetleyen imzası). Yazdır ya da Word'e al; öğretmene imzalatıp dosyala.</li>
+      <li><strong>Takip</strong>: geri bildirim tarihi geçen ve "alındı" işaretlenmeyen denetimler kayıt listesinde kırmızı görünür, ana ekranda rozet olur. Öğretmen bilgi verince "Geri bildirim alındı" de, notu yaz.</li>
+      <li><strong>Öğretmen Özeti</strong>: kim kaç kez denetlendi, son denetimde kaç "Geliştirilmeli", geri bildirim bekleyenler; okul genelinde en çok "Geliştirilmeli" alan ölçütler (zümre veya seminer konusu için).</li>
+    </ol>
+    <p style="color:var(--muted)">Denetim kayıtları öğretmen kişisel verisidir; yalnızca idareci hesapları görür. Denetimi tehdit aracı değil gelişim aracı olarak kullan: güçlü yönleri de mutlaka yaz.</p>
+  ` },
   { id: "ekders", title: "Ek Ders Onay Çizelgesi", html: `
     <p>Yönetici ve öğretmenlerin haftalık <strong>aylık karşılığı ders, ek ders ve ek ders görevinden sayılan</strong> saatlerini tek çizelgede toplar; 2006/11350 sayılı Karar, 8. Dönem Toplu Sözleşme ve 657/176'ya göre sınırları denetler; yatay A4 çizelge ve olur yazısı üretir. Sayıların tamamı birincil kaynaktan doğrulanmıştır; memur aylık katsayısı ise panelde tutulmaz, her dönem Hazine ve Maliye Bakanlığı genelgesinden sen girersin.</p>
     <ol>
@@ -6949,6 +7274,8 @@ const SSS_ITEMS = [
   { cat: "LGS Koçluk", q: "Zayıflık Analizi'ndeki \"öncelik skoru\" nasıl hesaplanıyor?", a: `Ham "en düşük net" sıralaması değildir — son denemelerin yakınlık ağırlıklı trendi ile dersin (ya da tanımlıysa konunun) LGS'deki soru ağırlığı birlikte hesaba katılır. Az soru gelen bir ders, çok soru gelen bir dersin önüne geçemez.` },
   { cat: "LGS Koçluk", q: "Konu bazlı hata etiketlemesi zorunlu mu?", a: `Hayır, tamamen opsiyoneldir. Konu tanımlamazsan sistem ders bazlı çalışmaya devam eder; tanımlarsan Zayıflık Analizi ve Haftalık Görevler'deki öneriler konu seviyesinde daha spesifik hale gelir (ör. "Matematik çalış" yerine "Kesirler çalış").` },
   { cat: "LGS Koçluk", q: "Kayıt Geçmişi'ni kim görebilir?", a: `İdareci okul genelindeki tüm değişiklikleri, öğretmen ise sadece kendi yaptığı işlemleri görür.` },
+  { cat: "Ders Denetimi", q: "Müdür ders denetimi yapabilir mi, dayanağı ne?", a: `Evet. MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği md.39/3 (17/1/2025'te eklendi) okul müdürüne "Bakanlık tarafından kabul edilen eğitim ve öğretim programlarının uygulanmasını denetleme" görevini verir. Form düzeni ve ölçütler mevzuatta yoktur; modüldeki liste okul uygulamasıdır ve düzenlenebilir.` },
+  { cat: "Ders Denetimi", q: "Ölçütleri değiştirebilir miyim?", a: `Evet, "Ölçütler" sekmesinden ekleyebilir, düzenleyebilir ya da pasifleştirebilirsin. Pasif ölçüt yeni formlarda görünmez; eski kayıtlardaki puanlar silinmez, o kayıtların formunda görünmeye devam eder.` },
   { cat: "Ek Ders", q: "Katsayıyı neden panel vermiyor?", a: `Memur aylık katsayısı her yıl Ocak ve Temmuz'da Hazine ve Maliye Bakanlığı genelgesiyle değişir; panelde sabit bir sayı tutmak yanlış ödeme riski yaratır. Dönem genelgesindeki katsayıyı çizelge ayarlarına gir; girilmezse tutar sütunu boş kalır ama saat sınırları yine denetlenir. Gösterge rakamları (140/150, %25, %100) 657 sayılı Kanun md.176'dan sabittir.` },
   { cat: "Ek Ders", q: "Müdür yardımcısına hazırlık-planlama neden 0 çıkıyor?", a: `Karar md.11 hazırlık ve planlama ücretini "10 uncu maddede sayılanlar hariç" öğretmenlere verir; müdür, müdür başyardımcısı, müdür yardımcısı ve rehber öğretmen md.10 kapsamında ders niteliğinde yönetim görevi ücreti aldığından hazırlık-planlama alamaz. Elle girersen kırmızı uyarı çıkar.` },
   { cat: "Ek Ders", q: "Aylık ücreti neden hesaplamıyor?", a: `Md.25 gereği ek ders yalnızca fiilen yapılan görevler için ödenir; aylık tutar o ayki fiilî gün/saat, izin-rapor ve tatil günlerine göre MEBBİS Ek Ders Modülünde hesaplanır. Panel haftalık planlanan saat × birim ücret tahmini verir; onay çizelgesi de zaten haftalık saatler üzerinden düzenlenir.` },
