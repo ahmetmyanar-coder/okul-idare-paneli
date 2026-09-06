@@ -181,6 +181,7 @@ const MODULES = [
   { name: "Talep Takibi", desc: "Öğretmenlerden gelen talep/bildirimleri kaydet, durumunu takip et." },
   { name: "Planlama İşleri", desc: "Kurul, komisyon ve kulüplerin üye listesi ve toplantı/faaliyet kayıtları." },
   { name: "Periyodik Bakım Takibi", desc: "Asansör, yangın tüpü, su deposu, doğalgaz… bakım periyotları, gecikme uyarısı, denetim izi." },
+  { name: "Öğrenci Disiplin Dosyası", desc: "Olay tutanağından ÖDDK kararına, veli tebliğine ve e-Okul'a kadar dosya akışı; ifade/karar/tebliğ belgeleri ve süre takibi (yönetmeliğe göre)." },
   { name: "Okul Panosu", desc: "Koridor ekranı için duyuru, medya ve pekiştireç (ayın öğrencisi vb.) yönetimi." },
   { name: "Kullanma Kılavuzu", desc: "Her modülün nasıl kullanılacağı, adım adım." },
   { name: "Sıkça Sorulan Sorular", desc: "Aranabilir soru-cevap listesi." },
@@ -646,15 +647,17 @@ async function maybeShowPlatformAdminLink(profile) {
  * İlgili kart (Platform Yönetimi'nden kapatılmışsa) yoksa sessizce atlanır.
  */
 async function maybeShowPendingBadges(school) {
-  const [{ count: talepCount }, { data: aylikTasks }, { data: bakimItems }] = await Promise.all([
+  const [{ count: talepCount }, { data: aylikTasks }, { data: bakimItems }, { data: disCases }] = await Promise.all([
     sb.from("requests").select("id", { count: "exact", head: true }).eq("school_id", school.id).eq("status", "bekliyor"),
     sb.from("monthly_tasks").select("month").eq("school_id", school.id).eq("is_done", false),
     sb.from("maintenance_items").select("last_done_on, period_months").eq("school_id", school.id).eq("is_active", true),
+    sb.from("discipline_cases").select("id, stage, sanction, decision_date, notified_on, ilce_sent_on, eokul_entered, created_at").eq("school_id", school.id).neq("stage", "tamam"),
   ]);
   const currentMonth = new Date().getMonth() + 1;
   const aylikPendingThisMonth = (aylikTasks || []).filter(t => t.month === currentMonth).length;
   const bakimToday = toLocalISO(new Date());
   const bakimOverdue = (bakimItems || []).filter(i => bakimStatusOf(i, bakimToday).status === "gecikti").length;
+  const disOverdue = (disCases || []).filter(c => disDeadlines(c, []).some(d => d.state === "gecti")).length;
 
   function addBadge(modName, count) {
     if (!count) return;
@@ -668,6 +671,7 @@ async function maybeShowPendingBadges(school) {
   addBadge("Talep Takibi", talepCount);
   addBadge("Aylık Yönetim Akışı", aylikPendingThisMonth);
   addBadge("Periyodik Bakım Takibi", bakimOverdue);
+  addBadge("Öğrenci Disiplin Dosyası", disOverdue);
 }
 
 function renderDashboard(profile, school) {
@@ -723,6 +727,8 @@ function renderDashboard(profile, school) {
   if (planlamaCard) planlamaCard.onclick = () => renderPlanlamaModule(profile, school);
   const bakimCard = document.querySelector('[data-mod="Periyodik Bakım Takibi"]');
   if (bakimCard) bakimCard.onclick = () => renderBakimModule(profile, school);
+  const disCard = document.querySelector('[data-mod="Öğrenci Disiplin Dosyası"]');
+  if (disCard) disCard.onclick = () => renderDisiplinModule(profile, school);
   const panoCard = document.querySelector('[data-mod="Okul Panosu"]');
   if (panoCard) panoCard.onclick = () => renderPanoModule(profile, school);
   const kilavuzCard = document.querySelector('[data-mod="Kullanma Kılavuzu"]');
@@ -3928,6 +3934,725 @@ async function renderCommitteeDetail(school, committee, el) {
   });
 }
 
+/* ============ ÖĞRENCİ DİSİPLİN DOSYASI (ortaokul — Öğrenci Davranışlarını Değerlendirme Kurulu) ============ */
+
+/**
+ * Dayanak: MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği (RG 26/7/2014-29072;
+ * MEB'in Kasım 2025 tarihli konsolide metninden birebir okunarak doğrulandı):
+ *  - Madde 54: yaptırımlar (uyarma / kınama / okul değiştirme) ve uyarma SÜRECİ (sözlü uyarı →
+ *    EK-9 öğrenci sözleşmesi → veli görüşmesi → dosya raporla kurula).
+ *  - Madde 55: yaptırım gerektiren davranışların listesi (aşağıda DIS_BEHAVIORS).
+ *  - Madde 56: takdirde dikkat edilecek hususlar; uyarma/kınama okul müdürü, okul değiştirme ilçe
+ *    kurulu onayı; tekrarında üst yaptırım; veli tebliğden itibaren 5 iş günü içinde itiraz;
+ *    itiraz sonuçlanana kadar yaptırım uygulanmaz; yaptırımlar e-Okul'a işlenir.
+ *  - Madde 57: kurul = müdür yardımcısı (başkan) + gizli oyla seçilen 3 öğretmen + OAB'den 1 veli
+ *    (+3 yedek; rehberlik öğretmeni oy hakkı olmadan katılabilir).
+ *  - Madde 59: kurul en geç 5 iş günü içinde inceler, kararı en geç 2 iş günü içinde müdürlüğe bildirir.
+ *  - Madde 60: ifadeler kurul başkanınca rehberlik öğretmeni (yoksa bir öğretmen) eşliğinde tutanakla
+ *    alınır; gelmeyen/ifade vermeyen tutanakla tespit edilir; karar gerekçeli, dayanılan maddeler
+ *    yazılı, üyeler imzalı, EK-10'a uygun; müdür uygun bulmazsa 5 iş günü içinde iade eder.
+ *  - Madde 61: okul değiştirme dosyası 5 iş günü içinde ilçe kuruluna; dosya içeriği listesi.
+ *  - Madde 62: uyarma/kınama müdür onayıyla sonuçlanır ve veliye tebliğ edilir; okul değiştirmede veli
+ *    okula çağrılarak tebliğ, gelmezse 7201 sayılı Tebligat Kanunu; dönem sonu toplantısında yaptırım
+ *    kaldırılabilir, 5 iş günü içinde e-Okul'dan çıkarılır.
+ * Bu modül ortaokul (ve imam-hatip ortaokulu) içindir; Madde 54/1 yaptırımları ortaokul öğrencileri
+ * için tanımlar. Lise, ayrı bir yönetmeliğe (Ortaöğretim Kurumları Yönetmeliği, Ödül ve Disiplin
+ * Kurulu) tabidir — bu sürümde lise akışı YOK, uydurulmadı; ekranda açıkça belirtilir.
+ * EK-9/EK-10 resmî form düzenleri yönetmelik PDF'inin metin katmanında bulunmadığı için birebir
+ * kopyalanmadı; karar belgesi Madde 60/3'ün zorunlu unsurlarını içerir ve karar defterine EK-10'a
+ * uygun yazılması gerektiği belgede hatırlatılır.
+ */
+const DIS_YON = "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği";
+const DIS_TA = 'style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px"';
+
+const DIS_STAGES = [
+  { id: "olay", label: "Olay & Tutanak", hint: "Olay tespit tutanağı düzenlenir, ilk tedbirler kaydedilir. Uyarma sürecine (Madde 54/3) ya da doğrudan kurula sevke geçilir." },
+  { id: "uyarma_sureci", label: "Uyarma Süreci", hint: "Madde 54/3: (a) sözlü uyarma, (b) öğrenci ile sözleşme (EK-9), (c) okul yöneticisi + rehberlik öğretmeni katılımıyla veli görüşmesi — veli gelmezse tutanak. Davranış sürerse öğretmen dosyayı raporla kurula verir." },
+  { id: "ifade", label: "İfadeler", hint: "Madde 60/1-2: öğrenci ve tanık ifadeleri kurul başkanı tarafından rehberlik öğretmeni (yoksa bir öğretmen) eşliğinde tutanakla alınır. Çağrıldığı hâlde gelmeyen/ifade vermeyen tutanakla tespit edilir; özürsüz gelinmezse dosyadaki belgelere göre işlem yapılır." },
+  { id: "kurul", label: "Kurul & Karar", hint: "Madde 59/3: kurul en geç 5 iş günü içinde inceler, kararı en geç 2 iş günü içinde müdürlüğe bildirir. Madde 60/3: karar gerekçeli yazılır, takdirde esas alınan hususlar özetlenir, dayanılan maddeler belirtilir, üyeler imzalar (EK-10). Madde 59/2: şikâyetçi, zarar gören veya ikinci dereceye kadar akrabalığı olan üye kurula katılamaz." },
+  { id: "onay", label: "Onay", hint: "Madde 56/6 ve 62/1: uyarma/kınama okul müdürünün onayıyla sonuçlanır. Okul değiştirme: dosya 5 iş günü içinde ilçe öğrenci davranışlarını değerlendirme kuruluna gönderilir (Madde 61/1), onay oradan gelir. Müdür kararı uygun bulmazsa 5 iş günü içinde gerekçesiyle kurula iade eder; ikinci karar nihaidir (Madde 60/4)." },
+  { id: "teblig", label: "Veliye Tebliğ", hint: "Madde 62/1-2: karar veliye tebliğ edilir. Okul değiştirmede veli okula çağrılarak tebliğ edilir; çağrıya uymazsa 7201 sayılı Tebligat Kanunu'na göre bildirilir, tebellüğ belgesi dosyada saklanır." },
+  { id: "itiraz", label: "İtiraz Penceresi", hint: "Madde 56/11-12: veli tebliğden itibaren 5 iş günü içinde okul müdürlüğüne itiraz edebilir. Okul değiştirme itirazı görüşleriyle birlikte 5 iş günü içinde ilçe kuruluna gönderilir; itiraz sonuçlanana kadar yaptırım uygulanmaz." },
+  { id: "tamam", label: "e-Okul & Kapanış", hint: "Madde 56/13: yaptırım e-Okul'daki öğrenci bilgileri bölümüne işlenir. Madde 62/3: davranışı tekrarlamayan ve olumlu davranışları gözlenen öğrencinin yaptırımı dönem sonu toplantısında kaldırılabilir; karar 5 iş günü içinde e-Okul'dan çıkarılır." },
+];
+const DIS_STAGE_IDX = Object.fromEntries(DIS_STAGES.map((s, i) => [s.id, i]));
+const DIS_SANCTIONS = { yok: "Karar bekleniyor", yaptirimsiz: "Yaptırım gerekmedi", uyarma: "Uyarma", kinama: "Kınama", okul_degistirme: "Okul değiştirme" };
+const DIS_SANCTION_PILL = { yok: "muted", yaptirimsiz: "good", uyarma: "warn", kinama: "warn", okul_degistirme: "crit" };
+
+/* Madde 55 — yaptırım gerektiren davranışlar (yönetmelik metninden; mülga bentler atlandı). */
+const DIS_BEHAVIORS = [
+  { code: "55/a-1", s: "uyarma", t: "Derse ve diğer etkinliklere vaktinde gelmemek ve geçerli bir neden olmaksızın bu davranışı tekrar etmek" },
+  { code: "55/a-2", s: "uyarma", t: "Özürsüz devamsızlığı belgelendirmemek, alışkanlık hâline getirmek, izin süresini özürsüz uzatmak" },
+  { code: "55/a-3", s: "uyarma", t: "(Yatılı) öğrenci dolabını amacı dışında kullanmak, yasaklı malzeme bulundurmak, dolabı bildirmeden devretmek" },
+  { code: "55/a-4", s: "uyarma", t: "Okula yönetimce yasaklanmış malzeme getirmek ve bunları kullanmak" },
+  { code: "55/a-5", s: "uyarma", t: "Yalan söylemek" },
+  { code: "55/a-6", s: "uyarma", t: "Duvarları, sıraları ve okul çevresini kirletmek" },
+  { code: "55/a-7", s: "uyarma", t: "Görgü kurallarına uymamak" },
+  { code: "55/a-8", s: "uyarma", t: "Kütüphane/laboratuvardan aldığı kitap, araç, gereç ve malzemeyi zamanında teslim etmemek veya geri vermemek" },
+  { code: "55/a-10", s: "uyarma", t: "Kılık ve kıyafetle ilgili kurallara uymamak" },
+  { code: "55/b-1", s: "kinama", t: "Yöneticilere, öğretmenlere, görevlilere ve arkadaşlarına kaba ve saygısız davranmak" },
+  { code: "55/b-2", s: "kinama", t: "Okul kurallarını ve ders ortamını bozmak, ders ve ders dışı etkinliklerin yapılmasını engellemek" },
+  { code: "55/b-3", s: "kinama", t: "Okul yönetimini yanlış bilgilendirmek, yalan söylemeyi alışkanlık hâline getirmek" },
+  { code: "55/b-4", s: "kinama", t: "Okulda bulunduğu hâlde törenlere özürsüz katılmamak, törenlerde uygun olmayan davranışlarda bulunmak" },
+  { code: "55/b-5", s: "kinama", t: "Okulda ya da okul dışında sigara içmek" },
+  { code: "55/b-6", s: "kinama", t: "Resmî evrakta değişiklik yapmak" },
+  { code: "55/b-7", s: "kinama", t: "Okulda kavga etmek" },
+  { code: "55/b-8", s: "kinama", t: "Sınıfta cep telefonu kullanmak" },
+  { code: "55/b-9", s: "kinama", t: "Başkasının malını haberi olmadan almak" },
+  { code: "55/b-10", s: "kinama", t: "Okulun ve öğrencilerin eşya, araç ve gerecine kasıtlı olarak zarar vermek" },
+  { code: "55/b-11", s: "kinama", t: "Kılık ve kıyafetle ilgili kurallara uymamakta ısrar etmek" },
+  { code: "55/b-12", s: "kinama", t: "Okul ile ilgili mekân ve malzemeyi izinsiz ve eğitimin amaçları dışında kullanmak" },
+  { code: "55/b-13", s: "kinama", t: "(Yatılı) izinsiz okulu terk etmek ve gece dışarıda kalmak" },
+  { code: "55/b-14", s: "kinama", t: "Sınavda kopya çekmek veya kopya vermek" },
+  { code: "55/b-15", s: "kinama", t: "Diğer öğrencilerin sosyal/duygusal gelişimini, akran ve arkadaşlık ilişkilerini olumsuz etkileyecek davranışları alışkanlık hâline getirmek" },
+  { code: "55/c-1", s: "okul_degistirme", t: "Anayasanın başlangıcındaki temel ilkelere dayalı millî, demokratik, lâik, sosyal ve hukuk devleti niteliklerine aykırı davranmak veya başkalarını zorlamak" },
+  { code: "55/c-2", s: "okul_degistirme", t: "Sarkıntılık, hakaret, iftira, tehdit ve taciz etmek veya başkalarını bu davranışlara kışkırtmak" },
+  { code: "55/c-3", s: "okul_degistirme", t: "Okula yaralayıcı, öldürücü aletler getirmek ve bunları bulundurmak" },
+  { code: "55/c-4", s: "okul_degistirme", t: "Okul ve çevresinde kasıtlı olarak yangın çıkarmak" },
+  { code: "55/c-5", s: "okul_degistirme", t: "Okul mekân ve malzemesini izinsiz ve eğitim amaçları dışında kullanmayı alışkanlık hâline getirmek" },
+  { code: "55/c-6", s: "okul_degistirme", t: "Okul içinde ve dışında siyasi parti ve sendikaların propagandasını yapmak, bunlarla ilgili eylemlere katılmak" },
+  { code: "55/c-7", s: "okul_degistirme", t: "Herhangi bir kurum ve örgüt adına yardım ve para toplamak" },
+  { code: "55/c-8", s: "okul_degistirme", t: "Kişi veya grupları dil, ırk, cinsiyet, siyasi düşünce ve inançlarına göre ayırmak, kınamak, kötülemek; bu tür eylemlere katılmak" },
+  { code: "55/c-9", s: "okul_degistirme", t: "Başkasının malına zarar vermek, haberi olmadan almayı alışkanlık hâline getirmek" },
+  { code: "55/c-10", s: "okul_degistirme", t: "Okulun bina, eklenti ve donanımlarını, taşınır ve taşınmaz mallarını kasıtlı tahrip etmeyi alışkanlık hâline getirmek" },
+  { code: "55/c-11", s: "okul_degistirme", t: "Okula, derslere, sınavlara girilmesine; derslerin ve sınavların sağlıklı yapılmasına engel olmak" },
+  { code: "55/c-12", s: "okul_degistirme", t: "Yöneticilere, öğretmenlere, personele ve arkadaşlarına şiddet uygulamak, saldırıda bulunmak; bunları düzenlemek veya kışkırtmak" },
+  { code: "55/c-13", s: "okul_degistirme", t: "(Yatılı) gece izinsiz dışarıda kalmayı alışkanlık hâline getirmek" },
+  { code: "55/c-14", s: "okul_degistirme", t: "Okul ile ilişiği olmayan kişileri okulda veya okula ait yerlerde barındırmak" },
+  { code: "55/c-15", s: "okul_degistirme", t: "Kendi yerine başkasının sınava girmesini sağlamak, başkasının yerine sınava girmek" },
+  { code: "55/c-16", s: "okul_degistirme", t: "Alkol veya bağımlılık yapan maddeleri kullanmak veya başkalarını kullanmaya teşvik etmek" },
+  { code: "55/c-18", s: "okul_degistirme", t: "Okul personeli ve öğrencileriyle ilgili dijital araçlar/sosyal medya yoluyla kişilik haklarını ihlal edecek şekilde ses ya da görüntü kaydetmek veya yayımlamak" },
+];
+const DIS_TAKDIR = [
+  "Davranışın niteliği, önemi ve ne gibi şartlarda gerçekleştiği; o andaki psikolojik durumu ve kişisel özellikleri (Madde 56/1-a)",
+  "Okul içinde ve dışındaki genel durumu (56/1-b)",
+  "Yaş ve cinsiyeti (56/1-c)",
+  "Derslerdeki ilgi ve başarısı (56/1-ç)",
+  "Okuldaki sosyal ve kültürel faaliyetlere katılım ve başarı durumu (56/1-d)",
+  "Aynı eğitim-öğretim yılı içinde daha önce yaptırım uygulanıp uygulanmadığı (56/1-e)",
+];
+
+/* İş günü: Cumartesi/Pazar hariç (resmî tatiller modellenmedi — ekranda belirtilir). */
+function addBusinessDays(iso, n) {
+  const d = new Date(iso + "T00:00:00");
+  let left = n;
+  while (left > 0) { d.setDate(d.getDate() + 1); const w = d.getDay(); if (w !== 0 && w !== 6) left--; }
+  return toLocalISO(d);
+}
+function disCaseNo(c) { return `${c.case_year}/${String(c.case_seq).padStart(3, "0")}`; }
+
+/* Yönetmelikteki süreli adımlar → her biri için son tarih ve durum. */
+function disDeadlines(c, docs) {
+  const today = toLocalISO(new Date());
+  const out = [];
+  const state = (due, done) => done ? "tamam" : (due < today ? "gecti" : (addBusinessDays(today, 2) >= due ? "yaklasiyor" : "uygun"));
+  const sevk = (docs || []).find(d => d.doc_type === "kurula_sevk");
+  const karar = (docs || []).find(d => d.doc_type === "kurul_karari");
+  if (sevk) {
+    const due = addBusinessDays(sevk.doc_date || sevk.created_at.slice(0, 10), 5);
+    out.push({ key: "kurul", label: "Kurulun inceleme süresi (Madde 59/3: 5 iş günü)", due, state: state(due, !!karar || !!c.decision_date) });
+  }
+  if (c.sanction === "okul_degistirme" && c.decision_date) {
+    const due = addBusinessDays(c.decision_date, 5);
+    out.push({ key: "ilce", label: "Dosyanın ilçe kuruluna gönderilmesi (Madde 61/1: 5 iş günü)", due, state: state(due, !!c.ilce_sent_on) });
+  }
+  if (c.notified_on) {
+    const due = addBusinessDays(c.notified_on, 5);
+    const closed = !!c.appeal_on || due < today;
+    out.push({ key: "itiraz", label: "Velinin itiraz süresi (Madde 56/11: tebliğden itibaren 5 iş günü)", due, state: c.appeal_on ? "itiraz" : (due < today ? "kapandi" : "acik") });
+    if (!c.appeal_on && due < today && c.sanction !== "yok" && c.sanction !== "yaptirimsiz" && !c.eokul_entered && c.stage !== "tamam") {
+      out.push({ key: "eokul", label: "İtiraz süresi doldu — yaptırımın e-Okul'a işlenmesi (Madde 56/13)", due, state: "gecti" });
+    }
+  }
+  return out;
+}
+
+/* Belge şablonları — alanlar dosyadan önceden dolar, belge kaydedilir ve yeniden yazdırılabilir. */
+const DIS_DOCS = [
+  { key: "olay_tutanagi", stage: "olay", title: "Olay Tespit Tutanağı",
+    fields: c => [
+      { id: "tarih", label: "Tutanak tarihi", type: "date", v: c.incident_date || toLocalISO(new Date()) },
+      { id: "saat", label: "Olay saati", type: "text", v: c.incident_time || "" },
+      { id: "yer", label: "Olay yeri", type: "text", v: c.incident_place || "" },
+      { id: "ogrenciler", label: "İlgili öğrenci(ler)", type: "text", v: `${c.student_name}${c.class_label ? ` (${c.class_label}${c.student_no ? ` / No: ${c.student_no}` : ""})` : ""}` },
+      { id: "anlatim", label: "Olayın kronolojik ve somut anlatımı", type: "textarea", v: c.description || c.summary || "" },
+      { id: "tedbir", label: "İlk alınan tedbirler / yapılan işlemler", type: "textarea", v: c.first_measures || "" },
+      { id: "duzenleyen", label: "Tutanağı düzenleyen(ler)", type: "text", v: c.reported_by || "" },
+    ],
+    meta: d => ({ konu: "Olay Tespit Tutanağı", tarih: d.tarih }),
+    render: (d, c, s) => `
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">OLAY TESPİT TUTANAĞI</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:11pt">
+        <tr><td style="width:32%;padding:3px 0"><strong>Dosya No</strong></td><td>: ${esc(disCaseNo(c))}</td></tr>
+        <tr><td style="padding:3px 0"><strong>Tarih / Saat</strong></td><td>: ${fmtDate(d.tarih)} ${esc(d.saat)}</td></tr>
+        <tr><td style="padding:3px 0"><strong>Olay Yeri</strong></td><td>: ${esc(d.yer)}</td></tr>
+        <tr><td style="padding:3px 0"><strong>İlgili Öğrenci(ler)</strong></td><td>: ${esc(d.ogrenciler)}</td></tr>
+      </table>
+      <p style="margin-top:14px"><strong>OLAYIN KRONOLOJİK VE SOMUT ANLATIMI</strong></p>
+      <p style="text-align:justify;white-space:pre-wrap">${esc(d.anlatim)}</p>
+      <p><strong>İLK ALINAN TEDBİRLER / YAPILAN İŞLEMLER</strong></p>
+      <p style="text-align:justify;white-space:pre-wrap">${esc(d.tedbir)}</p>
+      <p style="text-align:justify;text-indent:1.25cm;margin-top:10px">İş bu tutanak, olayın tespiti amacıyla tarafımızca düzenlenerek imza altına alınmıştır.</p>
+      <table style="width:100%;margin-top:40px"><tr>
+        <td style="width:50%;text-align:center"><strong>Düzenleyen(ler)</strong><br><br><br>${esc(d.duzenleyen)}</td>
+        <td style="width:50%;text-align:center"><strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü</td>
+      </tr></table>` },
+  { key: "veli_gorusme", stage: "uyarma_sureci", title: "Veli Görüşme / Bilgilendirme Tutanağı (Madde 54/3-c)",
+    fields: c => [
+      { id: "tarih", label: "Görüşme tarihi", type: "date", v: toLocalISO(new Date()) },
+      { id: "veli", label: "Veli adı", type: "text", v: c.veli_adi || "" },
+      { id: "katilanlar", label: "Görüşmeye katılan okul yöneticisi ve rehberlik öğretmeni", type: "text", v: "" },
+      { id: "geldi", label: "Veli görüşmeye katıldı mı? (Evet / Hayır — gelmediyse tutanak tutulur)", type: "text", v: "Evet" },
+      { id: "icerik", label: "Görüşmede bildirilen olumsuz davranışlar ve uygulanabilecek yaptırımlar", type: "textarea", v: c.summary || "" },
+    ],
+    meta: d => ({ konu: "Veli Görüşme Tutanağı", tarih: d.tarih }),
+    render: (d, c, s) => `
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">VELİ GÖRÜŞME TUTANAĞI</h3>
+      <p><strong>Öğrenci:</strong> ${esc(c.student_name)} ${c.class_label ? `(${esc(c.class_label)})` : ""} &nbsp; <strong>Dosya No:</strong> ${esc(disCaseNo(c))}</p>
+      <p><strong>Veli:</strong> ${esc(d.veli)} &nbsp; <strong>Tarih:</strong> ${fmtDate(d.tarih)} &nbsp; <strong>Katılım:</strong> ${esc(d.geldi)}</p>
+      <p><strong>Görüşmeye katılanlar (okul yönetimi / rehberlik):</strong> ${esc(d.katilanlar)}</p>
+      <p style="text-align:justify;text-indent:1.25cm">${DIS_YON} Madde 54/3-c uyarınca öğrenci velisi okula davet edilmiş; öğrencinin olumsuz davranışları ve bu davranışların sürmesi hâlinde uygulanabilecek yaptırımlar veliye bildirilmiştir:</p>
+      <p style="text-align:justify;white-space:pre-wrap">${esc(d.icerik)}</p>
+      ${/^h/i.test(d.geldi || "") ? `<p style="text-align:justify;text-indent:1.25cm">Veli, davet edildiği hâlde görüşmeye katılmamıştır; bu durum iş bu tutanakla tespit edilmiştir.</p>` : ""}
+      <table style="width:100%;margin-top:40px"><tr>
+        <td style="width:33%;text-align:center"><strong>Veli</strong><br><br><br>${esc(d.veli)}</td>
+        <td style="width:33%;text-align:center"><strong>Rehberlik Öğretmeni / Öğretmen</strong><br><br><br>………………</td>
+        <td style="width:33%;text-align:center"><strong>Okul Yöneticisi</strong><br><br><br>………………</td>
+      </tr></table>` },
+  { key: "ogrenci_ifade", stage: "ifade", title: "Öğrenci İfade Tutanağı (Madde 60/1)",
+    fields: c => [
+      { id: "tarih", label: "İfade tarihi", type: "date", v: toLocalISO(new Date()) },
+      { id: "saat", label: "Saat", type: "text", v: "" },
+      { id: "ogrenci", label: "İfade veren öğrenci", type: "text", v: `${c.student_name}${c.class_label ? ` (${c.class_label}${c.student_no ? ` / No: ${c.student_no}` : ""})` : ""}` },
+      { id: "eslik", label: "Eşlik eden rehberlik öğretmeni (yoksa bir öğretmen)", type: "text", v: "" },
+      { id: "sorucevap", label: "Sorular ve cevaplar (her satıra bir soru/cevap)", type: "textarea", v: "Soru 1: \nCevap: \n\nSoru 2: \nCevap: " },
+    ],
+    meta: d => ({ konu: "Öğrenci İfade Tutanağı", tarih: d.tarih }),
+    render: (d, c, s) => `
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">ÖĞRENCİ İFADE TUTANAĞI</h3>
+      <p><strong>Dosya No:</strong> ${esc(disCaseNo(c))} &nbsp; <strong>Olay Tarihi/Yeri:</strong> ${fmtDate(c.incident_date)} ${esc(c.incident_place || "")}</p>
+      <p><strong>İfade veren:</strong> ${esc(d.ogrenci)} &nbsp; <strong>Tarih/Saat:</strong> ${fmtDate(d.tarih)} ${esc(d.saat)}</p>
+      <p style="text-align:justify;text-indent:1.25cm">${DIS_YON} Madde 60/1 uyarınca öğrencinin ifadesi, kurul başkanı tarafından ${esc(d.eslik) || "rehberlik öğretmeni"} eşliğinde, olay kendisine açıklanarak alınmıştır.</p>
+      <p><strong>SORULAR VE CEVAPLAR</strong></p>
+      <p style="text-align:justify;white-space:pre-wrap">${esc(d.sorucevap)}</p>
+      <p style="text-align:justify;text-indent:1.25cm">İfadem yukarıda yazıldığı gibidir; okudum, doğrudur.</p>
+      <table style="width:100%;margin-top:36px"><tr>
+        <td style="width:33%;text-align:center"><strong>İfade Veren Öğrenci</strong><br><br><br>${esc(c.student_name)}</td>
+        <td style="width:33%;text-align:center"><strong>Eşlik Eden</strong><br><br><br>${esc(d.eslik)}</td>
+        <td style="width:33%;text-align:center"><strong>Kurul Başkanı</strong><br><br><br>………………</td>
+      </tr></table>` },
+  { key: "tanik_ifade", stage: "ifade", title: "Tanık İfade Tutanağı (Madde 60/2)",
+    fields: c => [
+      { id: "tarih", label: "İfade tarihi", type: "date", v: toLocalISO(new Date()) },
+      { id: "tanik", label: "Tanığın adı soyadı", type: "text", v: "" },
+      { id: "sinif", label: "Sınıfı/şubesi veya görevi", type: "text", v: "" },
+      { id: "iliski", label: "Olayla ilişkisi", type: "text", v: "Olay yerinde bulunan" },
+      { id: "eslik", label: "Eşlik eden rehberlik öğretmeni / öğretmen", type: "text", v: "" },
+      { id: "ifade", label: "İfade", type: "textarea", v: "" },
+    ],
+    meta: d => ({ konu: "Tanık İfade Tutanağı", tarih: d.tarih }),
+    render: (d, c, s) => `
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">TANIK İFADE TUTANAĞI</h3>
+      <p><strong>Dosya No:</strong> ${esc(disCaseNo(c))} &nbsp; <strong>Olay:</strong> ${fmtDate(c.incident_date)} — ${esc(c.summary)}</p>
+      <p><strong>Tanık:</strong> ${esc(d.tanik)} (${esc(d.sinif)}) &nbsp; <strong>Olayla ilişkisi:</strong> ${esc(d.iliski)} &nbsp; <strong>Tarih:</strong> ${fmtDate(d.tarih)}</p>
+      <p><strong>İFADE</strong></p>
+      <p style="text-align:justify;white-space:pre-wrap">${esc(d.ifade)}</p>
+      <table style="width:100%;margin-top:36px"><tr>
+        <td style="width:33%;text-align:center"><strong>Tanık</strong><br><br><br>${esc(d.tanik)}</td>
+        <td style="width:33%;text-align:center"><strong>Eşlik Eden</strong><br><br><br>${esc(d.eslik)}</td>
+        <td style="width:33%;text-align:center"><strong>Kurul Başkanı</strong><br><br><br>………………</td>
+      </tr></table>` },
+  { key: "ifade_vermeme", stage: "ifade", title: "Çağrıya Uymama / İfade Vermeme Tutanağı (Madde 60/2)",
+    fields: c => [
+      { id: "kisi", label: "Çağrılan kişi (öğrenci/tanık)", type: "text", v: c.student_name },
+      { id: "cagri", label: "Çağrı tarihi/saati", type: "text", v: "" },
+      { id: "tespit", label: "Tespit tarihi", type: "date", v: toLocalISO(new Date()) },
+      { id: "aciklama", label: "Açıklama", type: "textarea", v: "Çağrıldığı hâlde belirtilen tarih ve saatte gelmemiş / ifade vermemiştir." },
+    ],
+    meta: d => ({ konu: "İfade Vermeme Tutanağı", tarih: d.tespit }),
+    render: (d, c, s) => `
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">ÇAĞRIYA UYMAMA / İFADE VERMEME TUTANAĞI</h3>
+      <p><strong>Dosya No:</strong> ${esc(disCaseNo(c))} &nbsp; <strong>Çağrılan:</strong> ${esc(d.kisi)} &nbsp; <strong>Çağrı:</strong> ${esc(d.cagri)} &nbsp; <strong>Tespit:</strong> ${fmtDate(d.tespit)}</p>
+      <p style="text-align:justify;white-space:pre-wrap">${esc(d.aciklama)}</p>
+      <p style="text-align:justify;text-indent:1.25cm">${DIS_YON} Madde 60/2 uyarınca durum iş bu tutanakla tespit edilmiş olup, çağrıya özürsüz uyulmaması hâlinde dosyada bulunan bilgi ve belgelere göre işlem yapılacaktır.</p>
+      <table style="width:100%;margin-top:36px"><tr>
+        <td style="width:50%;text-align:center"><strong>Kurul Başkanı</strong><br><br><br>………………</td>
+        <td style="width:50%;text-align:center"><strong>Öğretmen / Rehberlik Öğretmeni</strong><br><br><br>………………</td>
+      </tr></table>` },
+  { key: "rehberlik_gorusu", stage: "ifade", title: "Rehberlik Servisi Görüşü",
+    fields: c => [
+      { id: "tarih", label: "Tarih", type: "date", v: toLocalISO(new Date()) },
+      { id: "hazirlayan", label: "Görüşü hazırlayan rehberlik öğretmeni", type: "text", v: "" },
+      { id: "uyum", label: "Öğrencinin genel okul uyumu", type: "textarea", v: "" },
+      { id: "ders", label: "Derslere ilgi ve başarı durumu", type: "textarea", v: "" },
+      { id: "akran", label: "Akran ilişkileri / sosyal durum", type: "textarea", v: "" },
+      { id: "onceki", label: "Daha önce yapılan rehberlik çalışmaları", type: "textarea", v: "" },
+      { id: "oneri", label: "Görüş ve öneriler", type: "textarea", v: "" },
+    ],
+    meta: d => ({ konu: "Rehberlik Görüşü", tarih: d.tarih }),
+    render: (d, c, s) => `
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">REHBERLİK SERVİSİ GÖRÜŞÜ</h3>
+      <p><strong>Öğrenci:</strong> ${esc(c.student_name)} ${c.class_label ? `(${esc(c.class_label)})` : ""} &nbsp; <strong>Dosya No:</strong> ${esc(disCaseNo(c))} &nbsp; <strong>Tarih:</strong> ${fmtDate(d.tarih)}</p>
+      ${[["Öğrencinin genel okul uyumu", d.uyum], ["Derslere ilgi ve başarı durumu", d.ders], ["Akran ilişkileri / sosyal durum", d.akran], ["Daha önce yapılan rehberlik çalışmaları", d.onceki], ["Görüş ve öneriler", d.oneri]].map(([h, v]) => `<p><strong>${h}</strong></p><p style="text-align:justify;white-space:pre-wrap">${esc(v)}</p>`).join("")}
+      <p style="font-size:10pt;color:#444">Not: Rehberlik öğretmeni kurul toplantısına ihtiyaç hâlinde katılır, oy kullanamaz (Madde 57/8). Kurul, yaptırım yerine çatışma çözme ve arabuluculuk gibi yöntemleri de değerlendirir (Madde 58/d).</p>
+      <table style="width:100%;margin-top:30px"><tr><td style="text-align:center"><strong>${esc(d.hazirlayan)}</strong><br>Rehberlik Öğretmeni</td></tr></table>` },
+  { key: "kurula_sevk", stage: "kurul", title: "Kurula Sevk Yazısı",
+    fields: c => [
+      { id: "tarih", label: "Sevk tarihi", type: "date", v: toLocalISO(new Date()) },
+      { id: "ekler", label: "Ekler (her satıra bir belge)", type: "textarea", v: "Olay tespit tutanağı\nÖğrenci ifade tutanağı\nTanık ifade tutanağı\nRehberlik görüşü" },
+    ],
+    meta: d => ({ konu: "Öğrenci davranışının kurulda değerlendirilmesi", tarih: d.tarih }),
+    render: (d, c, s) => `
+      <p style="margin-top:24px"><strong>ÖĞRENCİ DAVRANIŞLARINI DEĞERLENDİRME KURULU BAŞKANLIĞINA</strong></p>
+      <p style="text-align:justify;text-indent:1.25cm">Okulumuz ${esc(c.class_label || "")} sınıfı${c.student_no ? ` ${esc(c.student_no)} numaralı` : ""} öğrencisi <strong>${esc(c.student_name)}</strong> hakkında ${fmtDate(c.incident_date)} tarihinde gerçekleşen "${esc(c.summary)}" konulu olay ve ekli belgeler, ${DIS_YON} hükümleri çerçevesinde (${c.behavior_ref ? `Madde ${esc(c.behavior_ref)}` : "Madde 55"}) değerlendirilmek üzere kurulunuza sevk edilmiştir.</p>
+      <p style="text-align:justify;text-indent:1.25cm">Kurulun, konuyu en geç beş iş günü içinde inceleyip kararını en geç iki iş günü içinde müdürlüğümüze bildirmesini rica ederim (Madde 59/3).</p>
+      <table style="width:100%;margin-top:36px"><tr><td style="text-align:center"><strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü</td></tr></table>
+      <p style="margin-top:20px"><strong>Ekler:</strong></p><ol>${linesToList(d.ekler)}</ol>` },
+  { key: "kurul_karari", stage: "kurul", title: "Kurul Toplantı Tutanağı ve Kararı (Madde 60/3, EK-10)",
+    fields: c => [
+      { id: "tarih", label: "Toplantı tarihi", type: "date", v: c.decision_date || toLocalISO(new Date()) },
+      { id: "saat", label: "Saat", type: "text", v: "" },
+      { id: "yer", label: "Toplantı yeri", type: "text", v: "Okul toplantı salonu" },
+      { id: "karar_no", label: "Karar no", type: "text", v: c.decision_no || "" },
+      { id: "baskan", label: "Kurul başkanı (müdür yardımcısı)", type: "text", v: "" },
+      { id: "uyeler", label: "Üyeler (her satıra bir üye: ad — görev)", type: "textarea", v: "" },
+      { id: "belgeler", label: "İncelenen belge ve deliller", type: "textarea", v: "Olay tespit tutanağı, öğrenci ve tanık ifadeleri, rehberlik görüşü" },
+      { id: "gerekce", label: "Değerlendirme / gerekçe", type: "textarea", v: c.decision_rationale || "" },
+      { id: "takdir", label: "Takdirde esas alınan hususlar (Madde 56/1)", type: "textarea", v: DIS_TAKDIR.join("\n") },
+      { id: "karar", label: "Karar (yaptırım türü ve dayanılan maddeler)", type: "textarea", v: c.sanction && c.sanction !== "yok" ? `${DIS_SANCTIONS[c.sanction]} — ${DIS_YON} Madde 54, ${c.behavior_ref ? "Madde " + c.behavior_ref + ", " : ""}Madde 56` : "" },
+      { id: "oy", label: "Oy durumu (oy birliği / oy çokluğu; karşı oy varsa gerekçesi)", type: "text", v: "Oy birliği" },
+    ],
+    meta: d => ({ konu: `Öğrenci Davranışlarını Değerlendirme Kurulu Kararı (Karar No: ${d.karar_no || "-"})`, tarih: d.tarih }),
+    render: (d, c, s) => `
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">ÖĞRENCİ DAVRANIŞLARINI DEĞERLENDİRME KURULU<br>TOPLANTI TUTANAĞI VE KARARI</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:11pt">
+        <tr><td style="width:32%;padding:3px 0"><strong>Karar No / Dosya No</strong></td><td>: ${esc(d.karar_no)} / ${esc(disCaseNo(c))}</td></tr>
+        <tr><td style="padding:3px 0"><strong>Toplantı Tarihi / Saati / Yeri</strong></td><td>: ${fmtDate(d.tarih)} ${esc(d.saat)} — ${esc(d.yer)}</td></tr>
+        <tr><td style="padding:3px 0"><strong>Öğrenci</strong></td><td>: ${esc(c.student_name)} ${c.class_label ? `(${esc(c.class_label)}${c.student_no ? ` / No: ${esc(c.student_no)}` : ""})` : ""}</td></tr>
+        <tr><td style="padding:3px 0"><strong>Olay</strong></td><td>: ${fmtDate(c.incident_date)} — ${esc(c.summary)}</td></tr>
+      </table>
+      <p style="margin-top:12px"><strong>İNCELENEN BELGE VE DELİLLER</strong></p><p style="text-align:justify;white-space:pre-wrap">${esc(d.belgeler)}</p>
+      <p><strong>DEĞERLENDİRME / GEREKÇE</strong></p><p style="text-align:justify;white-space:pre-wrap">${esc(d.gerekce)}</p>
+      <p><strong>TAKDİRDE ESAS ALINAN HUSUSLAR (Madde 56/1)</strong></p><ul>${linesToList(d.takdir)}</ul>
+      <p><strong>KARAR</strong></p><p style="text-align:justify;white-space:pre-wrap">${esc(d.karar)}</p>
+      <p><strong>Oy durumu:</strong> ${esc(d.oy)}</p>
+      <p style="font-size:10pt;color:#444;text-align:justify">Bu karar ${DIS_YON} Madde 60/3 uyarınca gerekçeli olarak karar defterine EK-10 Karar Örneği'ne uygun şekilde yazılır; karara katılan üyelerce imzalanır, katılmayan üye gerekçesini yazarak imzalar. Uyarma ve kınama okul müdürünün onayı ile (Madde 62/1), okul değiştirme ilçe öğrenci davranışlarını değerlendirme kurulunun onayı ile (Madde 56/6) uygulanır.</p>
+      <table style="width:100%;margin-top:30px;border-collapse:collapse">
+        <tr><td style="width:50%;text-align:center;padding:8px"><strong>Kurul Başkanı</strong><br><br><br>${esc(d.baskan)}</td><td style="text-align:center;padding:8px"><strong>Üyeler</strong><br><br><br><span style="white-space:pre-wrap">${esc(d.uyeler)}</span></td></tr>
+      </table>
+      <p style="margin-top:24px;text-align:right"><strong>OLUR / UYGUNDUR</strong><br>…/…/……<br><br>${officialSignatureName(s.mudur_adi)}<br>Okul Müdürü</p>` },
+  { key: "mudur_onayi", stage: "onay", title: "Müdür Onay Yazısı (Madde 62/1)",
+    fields: c => [
+      { id: "tarih", label: "Onay tarihi", type: "date", v: c.approval_date || toLocalISO(new Date()) },
+      { id: "karar_no", label: "Onaylanan karar no / tarihi", type: "text", v: `${c.decision_no || ""}${c.decision_date ? " / " + fmtDate(c.decision_date) : ""}` },
+      { id: "sonuc", label: "Onay sonucu", type: "text", v: "Karar uygun görülmüştür." },
+    ],
+    meta: d => ({ konu: "Kurul kararının onayı", tarih: d.tarih }),
+    render: (d, c, s) => `
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">ONAY</h3>
+      <p style="text-align:justify;text-indent:1.25cm">Öğrenci Davranışlarını Değerlendirme Kurulunun ${esc(d.karar_no)} sayılı kararı ile öğrenci <strong>${esc(c.student_name)}</strong> hakkında verilen <strong>${esc(DIS_SANCTIONS[c.sanction] || "")}</strong> yaptırımı, ${DIS_YON} Madde 56/6 ve Madde 62/1 uyarınca incelenmiştir.</p>
+      <p style="text-align:justify;text-indent:1.25cm">${esc(d.sonuc)}</p>
+      <p style="font-size:10pt;color:#444">Okul müdürü kararı uygun bulmazsa, itirazını içeren görüş ve önerisini ekleyerek dosyayı en geç beş iş günü içinde kurula iade eder; kurulda ikinci kez görüşülüp verilen karar okulun nihai kararıdır (Madde 60/4).</p>
+      <table style="width:100%;margin-top:36px"><tr><td style="text-align:center"><strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü<br>${fmtDate(d.tarih)}</td></tr></table>` },
+  { key: "veli_teblig", stage: "teblig", title: "Veliye Tebliğ Yazısı ve Tebellüğ Belgesi (Madde 62)",
+    fields: c => [
+      { id: "tarih", label: "Yazı tarihi", type: "date", v: toLocalISO(new Date()) },
+      { id: "veli", label: "Veli adı", type: "text", v: c.veli_adi || "" },
+      { id: "karar_no", label: "Karar no / tarihi", type: "text", v: `${c.decision_no || ""}${c.decision_date ? " / " + fmtDate(c.decision_date) : ""}` },
+      { id: "aciklama", label: "Ek açıklama (opsiyonel)", type: "textarea", v: "" },
+    ],
+    meta: d => ({ konu: "Öğrenci hakkındaki kurul kararının tebliği", tarih: d.tarih }),
+    render: (d, c, s) => `
+      <p style="margin-top:24px"><strong>Sayın ${esc(d.veli)}</strong><br><span style="font-size:10pt">(${esc(c.student_name)} öğrencisinin velisi)</span></p>
+      <p style="text-align:justify;text-indent:1.25cm">Okulumuz ${esc(c.class_label || "")} sınıfı öğrencisi <strong>${esc(c.student_name)}</strong> hakkında, ${fmtDate(c.incident_date)} tarihli olay nedeniyle Öğrenci Davranışlarını Değerlendirme Kurulunca ${esc(d.karar_no)} sayılı kararla <strong>${esc(DIS_SANCTIONS[c.sanction] || "")}</strong> yaptırımı takdir edilmiş ve ${c.sanction === "okul_degistirme" ? "ilçe öğrenci davranışlarını değerlendirme kurulunca" : "okul müdürlüğünce"} onaylanmıştır.</p>
+      ${d.aciklama ? `<p style="text-align:justify;text-indent:1.25cm;white-space:pre-wrap">${esc(d.aciklama)}</p>` : ""}
+      <p style="text-align:justify;text-indent:1.25cm">${DIS_YON} Madde 56/11 uyarınca bu karara karşı, tebliğ tarihinden itibaren <strong>beş iş günü</strong> içinde okul müdürlüğüne yazılı olarak itirazda bulunabilirsiniz. İtiraz işlemleri sonuçlanıncaya kadar yaptırım uygulanmaz (Madde 56/12).</p>
+      <p style="text-align:justify;text-indent:1.25cm">Bilgilerinizi rica ederim.</p>
+      <table style="width:100%;margin-top:30px"><tr><td style="text-align:center"><strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü</td></tr></table>
+      <div style="border-top:1px dashed #999;margin-top:28px;padding-top:10px">
+        <p style="text-align:center"><strong>TEBELLÜĞ BELGESİ</strong></p>
+        <p style="text-align:justify;text-indent:1.25cm">Yukarıda özetlenen kararı …/…/…… tarihinde tebellüğ ettim; bir örneğini teslim aldım.</p>
+        <table style="width:100%;margin-top:20px"><tr>
+          <td style="width:50%;text-align:center"><strong>Tebliğ Eden</strong><br><br><br>………………</td>
+          <td style="width:50%;text-align:center"><strong>Tebellüğ Eden (Veli)</strong><br><br><br>${esc(d.veli)}</td>
+        </tr></table>
+        <p style="font-size:9.5pt;color:#444;margin-top:10px">Okul değiştirme yaptırımında veli okula çağrılarak tebliğ edilir; çağrıya uyulmaması hâlinde 7201 sayılı Tebligat Kanunu'na göre bildirilir ve tebellüğ belgesi dosyada saklanır (Madde 62/2).</p>
+      </div>` },
+  { key: "ilce_ust_yazi", stage: "onay", title: "İlçe Kuruluna Gönderme Üst Yazısı (Madde 61)",
+    fields: c => [
+      { id: "tarih", label: "Yazı tarihi", type: "date", v: c.ilce_sent_on || toLocalISO(new Date()) },
+      { id: "amac", label: "Gönderme amacı", type: "text", v: c.appeal_on ? "İtirazın değerlendirilmesi" : "Okul değiştirme yaptırımının onayı" },
+      { id: "ekler", label: "Dosyadaki belgeler (Madde 61/2)", type: "textarea", v: "Yazılı ifadeler, savunma ve soruşturmaya ilişkin diğer belgeler\nÖğrenci davranışlarını değerlendirme kurulu kararı onaylı örneği (EK-10)\nİtiraz edilmişse buna ilişkin belgeler\nKararların bildirildiğine ilişkin tebellüğ belgesi" },
+    ],
+    meta: d => ({ konu: `${d.amac} — ${"öğrenci"} dosyası`, tarih: d.tarih }),
+    render: (d, c, s) => `
+      <p style="margin-top:24px"><strong>İLÇE MİLLÎ EĞİTİM MÜDÜRLÜĞÜNE<br><span style="font-size:10.5pt">(İlçe Öğrenci Davranışlarını Değerlendirme Kurulu Başkanlığına)</span></strong></p>
+      <p style="text-align:justify;text-indent:1.25cm">Okulumuz ${esc(c.class_label || "")} sınıfı öğrencisi <strong>${esc(c.student_name)}</strong> hakkında Öğrenci Davranışlarını Değerlendirme Kurulumuzca ${esc(c.decision_no || "")} sayılı ve ${fmtDate(c.decision_date)} tarihli kararla takdir edilen <strong>${esc(DIS_SANCTIONS[c.sanction] || "")}</strong> yaptırımına ilişkin dosya, ${DIS_YON} Madde 61 uyarınca <strong>${esc(d.amac).toLocaleLowerCase("tr-TR")}</strong> için ekte sunulmuştur.</p>
+      ${c.appeal_on ? `<p style="text-align:justify;text-indent:1.25cm">Veli tarafından ${fmtDate(c.appeal_on)} tarihinde itiraz edilmiş olup, itiraz gerekçeleri hakkındaki müdürlüğümüz görüşleri dosyada yer almaktadır (Madde 56/12).</p>` : ""}
+      <p style="text-align:justify;text-indent:1.25cm">Gereğini arz ederim.</p>
+      <table style="width:100%;margin-top:30px"><tr><td style="text-align:center"><strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü</td></tr></table>
+      <p style="margin-top:20px"><strong>Ekler:</strong></p><ol>${linesToList(d.ekler)}</ol>` },
+];
+const DIS_DOC_BY_KEY = Object.fromEntries(DIS_DOCS.map(d => [d.key, d]));
+
+function disDocHtml(school, kase, docType, data) {
+  const tpl = DIS_DOC_BY_KEY[docType];
+  if (!tpl) return docWrapper(school, `<p>Bilinmeyen belge türü.</p>`);
+  return docWrapper(school, tpl.render(data, kase, school), tpl.meta ? tpl.meta(data, kase) : {});
+}
+
+/* Dizi pusulası: dosyadaki belgelerin listesi (Madde 61/2 sırası gözetilerek) — belgelerden otomatik. */
+function disDiziPusulasiHtml(school, kase, docs) {
+  const rows = docs.slice().sort((a, b) => (a.doc_date || a.created_at).localeCompare(b.doc_date || b.created_at));
+  return docWrapper(school, `
+    <h3 style="text-align:center;text-decoration:underline;margin-top:28px">DİZİ PUSULASI</h3>
+    <p><strong>Dosya No:</strong> ${esc(disCaseNo(kase))} &nbsp; <strong>Öğrenci:</strong> ${esc(kase.student_name)} ${kase.class_label ? `(${esc(kase.class_label)})` : ""} &nbsp; <strong>Olay:</strong> ${fmtDate(kase.incident_date)}</p>
+    <table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:11pt">
+      <thead><tr><th style="border:1px solid #999;padding:5px;width:8%">Sıra</th><th style="border:1px solid #999;padding:5px">Belge</th><th style="border:1px solid #999;padding:5px;width:18%">Tarih</th><th style="border:1px solid #999;padding:5px;width:12%">Sayfa</th></tr></thead>
+      <tbody>${rows.map((d, i) => `<tr><td style="border:1px solid #999;padding:5px;text-align:center">${i + 1}</td><td style="border:1px solid #999;padding:5px">${esc(d.title)}</td><td style="border:1px solid #999;padding:5px;text-align:center">${fmtDate(d.doc_date || d.created_at.slice(0, 10))}</td><td style="border:1px solid #999;padding:5px"></td></tr>`).join("")}
+      ${rows.length ? "" : `<tr><td colspan="4" style="border:1px solid #999;padding:5px;text-align:center">Dosyada henüz belge yok.</td></tr>`}</tbody>
+    </table>
+    <p style="margin-top:14px;font-size:10pt;color:#444">Madde 61/2'ye göre ilçe kuruluna gönderilecek dosyada: yazılı ifadeler/savunma ve diğer belgeler, kurul kararının onaylı örneği (EK-10), varsa itiraz belgeleri ve tebellüğ belgesi bulunur.</p>
+    <table style="width:100%;margin-top:30px"><tr><td style="text-align:center"><strong>${officialSignatureName(school.mudur_adi)}</strong><br>Okul Müdürü</td></tr></table>
+  `, { konu: "Dizi Pusulası", tarih: toLocalISO(new Date()) });
+}
+
+function disShowPreview(container, fullHtml, filename) {
+  container.innerHTML = `
+    <div style="border:1px solid var(--line);border-radius:8px;overflow:hidden"><iframe class="dis-frame" style="width:100%;height:520px;border:none;background:#fff"></iframe></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="secondary dis-print" style="flex:1">Yazdır</button>
+      <button class="secondary dis-download" style="flex:1">Word olarak indir</button>
+      <button class="secondary dis-close" style="flex:0 0 auto">Kapat</button>
+    </div>`;
+  const frame = container.querySelector(".dis-frame");
+  frame.srcdoc = fullHtml;
+  container.querySelector(".dis-print").onclick = () => { frame.contentWindow.focus(); frame.contentWindow.print(); };
+  container.querySelector(".dis-download").onclick = () => {
+    const blob = new Blob(["﻿", fullHtml], { type: "application/msword" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `${filename}.doc`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
+  container.querySelector(".dis-close").onclick = () => { container.innerHTML = ""; };
+  container.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function renderDisiplinModule(profile, school, caseId = null) {
+  const isOrtaokul = school.okul_turu === "ortaokul";
+  app.innerHTML = `
+    <div class="wrap wide">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Öğrenci Disiplin Dosyası</div>
+      <h1>${esc(school.name)}</h1>
+      <div class="subtitle">Olay tutanağından kurul kararına, veli tebliğine, itiraz penceresine ve e-Okul kaydına kadar dosya akışı — ${DIS_YON} Madde 54–65'e göre. Süreler yönetmelikten; belgeler dosya bilgisiyle otomatik dolar.</div>
+      ${!isOrtaokul ? `<div class="card" style="border-color:var(--warn);margin-bottom:14px"><strong>Dikkat:</strong> Bu akış ${DIS_YON}'ne (Madde 54/1: ortaokul ve imam-hatip ortaokulu öğrencileri) göre kuruldu. ${school.okul_turu === "lise" ? "Lise, Ortaöğretim Kurumları Yönetmeliği'ne (Okul Öğrenci Ödül ve Disiplin Kurulu, farklı yaptırım türleri ve süreler) tabidir — bu sürümde lise akışı henüz yok; buradaki madde ve süreleri lise dosyasında kullanma." : "Okul öncesi/ilkokul öğrencileri için yönetmelikte yaptırım öngörülmez; bu modülü yalnızca kayıt/takip amacıyla kullan."}</div>` : ""}
+      <div class="card" style="margin-bottom:14px;font-size:12.5px;color:var(--muted)">🔒 Bu modül öğrenci kişisel verisi içerir; yalnızca idareci hesapları erişebilir (okul bazlı izolasyon). Dosyayı gereğinden uzun tutma; Madde 62/3 kapsamında kaldırılan yaptırımları e-Okul'dan da çıkar (5 iş günü).</div>
+      <div id="dis-content"></div>
+    </div>
+  `;
+  document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
+  const content = document.getElementById("dis-content");
+  content.innerHTML = `<div class="card">Yükleniyor…</div>`;
+  if (caseId) await renderDisiplinCase(profile, school, content, caseId);
+  else await renderDisiplinList(profile, school, content);
+}
+
+async function renderDisiplinList(profile, school, content, filter = "acik") {
+  const { data: cases } = await sb.from("discipline_cases").select("*").eq("school_id", school.id).order("created_at", { ascending: false });
+  const { data: allDocs } = await sb.from("discipline_docs").select("case_id, doc_type, doc_date, created_at").eq("school_id", school.id);
+  const docsByCase = {};
+  (allDocs || []).forEach(d => (docsByCase[d.case_id] ??= []).push(d));
+  const rows = (cases || []).map(c => ({ ...c, deadlines: disDeadlines(c, docsByCase[c.id] || []) }));
+  const open = rows.filter(c => c.stage !== "tamam"), closed = rows.filter(c => c.stage === "tamam");
+  const overdue = open.filter(c => c.deadlines.some(d => d.state === "gecti"));
+  const shown = filter === "acik" ? open : filter === "tamam" ? closed : filter === "gecikmis" ? overdue : rows;
+  const year = new Date().getFullYear();
+
+  content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Yeni Dosya Aç</h3>
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px">
+        <div><label>Öğrenci adı soyadı</label><input id="dc-name" placeholder="Ad Soyad"></div>
+        <div><label>Sınıf / şube</label><input id="dc-class" placeholder="örn. 7-B"></div>
+        <div><label>Okul no</label><input id="dc-no" placeholder="opsiyonel"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label>Veli adı <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label><input id="dc-veli" placeholder="Ad Soyad"></div>
+        <div><label>Veli telefonu <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label><input id="dc-tel" placeholder="05xx"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:12px;align-items:end">
+        <div><label>Olay tarihi</label>${dateInputHtml("dc-date", toLocalISO(new Date()))}</div>
+        <div><label>Saat <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label><input id="dc-time" placeholder="örn. 10.40"></div>
+        <div><label>Olay yeri</label><input id="dc-place" placeholder="örn. 2. kat koridoru"></div>
+      </div>
+      <label>Davranış türü (Madde 55) <span style="color:var(--muted);font-weight:400">— bilgi amaçlı ön eşleştirme; nihai takdir kurulun</span></label>
+      <select id="dc-behavior">
+        <option value="">Seçilmedi</option>
+        ${["uyarma", "kinama", "okul_degistirme"].map(s => `<optgroup label="${DIS_SANCTIONS[s]} gerektiren (Madde 55/${s === "uyarma" ? "a" : s === "kinama" ? "b" : "c"})">${DIS_BEHAVIORS.filter(b => b.s === s).map(b => `<option value="${b.code}">${b.code} — ${esc(b.t)}</option>`).join("")}</optgroup>`).join("")}
+      </select>
+      <label>Olayın kısa konusu</label>
+      <input id="dc-summary" placeholder="örn. Teneffüste arkadaşıyla kavga">
+      <label>Kronolojik anlatım <span style="color:var(--muted);font-weight:400">(opsiyonel, tutanağa otomatik geçer)</span></label>
+      <textarea id="dc-desc" rows="3" ${DIS_TA}></textarea>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label>İlk alınan tedbirler <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label><input id="dc-measures" placeholder="örn. veliye telefonla bilgi verildi"></div>
+        <div><label>Tutanağı düzenleyen(ler)</label><input id="dc-reporter" placeholder="örn. Nöbetçi öğretmen Ali Veli"></div>
+      </div>
+      <button class="primary" id="dc-save">Dosyayı Aç</button>
+      <div id="dc-msg"></div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="subtabs" style="flex-wrap:wrap">
+        <div class="subtab ${filter === "acik" ? "active" : ""}" data-filter="acik">Açık (${open.length})</div>
+        <div class="subtab ${filter === "gecikmis" ? "active" : ""}" data-filter="gecikmis">Süresi geçen (${overdue.length})</div>
+        <div class="subtab ${filter === "tamam" ? "active" : ""}" data-filter="tamam">Kapanan (${closed.length})</div>
+        <div class="subtab ${filter === "hepsi" ? "active" : ""}" data-filter="hepsi">Tümü (${rows.length})</div>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Dosyalar</h3>
+      ${shown.length ? `
+      <div class="table-wrap"><table class="data">
+        <thead><tr><th>Dosya No</th><th>Öğrenci</th><th>Olay</th><th>Aşama</th><th>Yaptırım</th><th>Süre</th><th></th></tr></thead>
+        <tbody>${shown.map(c => {
+          const late = c.deadlines.filter(d => d.state === "gecti");
+          const soon = c.deadlines.filter(d => d.state === "yaklasiyor");
+          return `<tr>
+            <td style="white-space:nowrap"><strong>${esc(disCaseNo(c))}</strong></td>
+            <td><strong>${esc(c.student_name)}</strong>${c.class_label ? `<div style="font-size:11.5px;color:var(--muted)">${esc(c.class_label)}${c.student_no ? ` · ${esc(c.student_no)}` : ""}</div>` : ""}</td>
+            <td>${fmtDate(c.incident_date)}<div style="font-size:11.5px;color:var(--muted)">${esc(c.summary)}</div></td>
+            <td><span class="pill ${c.stage === "tamam" ? "good" : ""}">${DIS_STAGES[DIS_STAGE_IDX[c.stage]].label}</span></td>
+            <td><span class="pill ${DIS_SANCTION_PILL[c.sanction]}">${DIS_SANCTIONS[c.sanction]}</span></td>
+            <td>${late.length ? `<span class="pill crit">${late.length} süre geçti</span>` : soon.length ? `<span class="pill warn">${soon.length} süre yaklaşıyor</span>` : (c.docsCount ? "" : "")}${(docsByCase[c.id] || []).length ? `<div style="font-size:11px;color:var(--muted)">${(docsByCase[c.id] || []).length} belge</div>` : ""}</td>
+            <td class="row-actions" style="white-space:nowrap"><button data-open-case="${c.id}">Aç</button><button data-del-case="${c.id}">Sil</button></td>
+          </tr>`; }).join("")}</tbody>
+      </table></div>` : `<p style="color:var(--muted)">${rows.length ? "Bu filtrede dosya yok." : "Henüz dosya açılmadı."}</p>`}
+    </div>
+  `;
+  wireDate3("dc-date");
+  content.querySelectorAll("[data-filter]").forEach(el => el.onclick = () => renderDisiplinList(profile, school, content, el.dataset.filter));
+  content.querySelectorAll("[data-open-case]").forEach(b => b.onclick = () => renderDisiplinModule(profile, school, b.dataset.openCase));
+  content.querySelectorAll("[data-del-case]").forEach(b => b.onclick = async () => {
+    const c = rows.find(x => x.id === b.dataset.delCase);
+    if (!confirm(`${disCaseNo(c)} numaralı dosyayı (${c.student_name}) tüm belgeleriyle birlikte kalıcı olarak silmek istediğine emin misin?`)) return;
+    await sb.from("discipline_cases").delete().eq("id", c.id);
+    await renderDisiplinList(profile, school, content, filter);
+  });
+  document.getElementById("dc-save").onclick = async () => {
+    const msg = document.getElementById("dc-msg");
+    const student_name = document.getElementById("dc-name").value.trim();
+    const summary = document.getElementById("dc-summary").value.trim();
+    const incident_date = document.getElementById("dc-date").value || null;
+    if (!student_name || !summary) { msg.innerHTML = `<div class="msg err">Öğrenci adı ve olayın kısa konusu gerekli.</div>`; return; }
+    const seq = Math.max(0, ...rows.filter(c => c.case_year === year).map(c => c.case_seq)) + 1;
+    const payload = {
+      school_id: school.id, case_year: year, case_seq: seq, student_name,
+      class_label: document.getElementById("dc-class").value.trim() || null,
+      student_no: document.getElementById("dc-no").value.trim() || null,
+      veli_adi: document.getElementById("dc-veli").value.trim() || null,
+      veli_telefon: document.getElementById("dc-tel").value.trim() || null,
+      incident_date, incident_time: document.getElementById("dc-time").value.trim() || null,
+      incident_place: document.getElementById("dc-place").value.trim() || null,
+      behavior_ref: document.getElementById("dc-behavior").value || null,
+      summary, description: document.getElementById("dc-desc").value.trim() || null,
+      first_measures: document.getElementById("dc-measures").value.trim() || null,
+      reported_by: document.getElementById("dc-reporter").value.trim() || null,
+      created_by: profile.id,
+    };
+    const { data, error } = await sb.from("discipline_cases").insert(payload).select().single();
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    await renderDisiplinModule(profile, school, data.id);
+  };
+}
+
+async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
+  const [{ data: kase }, { data: docs }, { data: committees }, { data: teachers }] = await Promise.all([
+    sb.from("discipline_cases").select("*").eq("id", caseId).single(),
+    sb.from("discipline_docs").select("*").eq("case_id", caseId).order("created_at"),
+    sb.from("committees").select("id, name").eq("school_id", school.id).ilike("name", "%davranış%"),
+    sb.from("teachers").select("full_name, branch").eq("school_id", school.id),
+  ]);
+  if (!kase) { content.innerHTML = `<div class="card">Dosya bulunamadı.</div>`; return; }
+  let kurulUyeleri = "";
+  if (committees && committees.length) {
+    const { data: members } = await sb.from("committee_members").select("member_name, role").eq("committee_id", committees[0].id);
+    kurulUyeleri = (members || []).map(m => `${m.member_name}${m.role ? ` — ${m.role}` : ""}`).join("\n");
+  }
+  const rehber = (teachers || []).find(t => /rehber|pdr/i.test(t.branch || ""))?.full_name || "";
+  const deadlines = disDeadlines(kase, docs || []);
+  const stageIdx = DIS_STAGE_IDX[kase.stage];
+  const has = (k) => (docs || []).some(d => d.doc_type === k);
+  const rerender = (patch = {}) => renderDisiplinCase(profile, school, content, caseId, { ...ui, ...patch });
+  const checklist = [
+    ["Olay tespit tutanağı düzenlendi", has("olay_tutanagi")],
+    ["Öğrenci ifadesi tutanakla alındı (Madde 60/1)", has("ogrenci_ifade")],
+    ["Tanık ifadesi / ifade vermeme tutanağı (Madde 60/2)", has("tanik_ifade") || has("ifade_vermeme")],
+    ["Rehberlik görüşü alındı", has("rehberlik_gorusu")],
+    ["Kurula sevk yazısı", has("kurula_sevk")],
+    ["Kurul kararı gerekçeli ve madde belirtilmiş (Madde 60/3)", has("kurul_karari") && !!kase.decision_rationale],
+    ["Yaptırım ve karar bilgileri işlendi", kase.sanction !== "yok" && !!kase.decision_date],
+    [kase.sanction === "okul_degistirme" ? "Dosya ilçe kuruluna gönderildi (Madde 61/1)" : "Müdür onayı tarihi girildi (Madde 62/1)", kase.sanction === "okul_degistirme" ? !!kase.ilce_sent_on : !!kase.approval_date],
+    ["Veliye tebliğ edildi (Madde 62)", !!kase.notified_on],
+    ["İtiraz süresi (5 iş günü) tamamlandı / itiraz işlendi", !!kase.notified_on && (!!kase.appeal_on || addBusinessDays(kase.notified_on, 5) < toLocalISO(new Date()))],
+    ["e-Okul'a işlendi (Madde 56/13)", kase.eokul_entered],
+  ];
+  const doneCount = checklist.filter(([, ok]) => ok).length;
+  const dlState = { gecti: ["crit", "Süre geçti"], yaklasiyor: ["warn", "Yaklaşıyor"], uygun: ["good", "Süre içinde"], tamam: ["good", "Tamamlandı"], itiraz: ["warn", "İtiraz var"], kapandi: ["muted", "Süre doldu"], acik: ["warn", "Açık"] };
+  const docTpl = ui.newDoc ? DIS_DOC_BY_KEY[ui.newDoc] : null;
+  const docFields = docTpl ? docTpl.fields(kase).map(f => {
+    if (f.id === "uyeler" && kurulUyeleri) return { ...f, v: kurulUyeleri };
+    if ((f.id === "eslik" || f.id === "hazirlayan") && rehber && !f.v) return { ...f, v: rehber };
+    if (f.id === "baskan" && kurulUyeleri) { const bask = kurulUyeleri.split("\n").find(l => /başkan/i.test(l)); if (bask) return { ...f, v: bask.split(" — ")[0] }; }
+    return f;
+  }) : [];
+
+  content.innerHTML = `
+    <button class="navlink" id="dis-back-list">← Dosya listesi</button>
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap">
+        <div>
+          <div class="eyebrow" style="margin-bottom:4px">Dosya ${esc(disCaseNo(kase))}</div>
+          <h3 style="margin:0">${esc(kase.student_name)} ${kase.class_label ? `<span style="font-weight:400;color:var(--muted)">· ${esc(kase.class_label)}${kase.student_no ? ` · No ${esc(kase.student_no)}` : ""}</span>` : ""}</h3>
+          <div style="font-size:13px;margin-top:4px">${fmtDate(kase.incident_date)}${kase.incident_time ? ` ${esc(kase.incident_time)}` : ""}${kase.incident_place ? ` · ${esc(kase.incident_place)}` : ""} — ${esc(kase.summary)}</div>
+          ${kase.behavior_ref ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">Madde ${esc(kase.behavior_ref)}: ${esc(DIS_BEHAVIORS.find(b => b.code === kase.behavior_ref)?.t || "")}</div>` : ""}
+        </div>
+        <div style="text-align:right"><span class="pill ${DIS_SANCTION_PILL[kase.sanction]}">${DIS_SANCTIONS[kase.sanction]}</span><div style="font-size:12px;color:var(--muted);margin-top:6px">Kontrol listesi ${doneCount}/${checklist.length}</div></div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:14px">
+        ${DIS_STAGES.map((s, i) => `<div class="subtab ${i === stageIdx ? "active" : ""}" data-stage="${s.id}" style="${i < stageIdx ? "border-color:var(--good);color:var(--good)" : ""}" title="${esc(s.hint)}">${i + 1}. ${s.label}</div>`).join("")}
+      </div>
+      <p style="font-size:12.5px;color:var(--muted);margin:10px 0 0">${esc(DIS_STAGES[stageIdx].hint)}</p>
+    </div>
+
+    ${deadlines.length ? `
+    <div class="card" style="margin-bottom:14px">
+      <h3 style="margin-top:0">Süre Takibi <span style="font-size:11.5px;color:var(--muted);font-weight:400">(iş günü = Cumartesi/Pazar hariç; resmî tatiller hesaba katılmaz, gerekirse elle düzelt)</span></h3>
+      ${deadlines.map(d => `<div class="list-item"><span>${esc(d.label)}<div style="font-size:11.5px;color:var(--muted)">Son gün: ${fmtDate(d.due)}</div></span><span class="pill ${dlState[d.state][0]}">${dlState[d.state][1]}</span></div>`).join("")}
+    </div>` : ""}
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
+      <div class="card">
+        <h3 style="margin-top:0">Dosya Kontrol Listesi</h3>
+        ${checklist.map(([label, ok]) => `<div class="list-item"><span style="${ok ? "" : "color:var(--muted)"}">${ok ? "✅" : "⬜"} ${label}</span></div>`).join("")}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Karar ve Süreç Bilgileri</h3>
+        <label>Yaptırım</label>
+        <select id="dk-sanction">${Object.entries(DIS_SANCTIONS).map(([k, v]) => `<option value="${k}" ${kase.sanction === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end">
+          <div><label>Karar no</label><input id="dk-decno" value="${esc(kase.decision_no || "")}"></div>
+          <div><label>Karar tarihi</label>${dateInputHtml("dk-decdate", kase.decision_date || "")}</div>
+        </div>
+        <label>Karar gerekçesi <span style="color:var(--muted);font-weight:400">(Madde 60/3 — karar belgesine geçer)</span></label>
+        <textarea id="dk-rationale" rows="2" ${DIS_TA}>${esc(kase.decision_rationale || "")}</textarea>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label>Müdür onay tarihi</label>${dateInputHtml("dk-approval", kase.approval_date || "")}</div>
+          <div><label>Veliye tebliğ tarihi</label>${dateInputHtml("dk-notified", kase.notified_on || "")}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label>İtiraz tarihi <span style="color:var(--muted);font-weight:400">(varsa)</span></label>${dateInputHtml("dk-appeal", kase.appeal_on || "")}</div>
+          <div><label>İlçe kuruluna gönderim</label>${dateInputHtml("dk-ilce", kase.ilce_sent_on || "")}</div>
+        </div>
+        <label>İtiraz sonucu <span style="color:var(--muted);font-weight:400">(varsa)</span></label>
+        <input id="dk-appealres" value="${esc(kase.appeal_result || "")}" placeholder="örn. ilçe kurulu itirazı reddetti">
+        <div class="check-row"><input type="checkbox" id="dk-eokul" ${kase.eokul_entered ? "checked" : ""}><label for="dk-eokul">e-Okul'a işlendi (Madde 56/13)</label></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label>e-Okul işlem tarihi</label>${dateInputHtml("dk-eokuldate", kase.eokul_entered_on || "")}</div>
+          <div><label>Yaptırımın kaldırılma tarihi <span style="color:var(--muted);font-weight:400">(Madde 62/3)</span></label>${dateInputHtml("dk-lifted", kase.lifted_on || "")}</div>
+        </div>
+        <label>Not</label>
+        <input id="dk-notes" value="${esc(kase.notes || "")}">
+        <button class="primary" id="dk-save">Kaydet</button>
+        <div id="dk-msg"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <h3 style="margin:0">Belgeler (${(docs || []).length})</h3>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="dd-type" style="width:auto;margin:0">
+            <option value="">Yeni belge ekle…</option>
+            ${DIS_STAGES.map(s => { const list = DIS_DOCS.filter(d => d.stage === s.id); return list.length ? `<optgroup label="${s.label}">${list.map(d => `<option value="${d.key}">${d.title}</option>`).join("")}</optgroup>` : ""; }).join("")}
+          </select>
+          <button class="secondary" id="dd-dizi" style="width:auto;padding:7px 12px;font-size:12.5px;margin:0">Dizi Pusulası</button>
+        </div>
+      </div>
+      ${(docs || []).length ? (docs || []).map(d => `<div class="list-item"><span>${esc(d.title)}<div style="font-size:11.5px;color:var(--muted)">${fmtDate(d.doc_date || d.created_at.slice(0, 10))}</div></span><div class="row-actions"><button data-open-doc="${d.id}">Aç / Yazdır</button><button data-del-doc="${d.id}">Sil</button></div></div>`).join("") : `<p style="color:var(--muted);margin-top:8px">Henüz belge yok — yukarıdan bir belge türü seç, alanlar dosya bilgisiyle dolu gelir.</p>`}
+      ${docTpl ? `
+      <div class="card" style="margin-top:12px;background:var(--surface-2)">
+        <h3 style="margin-top:0">${esc(docTpl.title)}</h3>
+        ${docFields.map(f => `<label>${esc(f.label)}</label>${f.type === "textarea" ? `<textarea id="dd-${f.id}" rows="4" ${DIS_TA}>${esc(f.v)}</textarea>` : f.type === "date" ? dateInputHtml("dd-" + f.id, f.v) : `<input id="dd-${f.id}" value="${esc(f.v)}">`}`).join("")}
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="primary" id="dd-save" style="margin:0;width:auto;padding:9px 16px">Belgeyi Oluştur ve Kaydet</button>
+          <button class="secondary" id="dd-cancel" style="margin:0;width:auto;padding:9px 16px">İptal</button>
+        </div>
+        <div id="dd-msg"></div>
+      </div>` : ""}
+      <div id="dis-preview" style="margin-top:12px"></div>
+    </div>
+  `;
+
+  ["dk-decdate", "dk-approval", "dk-notified", "dk-appeal", "dk-ilce", "dk-eokuldate", "dk-lifted"].forEach(wireDate3);
+  docFields.filter(f => f.type === "date").forEach(f => wireDate3("dd-" + f.id));
+
+  document.getElementById("dis-back-list").onclick = () => renderDisiplinModule(profile, school);
+  content.querySelectorAll("[data-stage]").forEach(el => el.onclick = async () => {
+    await sb.from("discipline_cases").update({ stage: el.dataset.stage, updated_at: new Date().toISOString() }).eq("id", caseId);
+    await rerender();
+  });
+
+  document.getElementById("dk-save").onclick = async () => {
+    const msg = document.getElementById("dk-msg");
+    const v = (id) => document.getElementById(id).value;
+    const patch = {
+      sanction: v("dk-sanction"), decision_no: v("dk-decno").trim() || null, decision_date: v("dk-decdate") || null,
+      decision_rationale: v("dk-rationale").trim() || null, approval_date: v("dk-approval") || null, notified_on: v("dk-notified") || null,
+      appeal_on: v("dk-appeal") || null, ilce_sent_on: v("dk-ilce") || null, appeal_result: v("dk-appealres").trim() || null,
+      eokul_entered: document.getElementById("dk-eokul").checked, eokul_entered_on: v("dk-eokuldate") || null, lifted_on: v("dk-lifted") || null,
+      notes: v("dk-notes").trim() || null, updated_at: new Date().toISOString(),
+    };
+    if (patch.sanction === "okul_degistirme" && patch.approval_date && !patch.ilce_sent_on) {
+      msg.innerHTML = `<div class="msg err">Okul değiştirme yaptırımı okul müdürü tarafından onaylanamaz; onay ilçe kurulundan gelir (Madde 56/6). "İlçe kuruluna gönderim" tarihini gir.</div>`; return;
+    }
+    const { error } = await sb.from("discipline_cases").update(patch).eq("id", caseId);
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    await rerender();
+  };
+
+  document.getElementById("dd-type").onchange = (ev) => { if (ev.target.value) rerender({ newDoc: ev.target.value }); };
+  const ddCancel = document.getElementById("dd-cancel");
+  if (ddCancel) ddCancel.onclick = () => rerender({ newDoc: null });
+  const ddSave = document.getElementById("dd-save");
+  if (ddSave) ddSave.onclick = async () => {
+    const msg = document.getElementById("dd-msg");
+    const data = {};
+    docFields.forEach(f => data[f.id] = document.getElementById("dd-" + f.id).value);
+    const doc_date = data.tarih || data.tespit || toLocalISO(new Date());
+    const { data: saved, error } = await sb.from("discipline_docs").insert({ school_id: school.id, case_id: caseId, doc_type: docTpl.key, title: docTpl.title, doc_date, data, created_by: profile.id }).select().single();
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    const patch = { updated_at: new Date().toISOString() };
+    if (DIS_STAGE_IDX[docTpl.stage] > stageIdx) patch.stage = docTpl.stage;
+    if (docTpl.key === "kurul_karari") { if (data.karar_no) patch.decision_no = data.karar_no; if (data.tarih) patch.decision_date = data.tarih; if (data.gerekce) patch.decision_rationale = data.gerekce; }
+    if (docTpl.key === "mudur_onayi" && data.tarih) patch.approval_date = data.tarih;
+    if (docTpl.key === "ilce_ust_yazi" && data.tarih) patch.ilce_sent_on = data.tarih;
+    await sb.from("discipline_cases").update(patch).eq("id", caseId);
+    await rerender({ newDoc: null, openDocId: saved.id });
+  };
+
+  const openDoc = (d) => disShowPreview(document.getElementById("dis-preview"), disDocHtml(school, kase, d.doc_type, d.data), `${disCaseNo(kase).replace("/", "-")} ${d.title}`);
+  content.querySelectorAll("[data-open-doc]").forEach(b => b.onclick = () => openDoc((docs || []).find(d => d.id === b.dataset.openDoc)));
+  content.querySelectorAll("[data-del-doc]").forEach(b => b.onclick = async () => {
+    if (!confirm("Bu belgeyi dosyadan silmek istediğine emin misin?")) return;
+    await sb.from("discipline_docs").delete().eq("id", b.dataset.delDoc);
+    await rerender({ newDoc: null });
+  });
+  document.getElementById("dd-dizi").onclick = () => disShowPreview(document.getElementById("dis-preview"), disDiziPusulasiHtml(school, kase, docs || []), `${disCaseNo(kase).replace("/", "-")} Dizi Pusulası`);
+  if (ui.openDocId) { const d = (docs || []).find(x => x.id === ui.openDocId); if (d) openDoc(d); }
+}
+
 /* ============ PERİYODİK BAKIM TAKİBİ ============ */
 
 const BAKIM_CATEGORIES = ["Hijyen", "Mekanik", "Güvenlik", "Elektrik", "Tesisat", "Diğer"];
@@ -5753,6 +6478,17 @@ const KILAVUZ_SECTIONS = [
   { id: "planlama", title: "Planlama İşleri", html: `
     <p>Kurul, komisyon ya da kulüp oluştur; üyelerini öğretmen listesinden seç ya da (veli, öğrenci temsilcisi gibi öğretmen olmayanlar için) elle yaz. Her kurul için ayrı toplantı/faaliyet kaydı (tarih, gündem, kararlar) tutulur.</p>
   ` },
+  { id: "disiplin", title: "Öğrenci Disiplin Dosyası", html: `
+    <p>Ortaokul öğrencileri için <strong>MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği Madde 54–65</strong>'e göre kurulmuş dosya akışı: Olay &amp; Tutanak → Uyarma Süreci (Madde 54/3) → İfadeler (Madde 60) → Kurul &amp; Karar (Madde 59-60) → Onay (Madde 56/6, 62/1) → Veliye Tebliğ (Madde 62) → İtiraz Penceresi (Madde 56/11-12) → e-Okul &amp; Kapanış (Madde 56/13, 62/3). Aşama çubuğundaki her adımın üzerine gelince ilgili hüküm görünür.</p>
+    <ol>
+      <li><strong>Dosya aç</strong>: öğrenci, olay tarihi/yeri, kısa konu; istersen Madde 55'teki davranış türünü seç (bilgi amaçlı — nihai takdir kurulun, Madde 56/1).</li>
+      <li><strong>Belge ekle</strong>: olay tutanağı, öğrenci/tanık ifadesi, ifade vermeme tutanağı, rehberlik görüşü, veli görüşme tutanağı, kurula sevk, kurul kararı, müdür onayı, veliye tebliğ + tebellüğ, ilçe üst yazısı. Alanlar dosya bilgisiyle dolu gelir; Planlama İşleri'nde adında "Davranış" geçen bir kurul varsa üyeler de otomatik dolar. Her belge kaydedilir, sonradan yeniden açılıp yazdırılır/Word'e alınır.</li>
+      <li><strong>Süre Takibi</strong>: kurulun 5 iş günü inceleme süresi (Madde 59/3), okul değiştirmede dosyanın ilçeye 5 iş günü içinde gönderilmesi (Madde 61/1), velinin tebliğden itibaren 5 iş günlük itiraz süresi (Madde 56/11) otomatik hesaplanır; süresi geçen dosya sayısı ana ekranda rozet olur. İş günü hesabı hafta sonunu atlar, resmî tatilleri bilmez.</li>
+      <li><strong>Dizi Pusulası</strong>: dosyadaki belgelerden otomatik üretilir — ilçeye gönderirken ya da teftişte dosyanın içindekiler listesi.</li>
+    </ol>
+    <p>Kurul kararı belgesi Madde 60/3'ün zorunlu unsurlarını (gerekçe, takdirde esas alınan hususlar, dayanılan maddeler, oy durumu, imzalar) içerir; resmî karar defterine <strong>EK-10</strong> formatında yazılması gerektiğini belgede hatırlatır. Sistem, okul değiştirme yaptırımına "müdür onayı" girilmesini engeller (onay ilçe kurulundan gelir, Madde 56/6).</p>
+    <p style="color:var(--muted)">Lise farklı bir yönetmeliğe (Ortaöğretim Kurumları Yönetmeliği — Okul Öğrenci Ödül ve Disiplin Kurulu) tabidir; bu sürüm lise akışını içermez ve lise okullarında bunu açıkça uyarır.</p>
+  ` },
   { id: "bakim", title: "Periyodik Bakım Takibi", html: `
     <p>Okulun periyodik bakım/kontrol kalemlerini (asansör, yangın tüpü, su deposu, doğalgaz, paratoner, jeneratör…) tek yerden takip eder: <strong>son yapılma tarihi + periyot → sonraki tarih</strong>, kalan gün ve durum (Gecikti / Yaklaşıyor / Uygun) otomatik hesaplanır. "Yaklaşıyor" eşiği 30 gündür; aylık kalemlerde periyodun yarısı (15 gün) alınır ki yeni yapılmış bir bakım hemen uyarı vermesin. Gecikmiş kalem sayısı ana ekrandaki kartta rozet olarak görünür.</p>
     <ol>
@@ -5821,6 +6557,9 @@ const SSS_ITEMS = [
   { cat: "LGS Koçluk", q: "Zayıflık Analizi'ndeki \"öncelik skoru\" nasıl hesaplanıyor?", a: `Ham "en düşük net" sıralaması değildir — son denemelerin yakınlık ağırlıklı trendi ile dersin (ya da tanımlıysa konunun) LGS'deki soru ağırlığı birlikte hesaba katılır. Az soru gelen bir ders, çok soru gelen bir dersin önüne geçemez.` },
   { cat: "LGS Koçluk", q: "Konu bazlı hata etiketlemesi zorunlu mu?", a: `Hayır, tamamen opsiyoneldir. Konu tanımlamazsan sistem ders bazlı çalışmaya devam eder; tanımlarsan Zayıflık Analizi ve Haftalık Görevler'deki öneriler konu seviyesinde daha spesifik hale gelir (ör. "Matematik çalış" yerine "Kesirler çalış").` },
   { cat: "LGS Koçluk", q: "Kayıt Geçmişi'ni kim görebilir?", a: `İdareci okul genelindeki tüm değişiklikleri, öğretmen ise sadece kendi yaptığı işlemleri görür.` },
+  { cat: "Disiplin Dosyası", q: "Davranış türünü seçince yaptırım kendiliğinden belirleniyor mu?", a: `Hayır. Madde 55 listesi sadece ön eşleştirme/bilgi içindir; yaptırımı, Madde 56/1'deki hususları (davranışın niteliği, öğrencinin genel durumu, yaşı, başarısı, daha önce yaptırım alıp almadığı) dikkate alarak kurul takdir eder. Uyarma ve kınamayı kurul verir (Madde 56/4); okul değiştirme ilçe kurulunun onayıyla uygulanır (Madde 56/6).` },
+  { cat: "Disiplin Dosyası", q: "İtiraz süresi nasıl hesaplanıyor, resmî tatiller dahil mi?", a: `Madde 56/11: veli, tebliğ tarihinden itibaren 5 iş günü içinde okul müdürlüğüne itiraz edebilir. Panel iş günü hesabında Cumartesi/Pazar'ı atlar ama resmî tatilleri bilmez — araya bayram/idari tatil giriyorsa son günü kendin bir gün ileri al. İtiraz sonuçlanana kadar yaptırım uygulanmaz (Madde 56/12).` },
+  { cat: "Disiplin Dosyası", q: "Yaptırım sonradan kaldırılabilir mi?", a: `Evet. Madde 62/3: davranışı tekrarlamayan ve olumlu davranışları gözlenen öğrencinin yaptırımı, kurulun dönem sonu toplantısında alacağı kararla kaldırılabilir; karar 5 iş günü içinde e-Okul'daki dosyadan çıkarılır. Dosyada "Yaptırımın kaldırılma tarihi" alanına işle.` },
   { cat: "Periyodik Bakım", q: "Örnek kalemlerdeki periyotlar yasal zorunluluk mu?", a: `Hayır. Örnek periyotlar sahadan gelen yaygın uygulamayı yansıtır, yasal süre değildir. Asansör, yangın tesisatı, doğalgaz, elektrik/topraklama gibi kalemlerde yürürlükteki mevzuatın ve yetkili muayene kuruluşunun belirlediği süre esastır — farklıysa "Düzenle" ile periyodu değiştir.` },
   { cat: "Periyodik Bakım", q: "Eski tarihli bir bakımı sonradan girersem sonraki tarih geriye kayar mı?", a: `Hayır. "✓ Yapıldı" ile girilen tarih, kalemin mevcut son yapılma tarihinden eskiyse sadece Bakım Geçmişi'ne kaydedilir; sonraki bakım tarihi her zaman en güncel yapılma tarihinden hesaplanır.` },
   { cat: "Genel", q: "Bir öğrenciyi/dersi/denemeyi silme yetkisi kimde?", a: `Kalıcı/idari işlemler (ekleme, silme, ders/deneme tanımlama) sadece idareciye açıktır. Öğretmen kendi öğrencisinin bazı bilgilerini güncelleyebilir ama silemez, yeni öğrenci ekleyemez.` },
