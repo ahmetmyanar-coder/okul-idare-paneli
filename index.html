@@ -1180,6 +1180,60 @@ const MONTH_NAMES = { 1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan", 5: "Mayıs"
 const VERIFIED_MONTHLY_SEED_TASKS = [
   {
     month: 9,
+    title: "Öğrenci Davranışlarını Değerlendirme Kurulu üye seçimi (gizli oy)",
+    description: "Kurulun 3 öğretmen üyesi, her ders yılının ilk öğretmenler kurulu toplantısında gizli oyla seçilir; OAB kendi üyeleri arasından 1 veli belirler; 3 yedek üye seçilir. (Ortaokul/imam-hatip ortaokulu)",
+    resmi_dayanak: "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği, Madde 57/2-b",
+  },
+  {
+    month: 9,
+    title: "Mesleki çalışma programının hazırlanması ve duyurulması (eylül)",
+    description: "Eylül ayının ilk iş gününden derslerin başlangıcına kadar mesleki çalışma yapılır; program okul müdürlüğünce hazırlanır ve öğretmenlere bir hafta önceden duyurulur.",
+    resmi_dayanak: "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği, Madde 38/1-2",
+  },
+  {
+    month: 1,
+    title: "ÖDDK dönem sonu toplantısı — yaptırım kaldırma değerlendirmesi (1. dönem)",
+    description: "Davranışını tekrarlamayan ve olumlu davranışları gözlenen öğrencinin yaptırımı, kurulun dönem sonu toplantısında alacağı kararla kaldırılabilir; karar 5 iş günü içinde e-Okul'dan çıkarılır.",
+    resmi_dayanak: "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği, Madde 62/3",
+  },
+  {
+    month: 3,
+    title: "Okul tespit komisyonu (kayıt alanlarının belirlenmesi)",
+    description: "Öğrencilerin yerleştirileceği okulları belirlemek üzere mart ayında il/ilçe millî eğitim müdürlüğünce oluşturulan komisyon toplanır; en çok beş okul müdürü üye olur — okul müdürü olarak görevlendirilirsen katıl.",
+    resmi_dayanak: "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği, Madde 10/1",
+  },
+  {
+    month: 4,
+    title: "Okul öncesi katkı payının tespiti (nisan — okul öncesi)",
+    description: "Okul öncesi eğitim kurumlarında alınacak katkı payı, katkı payı tespit komisyonunca nisan ayında belirlenir.",
+    resmi_dayanak: "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği, Madde 67/1",
+  },
+  {
+    month: 5,
+    title: "Sınıf tekrarı bilgilendirmesi (mayıs — ilkokul)",
+    description: "İstenilen yeterlilik düzeyine ulaşamamış ilkokul öğrencilerinin velilerine sınıf tekrarı konusunda mayıs ayında yazılı, e-posta veya SMS ile bilgilendirme yapılır.",
+    resmi_dayanak: "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği, Madde 31/1",
+  },
+  {
+    month: 6,
+    title: "ÖDDK dönem sonu toplantısı — yaptırım kaldırma değerlendirmesi (2. dönem)",
+    description: "Yaptırım kaldırma kararları dönem sonu toplantısında alınır; kaldırılan yaptırım 5 iş günü içinde e-Okul'dan çıkarılır.",
+    resmi_dayanak: "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği, Madde 62/3",
+  },
+  {
+    month: 6,
+    title: "Mesleki çalışma programının hazırlanması ve duyurulması (ders kesimi)",
+    description: "Derslerin kesiminden temmuz ayının ilk iş gününe kadar mesleki çalışma yapılır; program okul müdürlüğünce hazırlanıp bir hafta önceden duyurulur.",
+    resmi_dayanak: "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği, Madde 38/1-2",
+  },
+  {
+    month: 7,
+    title: "Yeni kayıtların başlaması (temmuz ayının ilk iş günü)",
+    description: "Okul öncesi eğitim ve ilköğretim kurumlarında yeni kayıtlar temmuz ayının ilk iş gününde başlar; kayıt ulusal adres veri tabanındaki adres esas alınarak e-Okul üzerinden yapılır.",
+    resmi_dayanak: "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği, Madde 11/1",
+  },
+  {
+    month: 9,
     title: "Öğretmenler Kurulu toplantısı (ders yılı başı)",
     description: "Ders yılı başlamadan önce, eylül ayının ilk işgününde yapılır.",
     resmi_dayanak: "MEB Eğitim Kurulları ve Zümreleri Yönergesi, Madde 9/3-4 ve EK-1 (Eğitim Kurullarının Toplantı Takvimi)",
@@ -1717,7 +1771,232 @@ function docWrapper(school, bodyHtml, meta = {}) {
 </html>`;
 }
 
+/* "Sınıf | Ders | …" biçimindeki satırları tabloya çevirir (belge şablonları için). */
+function linesToTable(text, headers) {
+  const rows = String(text || "").split("\n").map(l => l.trim()).filter(Boolean).map(l => l.split("|").map(c => c.trim()));
+  const td = "border:1px solid #999;padding:3px 5px;font-size:10.5pt";
+  return `<table style="width:100%;border-collapse:collapse;margin:6px 0 10px"><thead><tr><th style="${td};width:6%">S.N.</th>${headers.map(h => `<th style="${td}">${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.length ? rows.map((r, i) => `<tr><td style="${td};text-align:center">${i + 1}</td>${headers.map((_, j) => `<td style="${td}">${esc(r[j] || "")}</td>`).join("")}</tr>`).join("") : `<tr><td style="${td};text-align:center" colspan="${headers.length + 1}">Yok</td></tr>`}</tbody></table>`;
+}
+function egitimYiliDefault() { const d = new Date(), y = d.getFullYear(); return d.getMonth() + 1 >= 9 ? `${y}-${y + 1}` : `${y - 1}-${y}`; }
+function ayAdiDefault() { const d = new Date(); return `${MONTH_NAMES[d.getMonth() + 1]} ${d.getFullYear()}`; }
+
+/* Sene başı / sene sonu gündemleri — ortaokul uygulaması; madde atıfları yalnızca doğrulanmış hükümlere (İlköğretim Yönetmeliği). */
+const GUNDEM_SENE_BASI = [
+  "Açılış, yoklama, saygı duruşu ve İstiklal Marşı",
+  "Kurul yazmanlarının seçimi; gündemin okunması ve eklenmesi istenen maddelerin görüşülmesi",
+  "Bir önceki öğretmenler kurulu kararlarının gözden geçirilmesi",
+  "Bakanlık ve il/ilçe millî eğitim müdürlüğü yazılarının, mevzuat değişikliklerinin duyurulması",
+  "Yıllık çalışma takvimi, zaman çizelgesi, ders dağılımı ve haftalık ders programı",
+  "Ünitelendirilmiş yıllık planlar, ders planları ve BEP hazırlıkları ile teslim tarihleri; zümre toplantı takvimi ve okul zümre başkanının belirlenmesi",
+  "Ölçme ve değerlendirme esasları: sınav takvimi, ders etkinliklerine katılım puanları (haftalık ders saati 2 ve altındaki derslerde 2, üstünde 3 — Yönetmelik md.22/3), proje ödevleri (md.22/2), sınav analizleri",
+  "Sınıf/şube rehber öğretmenlerinin belirlenmesi",
+  "Öğrenci Davranışlarını Değerlendirme Kurulu üyelerinin gizli oyla seçimi (md.57/2-b); diğer kurul, komisyon ve ekiplerin oluşturulması",
+  "Nöbet esasları, nöbet çizelgesi ve nöbet defteri (md.44)",
+  "Öğrenci devam-devamsızlık takibi, e-Okul işlemleri ve veli bilgilendirme",
+  "Rehberlik hizmetleri: rehberlik programı, Rehberlik Hizmetleri Okul Yürütme Komisyonu, psikososyal destek, kaynaştırma/bütünleştirme ve destek eğitim odası",
+  "Sosyal etkinlikler: kulüplerin ve danışman öğretmenlerin belirlenmesi, belirli gün ve haftalar, sosyal sorumluluk çalışmaları, Sosyal Etkinlikler Kurulu",
+  "Ders dışı eğitim çalışmaları (egzersiz) ve destekleme-yetiştirme kurslarının planlanması",
+  "Proje çalışmaları (TÜBİTAK, eTwinning, Erasmus+, yerel projeler) ve yarışmalar",
+  "Bayrak törenleri, anma ve kutlama programları; tören komisyonu",
+  "Okul, sınıf ve çevre temizliği; taşınır mal ve ders araç-gereçlerinin korunması; tasarruf tedbirleri",
+  "Okul güvenliği, iş sağlığı ve güvenliği, sivil savunma ve acil durum planı; ekip listeleri",
+  "Öğrenci ve personel kılık-kıyafet esasları; cep telefonu ve kayıt özellikli dijital cihaz kullanım kuralları (md.39/2)",
+  "Öğretmenlerin izin-rapor işlemleri, mesleki çalışma ve hizmet içi eğitim planlaması (md.38)",
+  "Okul-Aile Birliği çalışmaları ve veli toplantılarının planlanması",
+  "Dilek ve temenniler; kapanış",
+];
+const GUNDEM_SENE_SONU = [
+  "Açılış, yoklama, saygı duruşu ve İstiklal Marşı",
+  "Kurul yazmanlarının seçimi; gündemin okunması",
+  "Bir önceki öğretmenler kurulu kararlarının değerlendirilmesi",
+  "Eğitim-öğretim yılının genel değerlendirilmesi; hedeflere ulaşma durumu",
+  "Öğrenci başarısının sınıf ve ders düzeyinde değerlendirilmesi; e-Okul sınav, proje ve ders etkinliklerine katılım puanı girişlerinin tamamlanması (md.22)",
+  "Zümre kararlarının uygulanma durumu; ölçme-değerlendirme süreçleri ve sınav analizleri",
+  "Merkezî sınav (LGS) hazırlık süreçleri ve destekleme-yetiştirme kurslarının değerlendirilmesi",
+  "Devamsızlık takibi ve alınan tedbirlerin değerlendirilmesi",
+  "Öğrenci davranışlarının değerlendirilmesi; Öğrenci Davranışlarını Değerlendirme Kurulu dönem sonu değerlendirmesi ve yaptırım kaldırma kararları (md.62/3)",
+  "Rehberlik ve psikolojik danışma hizmetleri, kaynaştırma/bütünleştirme ve BEP uygulamalarının değerlendirilmesi",
+  "Sosyal, kültürel, sportif ve sanatsal etkinlikler, kulüp çalışmaları ve toplum hizmeti uygulamaları",
+  "Proje çalışmalarının (TÜBİTAK, eTwinning, Erasmus+, Teknofest vb.) değerlendirilmesi",
+  "Kütüphane, laboratuvar, atölye ve eğitim ortamlarının kullanım durumu",
+  "Taşınır mal işlemleri, ders araç-gereçleri ve demirbaşların durumu; sayım hazırlıkları",
+  "Temizlik, bakım-onarım ve güvenlik çalışmaları; yaz dönemi bakım-onarım planı",
+  "İş sağlığı ve güvenliği çalışmalarının değerlendirilmesi",
+  "Veli iş birliği ve Okul-Aile Birliği faaliyetlerinin değerlendirilmesi",
+  "Ders kesim raporları, sınav kâğıtları ve dosyaların teslimi; dönem sonu iş ve işlemleri kontrol listesi",
+  "Öğretmenlerin mesleki çalışma programı (derslerin kesiminden temmuz ayının ilk iş gününe kadar — md.38/1)",
+  "Bir sonraki eğitim-öğretim yılı için hedefler ve öneriler",
+  "Dilek ve temenniler; kapanış",
+];
+const DONEM_SONU_KONTROL = [
+  "e-Okul'da dönem sınav puanlarını, ders etkinliklerine katılım puanlarını (haftalık ders saati 2 ve altındaki derslerde 2, üstünde 3 — md.22/3) ve proje puanlarını (md.22/2) eksiksiz işledim.",
+  "Sürekli devamsız öğrenciler için puan girişi yapmadım; durumu okul yönetimine bildirdim.",
+  "Şube rehber öğretmeni olduğum sınıf için e-Okul'daki karne görüşü ve davranış değerlendirme alanlarını doldurdum.",
+  "Sınıfımın okuduğu kitaplar ve sosyal etkinlik modülü girişlerini tamamladım.",
+  "Sınıf defterinde eksik kazanım ve imza bırakmadım.",
+  "Sınav kâğıtlarını ve cevap anahtarlarını (md.22/1-a) teslim tutanağıyla idareye teslim ettim; sınav analizlerini teslim ettim.",
+  "Ders kesim raporumu teslim ettim.",
+  "Üyesi olduğum kurul, komisyon ve kulüp dosyalarını tamamlayıp ilgili müdür yardımcısına teslim ettim.",
+  "Nöbet defterinde eksik kayıt bırakmadım.",
+  "Takdir/teşekkür ve onur belgesi alacak öğrenci listelerini kontrol ettim.",
+  "Kaynaştırma/bütünleştirme öğrencilerimin BEP değerlendirmelerini tamamladım.",
+  "Zimmetimdeki ders araç-gereçlerini kontrol ettim; arızalı veya eksik olanları bildirdim.",
+];
+function gundemDavetHtml(school, d, baslik, kapanisNotu) {
+  return `
+    <p style="margin-top:20px"><strong>ÖĞRETMENLERE</strong></p>
+    <p style="text-align:justify;text-indent:1.25cm">Aşağıdaki gündem maddelerini görüşmek üzere ${fmtDate(d.tarih)} tarihinde saat ${esc(d.saat)}'da ${esc(d.yer)} bulunan yerde ${esc(d.egitim_yili)} eğitim-öğretim yılı <strong>${baslik}</strong> toplantısı yapılacaktır. Belirtilen gün ve saatte hazır bulunmanızı rica ederim.</p>
+    <p><strong>GÜNDEM MADDELERİ</strong></p>
+    <ol style="text-align:justify">${linesToList(d.gundem)}</ol>
+    ${kapanisNotu ? `<p style="font-size:10pt;color:#444">${kapanisNotu}</p>` : ""}
+    <table style="width:100%;margin-top:34px"><tr><td style="text-align:center"><strong>${officialSignatureName(school.mudur_adi)}</strong><br>Okul Müdürü</td></tr></table>
+    <p style="margin-top:22px;font-size:10.5pt"><strong>Tebliğ:</strong> Gündem, öğretmenler odasında ilan edilmiş / öğretmenlere e-posta ile duyurulmuştur. Okudum: …………………………………</p>`;
+}
+
 const EVRAK_TEMPLATES = [
+  {
+    key: "kurul_senebasi",
+    title: "Sene Başı Öğretmenler Kurulu — Davet ve Gündem",
+    desc: "Ortaokul için hazır 22 maddelik gündem (Yönetmelik md.22, 38, 39, 44, 57 atıflı); tarih, saat ve yeri gir, düzenle, yazdır.",
+    fields: [
+      { id: "egitim_yili", label: "Eğitim-öğretim yılı", type: "text", default: egitimYiliDefault },
+      { id: "tarih", label: "Toplantı tarihi", type: "date" },
+      { id: "saat", label: "Saat", type: "text", default: "10.00" },
+      { id: "yer", label: "Yer", type: "text", default: "okulumuz toplantı salonunda" },
+      { id: "gundem", label: "Gündem maddeleri (her satıra bir madde — ekle, çıkar, sırala)", type: "textarea", rows: 14, default: () => GUNDEM_SENE_BASI.join("\n") },
+    ],
+    meta: (d) => ({ konu: "Sene Başı Öğretmenler Kurulu Toplantısı", tarih: d.tarih }),
+    render: (d, school) => gundemDavetHtml(school, d, "sene başı öğretmenler kurulu", "Öğretmenler kurulu ders yılı başında eylül ayının ilk iş gününde toplanır (MEB Eğitim Kurulları ve Zümreleri Yönergesi md.9)."),
+  },
+  {
+    key: "kurul_senesonu",
+    title: "Sene Sonu Öğretmenler Kurulu — Davet ve Gündem",
+    desc: "Yıl sonu değerlendirme gündemi (21 madde): başarı, devamsızlık, ÖDDK, rehberlik, taşınır, mesleki çalışma, gelecek yıl hedefleri.",
+    fields: [
+      { id: "egitim_yili", label: "Eğitim-öğretim yılı", type: "text", default: egitimYiliDefault },
+      { id: "tarih", label: "Toplantı tarihi", type: "date" },
+      { id: "saat", label: "Saat", type: "text", default: "10.00" },
+      { id: "yer", label: "Yer", type: "text", default: "okulumuz toplantı salonunda" },
+      { id: "gundem", label: "Gündem maddeleri (her satıra bir madde)", type: "textarea", rows: 14, default: () => GUNDEM_SENE_SONU.join("\n") },
+    ],
+    meta: (d) => ({ konu: "Sene Sonu Öğretmenler Kurulu Toplantısı", tarih: d.tarih }),
+    render: (d, school) => gundemDavetHtml(school, d, "sene sonu öğretmenler kurulu", ""),
+  },
+  {
+    key: "donem_sonu_kontrol",
+    title: "Dönem Sonu Öğretmen İş ve İşlemleri Kontrol Listesi",
+    desc: "Öğretmenin dönem sonunda tamamladığını beyan edip imzaladığı 12 maddelik liste (e-Okul, sınav kâğıtları, ders kesim, kurul dosyaları, nöbet defteri…).",
+    fields: [
+      { id: "egitim_yili", label: "Eğitim-öğretim yılı", type: "text", default: egitimYiliDefault },
+      { id: "donem", label: "Dönem", type: "text", default: () => new Date().getMonth() + 1 >= 9 || new Date().getMonth() + 1 === 1 ? "1. Dönem" : "2. Dönem" },
+      { id: "ogretmen", label: "Öğretmen adı (boş bırakılırsa genel form basılır)", type: "text" },
+      { id: "teslim_tarihi", label: "Son teslim tarihi", type: "date" },
+      { id: "maddeler", label: "Kontrol maddeleri (her satıra bir madde)", type: "textarea", rows: 12, default: () => DONEM_SONU_KONTROL.join("\n") },
+    ],
+    meta: (d) => ({ konu: `${d.donem} Sonu Öğretmen İş ve İşlemleri Kontrol Listesi`, tarih: d.teslim_tarihi }),
+    render: (d, school) => `
+      <h3 style="text-align:center;text-decoration:underline;margin-top:24px">${esc(d.egitim_yili)} EĞİTİM-ÖĞRETİM YILI ${esc(d.donem).toLocaleUpperCase("tr-TR")} SONU<br>ÖĞRETMEN İŞ VE İŞLEMLERİ KONTROL LİSTESİ</h3>
+      <p><strong>Öğretmen:</strong> ${esc(d.ogretmen) || "……………………………………"} &nbsp;&nbsp; <strong>Branş:</strong> ………………… &nbsp;&nbsp; <strong>Son teslim:</strong> ${d.teslim_tarihi ? fmtDate(d.teslim_tarihi) : "…/…/……"}</p>
+      <table style="width:100%;border-collapse:collapse;font-size:10.5pt"><thead><tr><th style="border:1px solid #999;padding:4px;width:6%">No</th><th style="border:1px solid #999;padding:4px;text-align:left">Yapılacak iş / işlem</th><th style="border:1px solid #999;padding:4px;width:14%">Tamamlandı</th></tr></thead>
+      <tbody>${String(d.maddeler || "").split("\n").map(l => l.trim()).filter(Boolean).map((l, i) => `<tr><td style="border:1px solid #999;padding:4px;text-align:center">${i + 1}</td><td style="border:1px solid #999;padding:4px">${esc(l)}</td><td style="border:1px solid #999;padding:4px;text-align:center;font-size:14pt">☐</td></tr>`).join("")}</tbody></table>
+      <p style="text-align:justify;text-indent:1.25cm;margin-top:12px">Yukarıda belirtilen iş ve işlemleri tamamladığımı beyan ederim.</p>
+      <table style="width:100%;margin-top:30px"><tr>
+        <td style="width:50%;text-align:center">…/…/……<br><br><br>${esc(d.ogretmen) || "…………………………"}<br>Öğretmen</td>
+        <td style="width:50%;text-align:center">Teslim alan<br><br><br>…………………………<br>Müdür Yardımcısı</td>
+      </tr></table>`,
+  },
+  {
+    key: "ders_kesim",
+    title: "Ders Kesim Raporu (öğretmen)",
+    desc: "Öğretmenin dönem/yıl sonunda hangi sınıfta hangi dersin programını tamamlayıp tamamlamadığını bildirdiği rapor.",
+    fields: [
+      { id: "ogretmen", label: "Öğretmen adı", type: "text" },
+      { id: "brans", label: "Branşı", type: "text" },
+      { id: "egitim_yili", label: "Eğitim-öğretim yılı", type: "text", default: egitimYiliDefault },
+      { id: "tarih", label: "Tarih", type: "date" },
+      { id: "satirlar", label: "Satırlar: Sınıf | Dersin adı | Tamamlandı / Tamamlanmadı | Tamamlanmadıysa nedeni", type: "textarea", rows: 6, default: "5-A | Matematik | Tamamlandı | \n" },
+    ],
+    meta: (d) => ({ konu: "Ders Kesim Raporu", tarih: d.tarih }),
+    render: (d, school) => `
+      <p style="margin-top:20px"><strong>${esc(school.name).toLocaleUpperCase("tr-TR")} MÜDÜRLÜĞÜNE</strong></p>
+      <p style="text-align:justify;text-indent:1.25cm">${esc(d.egitim_yili)} eğitim-öğretim yılında derslerine girdiğim sınıfların ders kesim durumu aşağıdaki çizelgede gösterilmiştir. Gereğini arz ederim.</p>
+      ${linesToTable(d.satirlar, ["Sınıf", "Dersin Adı", "Tamamlanıp Tamamlanmadığı", "Tamamlanmadıysa Nedeni"])}
+      <table style="width:100%;margin-top:26px"><tr><td style="text-align:right">${fmtDate(d.tarih)}<br><br>${esc(d.ogretmen)}<br>${esc(d.brans)} Öğretmeni</td></tr></table>
+      <p style="margin-top:26px;font-size:10.5pt"><strong>Görüldü.</strong> …/…/…… &nbsp;&nbsp; ${officialSignatureName(school.mudur_adi)} — Okul Müdürü</p>`,
+  },
+  {
+    key: "yazili_teslim",
+    title: "Sınav Kâğıtları ve Cevap Anahtarı Teslim Tutanağı",
+    desc: "Öğretmenin sınav kâğıtlarını ve cevap anahtarını idareye teslim ettiğini gösteren tutanak (md.22/1-a: cevap anahtarı sınav kâğıtlarıyla birlikte saklanır).",
+    fields: [
+      { id: "ogretmen", label: "Teslim eden öğretmen", type: "text" },
+      { id: "ders", label: "Ders", type: "text" },
+      { id: "sinav", label: "Sınav (örn. 1. Dönem 1. Sınav)", type: "text", default: "1. Dönem 1. Sınav" },
+      { id: "tarih", label: "Teslim tarihi", type: "date" },
+      { id: "satirlar", label: "Satırlar: Sınıf | Sınav tarihi | Öğrenci sayısı | Teslim edilen kâğıt sayısı | Cevap anahtarı (var/yok)", type: "textarea", rows: 5, default: "5-A |  |  |  | Var\n" },
+      { id: "teslim_alan", label: "Teslim alan (müdür yardımcısı)", type: "text" },
+    ],
+    meta: (d) => ({ konu: `Sınav Kâğıtları Teslim Tutanağı (${d.ders} — ${d.sinav})`, tarih: d.tarih }),
+    render: (d, school) => `
+      <h3 style="text-align:center;text-decoration:underline;margin-top:24px">SINAV KÂĞITLARI VE CEVAP ANAHTARI TESLİM TUTANAĞI</h3>
+      <p><strong>Ders:</strong> ${esc(d.ders)} &nbsp;&nbsp; <strong>Sınav:</strong> ${esc(d.sinav)} &nbsp;&nbsp; <strong>Teslim tarihi:</strong> ${fmtDate(d.tarih)}</p>
+      ${linesToTable(d.satirlar, ["Sınıf", "Sınav Tarihi", "Öğrenci Sayısı", "Kâğıt Sayısı", "Cevap Anahtarı"])}
+      <p style="text-align:justify;text-indent:1.25cm">Yukarıda belirtilen sınav kâğıtları ve cevap anahtarları, MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği md.22/1-a uyarınca saklanmak üzere eksiksiz olarak teslim edilmiş ve teslim alınmıştır.</p>
+      <table style="width:100%;margin-top:30px"><tr>
+        <td style="width:50%;text-align:center">Teslim Eden<br><br><br>${esc(d.ogretmen)}<br>Öğretmen</td>
+        <td style="width:50%;text-align:center">Teslim Alan<br><br><br>${esc(d.teslim_alan) || "…………………………"}<br>Müdür Yardımcısı</td>
+      </tr></table>`,
+  },
+  {
+    key: "proje_secim",
+    title: "Proje Ödevi Seçim ve Takip Formu (md.22/2)",
+    desc: "Öğrencilerin ders yılında hazırlayacağı en az bir projenin ders/konu/teslim kaydı; verildiği dönemde değerlendirilir, vermeyenin proje puanı sıfırdır.",
+    fields: [
+      { id: "ders", label: "Ders", type: "text" },
+      { id: "ogretmen", label: "Ders öğretmeni", type: "text" },
+      { id: "egitim_yili", label: "Eğitim-öğretim yılı", type: "text", default: egitimYiliDefault },
+      { id: "donem", label: "Dönem", type: "text", default: "1. Dönem" },
+      { id: "teslim_tarihi", label: "Son teslim tarihi", type: "date" },
+      { id: "satirlar", label: "Satırlar: Sınıf | Okul No | Öğrenci | Proje konusu | Bireysel/Grup", type: "textarea", rows: 8, default: "5-A |  |  |  | Bireysel\n" },
+    ],
+    meta: (d) => ({ konu: `Proje Ödevi Seçim Formu (${d.ders})`, tarih: d.teslim_tarihi }),
+    render: (d, school) => `
+      <h3 style="text-align:center;text-decoration:underline;margin-top:24px">PROJE ÖDEVİ SEÇİM VE TAKİP FORMU</h3>
+      <p><strong>Ders:</strong> ${esc(d.ders)} &nbsp;&nbsp; <strong>Öğretmen:</strong> ${esc(d.ogretmen)} &nbsp;&nbsp; <strong>Yıl/Dönem:</strong> ${esc(d.egitim_yili)} ${esc(d.donem)} &nbsp;&nbsp; <strong>Son teslim:</strong> ${d.teslim_tarihi ? fmtDate(d.teslim_tarihi) : "…"}</p>
+      ${linesToTable(d.satirlar, ["Sınıf", "No", "Öğrenci", "Proje Konusu", "Bireysel / Grup", "Teslim (✓)"])}
+      <p style="font-size:10pt;color:#444;text-align:justify">MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği md.22/2: Ortaokul ve imam-hatip ortaokullarında öğrencilere ders yılında istedikleri ders veya derslerden bireysel ya da grup çalışması şeklinde öğretmen rehberliğinde en az bir proje hazırlatılır. Projeler verildikleri dönemde değerlendirilir; proje vermeyen öğrencinin proje puanı sıfır olarak değerlendirilir.</p>
+      <table style="width:100%;margin-top:26px"><tr><td style="text-align:center">${esc(d.ogretmen)}<br>${esc(d.ders)} Öğretmeni</td><td style="text-align:center">${officialSignatureName(school.mudur_adi)}<br>Okul Müdürü</td></tr></table>`,
+  },
+  {
+    key: "maas_degisiklik",
+    title: "Maaş Değişiklik Bildirim Formu (aylık)",
+    desc: "Ay içinde gelen/ayrılan personel, rapor kesintileri, aile durumu, terfi, sendika ve icra değişikliklerinin maaş birimine bildirimi; terfiler Personel İşleri'nden dolar.",
+    fields: [
+      { id: "ay", label: "Ay / Yıl", type: "text", default: ayAdiDefault },
+      { id: "kurum_kodu", label: "Kurum kodu", type: "text" },
+      { id: "gelen", label: "Ay içinde gelen personel — TC/Saymanlık No | Ad Soyad | Görevi | Başlama tarihi | IBAN", type: "textarea", rows: 3 },
+      { id: "ayrilan", label: "Ay içinde ayrılan personel — TC/Saymanlık No | Ad Soyad | Görevi | Ayrılma tarihi", type: "textarea", rows: 3 },
+      { id: "rapor", label: "Rapor kesintileri — TC/Saymanlık No | Ad Soyad | Görevi | Rapor gün sayısı | Rapor tarihleri", type: "textarea", rows: 3 },
+      { id: "aile", label: "Aile durumu değişikliği (evlenme, eş/çocuk kaydı) — TC/Saymanlık No | Ad Soyad | Yakınlığı | Tarih | Değişiklik nedeni", type: "textarea", rows: 3 },
+      { id: "terfi", label: "Terfi değişikliği — TC/Saymanlık No | Ad Soyad | Eski derece/kademe | Yeni derece/kademe | Terfi tarihi", type: "textarea", rows: 3, default: (school) => { try { const p = loadPersonel(school); const d = new Date(); const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; return p.changes.filter(c => c.type === "terfi" && (c.date || "").startsWith(ym)).map(c => { const s = p.staff.find(x => x.id === c.staff_id); return ` | ${s?.full_name || ""} |  |  | ${fmtDate(c.date)}${c.description ? " — " + c.description : ""}`; }).join("\n"); } catch { return ""; } } },
+      { id: "sendika", label: "Sendika değişikliği — TC/Saymanlık No | Ad Soyad | Sendika adı | Ayrılma/başlama tarihi", type: "textarea", rows: 2 },
+      { id: "icra", label: "İcra değişikliği — TC/Saymanlık No | Ad Soyad | İcra dairesi ve dosya no | Tutar", type: "textarea", rows: 2 },
+      { id: "aciklama", label: "Açıklama (opsiyonel)", type: "textarea", rows: 2 },
+    ],
+    meta: (d) => ({ konu: `Maaş Değişiklik Bildirimi (${d.ay})`, tarih: toLocalISO(new Date()) }),
+    render: (d, school) => `
+      <p style="margin-top:20px"><strong>İLÇE MİLLÎ EĞİTİM MÜDÜRLÜĞÜNE<br><span style="font-size:10.5pt">(Maaş / Mutemetlik Birimi)</span></strong></p>
+      <p style="text-align:justify;text-indent:1.25cm">${esc(d.ay)} dönemine ait maaş değişiklik bildirimleri aşağıda sunulmuştur${d.kurum_kodu ? ` (Kurum kodu: ${esc(d.kurum_kodu)})` : ""}. Gereğini arz ederim.</p>
+      <p><strong>1. Ay içinde gelen personel</strong></p>${linesToTable(d.gelen, ["TC / Saymanlık No", "Adı Soyadı", "Görevi", "Başlama Tarihi", "IBAN"])}
+      <p><strong>2. Ay içinde ayrılan personel</strong></p>${linesToTable(d.ayrilan, ["TC / Saymanlık No", "Adı Soyadı", "Görevi", "Ayrılma Tarihi"])}
+      <p><strong>3. Rapor kesintileri</strong></p>${linesToTable(d.rapor, ["TC / Saymanlık No", "Adı Soyadı", "Görevi", "Rapor Gün Sayısı", "Rapor Tarihleri"])}
+      <p><strong>4. Aile durumu değişikliği</strong></p>${linesToTable(d.aile, ["TC / Saymanlık No", "Adı Soyadı", "Yakınlığı", "Tarih", "Nedeni"])}
+      <p><strong>5. Terfi değişikliği</strong></p>${linesToTable(d.terfi, ["TC / Saymanlık No", "Adı Soyadı", "Eski", "Yeni", "Terfi Tarihi"])}
+      <p><strong>6. Sendika değişikliği</strong></p>${linesToTable(d.sendika, ["TC / Saymanlık No", "Adı Soyadı", "Sendika", "Ayrılma / Başlama"])}
+      <p><strong>7. İcra değişikliği</strong></p>${linesToTable(d.icra, ["TC / Saymanlık No", "Adı Soyadı", "İcra Dairesi / Dosya No", "Tutar"])}
+      ${d.aciklama ? `<p><strong>Açıklama:</strong> ${esc(d.aciklama)}</p>` : ""}
+      <table style="width:100%;margin-top:26px"><tr><td style="text-align:center"><strong>${officialSignatureName(school.mudur_adi)}</strong><br>Okul Müdürü</td></tr></table>`,
+  },
   {
     key: "teblig",
     title: "Tebliğ-Tebellüğ Belgesi",
@@ -1861,12 +2140,12 @@ function renderDocForm(school, key) {
   box.innerHTML = `
     <div class="card">
       <h3 style="margin-top:0">${tpl.title}</h3>
-      ${tpl.fields.map(f => `
+      ${tpl.fields.map(f => { const dv = typeof f.default === "function" ? (f.default(school) || "") : (f.default || ""); return `
         <label>${f.label}</label>
         ${f.type === "textarea"
-          ? `<textarea id="f-${f.id}" rows="4" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px"></textarea>`
-          : `<input id="f-${f.id}" type="${f.type}">`}
-      `).join("")}
+          ? `<textarea id="f-${f.id}" rows="${f.rows || 4}" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px">${esc(dv)}</textarea>`
+          : `<input id="f-${f.id}" type="${f.type}" value="${esc(dv)}">`}
+      `; }).join("")}
       <button class="primary" id="doc-gen">Belgeyi Oluştur</button>
       <div id="doc-preview" style="margin-top:20px"></div>
     </div>
@@ -3454,6 +3733,7 @@ function kelebekDocHtml(school, exam) {
   return docWrapper(school, `
     <h3 style="text-align:center">SINAV OTURMA PLANI</h3>
     <p style="text-align:center;margin-top:-6px">${esc(exam.name)}${exam.date ? ` — ${fmtDate(exam.date)}` : ""}</p>
+    ${exam.salon || exam.gozetmen ? `<p style="text-align:center;margin-top:-4px;font-size:11pt">${exam.salon ? `<strong>Salon:</strong> ${esc(exam.salon)}` : ""}${exam.salon && exam.gozetmen ? " &nbsp;·&nbsp; " : ""}${exam.gozetmen ? `<strong>Gözetmen:</strong> ${esc(exam.gozetmen)}` : ""}</p>` : ""}
     <table style="width:100%;border-collapse:collapse;margin-top:16px">
       ${grid.map(row => `
         <tr>
@@ -3461,6 +3741,10 @@ function kelebekDocHtml(school, exam) {
         </tr>
       `).join("")}
     </table>
+    <table style="width:100%;margin-top:26px;font-size:11pt"><tr>
+      ${(exam.gozetmen ? exam.gozetmen.split(",").map(g => g.trim()).filter(Boolean) : ["…………………………"]).map(g => `<td style="text-align:center">Gözetmen<br><br><br>${esc(g)}</td>`).join("")}
+      <td style="text-align:center">Okul Müdürü<br><br><br>${officialSignatureName(school.mudur_adi)}</td>
+    </tr></table>
   `);
 }
 
@@ -3498,7 +3782,7 @@ function renderSeatingResult(school, exam) {
   return `
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">${esc(exam.name)}</h3>
-      <p style="color:var(--muted);font-size:12.5px;margin-top:-6px">${exam.seating.length} öğrenci yerleşti${exam.date ? ` · ${fmtDate(exam.date)}` : ""}${exam.rows * exam.cols > exam.seating.length ? ` · ${exam.rows * exam.cols - exam.seating.length} sıra boş` : ""}</p>
+      <p style="color:var(--muted);font-size:12.5px;margin-top:-6px">${exam.salon ? `${esc(exam.salon)} · ` : ""}${exam.gozetmen ? `Gözetmen: ${esc(exam.gozetmen)} · ` : ""}${exam.seating.length} öğrenci yerleşti${exam.date ? ` · ${fmtDate(exam.date)}` : ""}${exam.rows * exam.cols > exam.seating.length ? ` · ${exam.rows * exam.cols - exam.seating.length} sıra boş` : ""}</p>
       ${exam.oversizedGroups?.length ? `<div class="msg err">⚠️ Matematiksel olarak imkansız: ${exam.oversizedGroups.map(g => `"${esc(g.label)}" (${g.count} öğrenci)`).join(", ")} bu sıra/sütun boyutunda (çapraz komşuluk dahil) en fazla ${exam.maxIsolatedGroupSize} öğrenciye kadar hiç bitişiksiz ayrılabilir. Sıra/sütun sayısını artır ya da bu grubu ayrı bir oturuma böl.</div>` : ""}
       ${exam.remainingViolations > 0 ? `<div class="msg err">⚠️ ${exam.remainingViolations} yerde aynı gruptan öğrenciler bitişik kalmak zorunda kaldı${exam.oversizedGroups?.length ? "" : " — grup boyutları arasındaki dengesizlik nedeniyle tam kelebek düzeni mümkün olmadı. Sıra/sütun sayısını artırmak yardımcı olabilir."}</div>` : `<div class="msg ok">Hiçbir aynı-grup öğrenci bitişik değil (yatay/dikey/çapraz).</div>`}
       <div class="table-wrap" style="margin-top:14px">
@@ -3538,6 +3822,10 @@ async function renderKelebek(school, content, draftGroups = null, lastExam = nul
       <input id="k-name" placeholder="örn. 1. Dönem Ortak Sınavı">
       <label>Tarih <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
       ${dateInputHtml("k-date", "")}
+      <div style="display:flex;gap:12px">
+        <div style="flex:1"><label>Salon / derslik <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label><input id="k-salon" placeholder="örn. 7-A dersliği"></div>
+        <div style="flex:2"><label>Gözetmen(ler) <span style="color:var(--muted);font-weight:400">(opsiyonel; virgülle ayır)</span></label><input id="k-gozetmen" placeholder="örn. Ayşe Kaya, Ali Veli"></div>
+      </div>
       <div style="display:flex;gap:12px">
         <div style="flex:1"><label>Sıra sayısı</label><input id="k-rows" type="number" min="1" value="6"></div>
         <div style="flex:1"><label>Sütun sayısı</label><input id="k-cols" type="number" min="1" value="6"></div>
@@ -3592,6 +3880,8 @@ async function renderKelebek(school, content, draftGroups = null, lastExam = nul
   document.getElementById("k-generate").onclick = () => {
     const name = document.getElementById("k-name").value.trim();
     const date = document.getElementById("k-date").value;
+    const salon = document.getElementById("k-salon").value.trim();
+    const gozetmen = document.getElementById("k-gozetmen").value.trim();
     const rows = parseInt(document.getElementById("k-rows").value) || 0;
     const cols = parseInt(document.getElementById("k-cols").value) || 0;
     const msg = document.getElementById("k-msg");
@@ -3609,7 +3899,7 @@ async function renderKelebek(school, content, draftGroups = null, lastExam = nul
       return;
     }
     const exam = {
-      id: uid(), name, date, rows, cols, seating: result.seating,
+      id: uid(), name, date, salon, gozetmen, rows, cols, seating: result.seating,
       remainingViolations: result.violations.length,
       oversizedGroups: result.oversizedGroups.map(g => ({ label: g.label, count: g.students.length })),
       maxIsolatedGroupSize: result.maxIsolatedGroupSize,
@@ -3778,6 +4068,54 @@ async function renderTalep(school, content, filterStatus = "hepsi") {
 
 /* ============ PLANLAMA İŞLERİ (kurul / komisyon / kulüp) ============ */
 
+/**
+ * Ortaokul kurul/komisyon şablonu. Üyelik yapıları yaygın okul uygulamasıdır; yalnızca
+ * Öğrenci Davranışlarını Değerlendirme Kurulu'nun yapısı yönetmelikle belirlenmiştir
+ * (İlköğretim Yönetmeliği md.57: müdürün görevlendireceği müdür yardımcısı başkan; ilk
+ * öğretmenler kurulunda gizli oyla seçilen 3 öğretmen; OAB'den 1 veli; 3 yedek üye).
+ * roles: { role: üye rolü (member.role ile eşleşir), who: kim, n: kaç kişi }
+ */
+const PLANLAMA_SEED_ORTAOKUL = [
+  { name: "Öğretmenler Kurulu", type: "Kurul", roles: [{ role: "Başkan", who: "Okul müdürü", n: 1 }, { role: "Yazman", who: "Öğretmenler kurulunca seçilen 2 asil + 2 yedek", n: 2 }] },
+  { name: "Zümre Başkanları Kurulu", type: "Kurul", roles: [{ role: "Okul zümre başkanı", who: "Zümre başkanları arasından", n: 1 }, { role: "Zümre başkanı", who: "Türkçe, Matematik, Fen Bilimleri, Sosyal Bilgiler, İngilizce, Din Kültürü, Görsel Sanatlar, Beden Eğitimi, Teknoloji ve Tasarım, Müzik, Bilişim Teknolojileri, Özel Eğitim", n: 12 }] },
+  { name: "Öğrenci Davranışlarını Değerlendirme Kurulu", type: "Kurul", basis: "İlköğretim Yönetmeliği md.57", roles: [{ role: "Başkan", who: "Müdürün görevlendireceği müdür yardımcısı", n: 1 }, { role: "Asil üye", who: "İlk öğretmenler kurulunda gizli oyla seçilen 3 öğretmen + OAB'nin kendi üyeleri arasından seçtiği 1 veli", n: 4 }, { role: "Yedek üye", who: "Aynı usulle seçilen 3 yedek", n: 3 }] },
+  { name: "Rehberlik ve Psikolojik Danışma Hizmetleri Okul Yürütme Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Okul müdürü", n: 1 }, { role: "Başkan yardımcısı", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Rehber öğretmen(ler), her sınıf düzeyinden bir şube rehber öğretmeni, OAB başkanı", n: 6 }] },
+  { name: "Okul Psikososyal Koruma, Önleme ve Krize Müdahale Ekibi", type: "Komisyon", roles: [{ role: "Başkan", who: "Okul müdürü", n: 1 }, { role: "Başkan yardımcısı", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Rehber öğretmen(ler) ve şube rehber öğretmenleri", n: 5 }] },
+  { name: "BEP Geliştirme Birimi", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Kaynaştırma öğrencisinin derslerine giren öğretmenler, rehber öğretmen, veli, öğrenci", n: 4 }] },
+  { name: "Sosyal Etkinlikler Kurulu", type: "Kurul", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Danışman öğretmenler ve OAB temsilcisi", n: 4 }] },
+  { name: "Tören Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Beden eğitimi, müzik, Türkçe ve sosyal bilgiler öğretmenleri", n: 4 }] },
+  { name: "Eser İnceleme Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Türkçe, görsel sanatlar ve teknoloji-tasarım öğretmenleri", n: 3 }] },
+  { name: "Web Yayın Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Bilişim/ilgili öğretmenler", n: 2 }] },
+  { name: "Kayıt Kabul ve Nakil Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Öğretmenler", n: 3 }] },
+  { name: "Okul Sağlığı Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Rehber öğretmen, öğretmenler, OAB temsilcisi", n: 4 }] },
+  { name: "Güvenli Okul Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Rehber öğretmen, öğretmenler, OAB temsilcisi", n: 5 }] },
+  { name: "Projeler Komisyonu (TÜBİTAK, eTwinning, Erasmus+)", type: "Komisyon", roles: [{ role: "Başkan", who: "Okul müdürü", n: 1 }, { role: "Başkan yardımcısı", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Gönüllü öğretmenler", n: 4 }] },
+  { name: "Okul-Aile Birliği Denetleme Kurulu", type: "Kurul", roles: [{ role: "Asil üye", who: "Genel kurulca seçilen veli ve öğretmenler", n: 3 }, { role: "Yedek üye", who: "Genel kurulca seçilen", n: 3 }] },
+  { name: "Kantin Denetim Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Asil üye", who: "Öğretmenler", n: 2 }] },
+  { name: "Okul Servis Araçları Denetim Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Asil üye", who: "Öğretmenler", n: 2 }] },
+  { name: "Satın Alma Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Asil üye", who: "Öğretmenler", n: 2 }, { role: "Yedek üye", who: "Öğretmen", n: 1 }] },
+  { name: "Muayene ve Kabul Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Asil üye", who: "Öğretmenler", n: 2 }] },
+  { name: "Taşınır Mal Sayım Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Asil üye", who: "Öğretmenler", n: 2 }] },
+  { name: "Değer Tespit ve Hurdaya Ayırma Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Asil üye", who: "Öğretmenler", n: 2 }] },
+  { name: "İş Sağlığı ve Güvenliği Ekibi", type: "Komisyon", roles: [{ role: "Başkan", who: "Okul müdürü", n: 1 }, { role: "Üye", who: "Müdür yardımcısı, çalışan temsilcisi, öğretmenler", n: 4 }] },
+  { name: "Okul Stratejik Plan Ekibi", type: "Komisyon", roles: [{ role: "Başkan", who: "Okul müdürü", n: 1 }, { role: "Üye", who: "Müdür yardımcısı, öğretmenler, OAB temsilcisi", n: 4 }] },
+  { name: "Değerler Eğitimi Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Din kültürü, Türkçe, sosyal bilgiler öğretmenleri ve rehber öğretmen", n: 4 }] },
+  { name: "Sıfır Atık ve Çevre Ekibi", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Fen bilimleri öğretmeni ve gönüllü öğretmenler", n: 3 }] },
+];
+const planlamaNorm = s => (s || "").toLocaleLowerCase("tr-TR").replace(/[^a-zçğıöşü0-9]+/g, " ").trim();
+function planlamaExpectedRolesHtml(committee, members) {
+  const tpl = PLANLAMA_SEED_ORTAOKUL.find(s => planlamaNorm(s.name) === planlamaNorm(committee.name));
+  if (!tpl) return "";
+  const roleOf = m => (m.role || "").toLocaleLowerCase("tr-TR");
+  const rows = tpl.roles.map(r => {
+    const key = r.role.toLocaleLowerCase("tr-TR").split(" ")[0];
+    const have = (members || []).filter(m => roleOf(m).includes(key)).length;
+    const ok = have >= r.n;
+    return `<div class="list-item"><span>${ok ? "✅" : "⬜"} <strong>${esc(r.role)}</strong> <span style="color:var(--muted)">— ${esc(r.who)}</span></span><span class="pill ${ok ? "good" : "warn"}">${have}/${r.n}</span></div>`;
+  }).join("");
+  return `<div style="margin:6px 0 12px"><div style="font-size:12.5px;font-weight:600;margin-bottom:4px">Beklenen üyelik yapısı <span style="font-weight:400;color:var(--muted)">(${tpl.basis ? esc(tpl.basis) : "yaygın uygulama"}; üye rolünü aynı adla gir — Başkan, Asil üye, Yedek üye…)</span></div>${rows}</div>`;
+}
+
 async function renderPlanlamaModule(profile, school) {
   app.innerHTML = `
     <div class="wrap wide">
@@ -3832,6 +4170,10 @@ async function renderPlanlama(school, content, activeId = null) {
       ${dateInputHtml("c-date", "")}
       <button class="primary" id="c-save">Ekle</button>
       <div id="c-msg"></div>
+      <div style="border-top:1px solid var(--line);margin-top:14px;padding-top:12px">
+        <button class="secondary" id="c-seed" style="width:100%">Ortaokul kurul/komisyon şablonunu yükle <span style="color:var(--muted);font-weight:400">(${PLANLAMA_SEED_ORTAOKUL.length} kalem — listede olmayanları ekler, üyeleri sen seçersin)</span></button>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0">Şablon, seçilen kurulun ayrıntısında beklenen üyelik yapısını (başkan, asil, yedek…) gösterir ve eksikleri işaretler. ÖDDK yapısı İlköğretim Yönetmeliği md.57'den; diğerleri yaygın okul uygulamasıdır.</p>
+      </div>
     </div>
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">Kurul, Komisyon ve Kulüpler (${(committees || []).length})</h3>
@@ -3849,6 +4191,16 @@ async function renderPlanlama(school, content, activeId = null) {
   `;
 
   wireDate3("c-date");
+  document.getElementById("c-seed").onclick = async () => {
+    const msg = document.getElementById("c-msg");
+    const have = new Set((committees || []).map(c => planlamaNorm(c.name)));
+    const missing = PLANLAMA_SEED_ORTAOKUL.filter(s => !have.has(planlamaNorm(s.name)));
+    if (!missing.length) { msg.innerHTML = `<div class="msg ok">Şablondaki tüm kurul ve komisyonlar zaten listede.</div>`; return; }
+    if (!confirm(`${missing.length} kurul/komisyon eklenecek (mevcutlar korunur). Devam edilsin mi?`)) return;
+    const { error } = await sb.from("committees").insert(missing.map(s => ({ school_id: school.id, name: s.name, committee_type: s.type })));
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    await renderPlanlama(school, content, activeId);
+  };
   document.getElementById("c-save").onclick = async () => {
     const name = document.getElementById("c-name").value.trim();
     const committee_type = document.getElementById("c-type").value || null;
@@ -3886,6 +4238,7 @@ async function renderCommitteeDetail(school, committee, el) {
   el.innerHTML = `
     <div class="card" style="margin-bottom:16px;border-color:var(--accent)">
       <h3 style="margin-top:0">${esc(committee.name)}${committee.established_on ? ` <span style="color:var(--muted);font-weight:400;font-size:12.5px">— ${fmtDate(committee.established_on)} kuruldu</span>` : ""}</h3>
+      ${planlamaExpectedRolesHtml(committee, members)}
       <div class="grid">
         <div>
           <h4>Üyeler (${(members || []).length})</h4>
@@ -7274,6 +7627,10 @@ const SSS_ITEMS = [
   { cat: "LGS Koçluk", q: "Zayıflık Analizi'ndeki \"öncelik skoru\" nasıl hesaplanıyor?", a: `Ham "en düşük net" sıralaması değildir — son denemelerin yakınlık ağırlıklı trendi ile dersin (ya da tanımlıysa konunun) LGS'deki soru ağırlığı birlikte hesaba katılır. Az soru gelen bir ders, çok soru gelen bir dersin önüne geçemez.` },
   { cat: "LGS Koçluk", q: "Konu bazlı hata etiketlemesi zorunlu mu?", a: `Hayır, tamamen opsiyoneldir. Konu tanımlamazsan sistem ders bazlı çalışmaya devam eder; tanımlarsan Zayıflık Analizi ve Haftalık Görevler'deki öneriler konu seviyesinde daha spesifik hale gelir (ör. "Matematik çalış" yerine "Kesirler çalış").` },
   { cat: "LGS Koçluk", q: "Kayıt Geçmişi'ni kim görebilir?", a: `İdareci okul genelindeki tüm değişiklikleri, öğretmen ise sadece kendi yaptığı işlemleri görür.` },
+  { cat: "Evrak Deposu", q: "Sene başı/sonu kurul gündemi hazır mı?", a: `Evet. Evrak Deposu'nda "Sene Başı Öğretmenler Kurulu — Davet ve Gündem" (22 madde) ve "Sene Sonu Öğretmenler Kurulu — Davet ve Gündem" (21 madde) şablonları var; gündem metin kutusuna dolu gelir, satır ekleyip çıkarabilirsin. Madde atıfları yalnızca doğrulanmış yönetmelik hükümlerine (md.22, 38, 39, 44, 57, 62) yapıldı; yıl bazlı genelge numaraları bilerek yazılmadı, güncel genelgeyi kendin ekle.` },
+  { cat: "Evrak Deposu", q: "Öğretmenlere verdiğim formlar (ders kesim, sınav kâğıdı teslim, proje, dönem sonu kontrol) nerede?", a: `Evrak Deposu'nda: "Ders Kesim Raporu", "Sınav Kâğıtları ve Cevap Anahtarı Teslim Tutanağı" (md.22/1-a), "Proje Ödevi Seçim ve Takip Formu" (md.22/2) ve "Dönem Sonu Öğretmen İş ve İşlemleri Kontrol Listesi". Tablo satırlarını "Sınıf | Ders | …" biçiminde dikey çubukla ayırarak gir; belge tabloyu kendisi çizer. "Maaş Değişiklik Bildirim Formu" ise aylık bildirim içindir; terfi satırları Personel İşleri'ndeki o ayın terfi kayıtlarından dolar.` },
+  { cat: "Planlama İşleri", q: "Kurul ve komisyonları tek tek mi gireceğim?", a: `Hayır. "Ortaokul kurul/komisyon şablonunu yükle" düğmesi 25 kurul/komisyonu tek seferde ekler (mevcutlar korunur). Sonra her kurulun ayrıntısında beklenen üyelik yapısı (başkan, asil, yedek…) ve eksikler görünür; üyeleri Personel listesinden seçip rolünü aynı adla girersen sayaç dolar. ÖDDK yapısı yönetmelikten (md.57), diğerleri yaygın uygulamadır.` },
+  { cat: "Sınav Kelebek", q: "Gözetmen ataması yapabiliyor muyum?", a: `Evet. Oturma planı oluştururken "Salon / derslik" ve "Gözetmen(ler)" alanlarını doldur; plan çıktısının başlığında salon ve gözetmen adı, altında gözetmen ve okul müdürü imza blokları yer alır. Birden fazla gözetmeni virgülle ayır.` },
   { cat: "Ders Denetimi", q: "Müdür ders denetimi yapabilir mi, dayanağı ne?", a: `Evet. MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği md.39/3 (17/1/2025'te eklendi) okul müdürüne "Bakanlık tarafından kabul edilen eğitim ve öğretim programlarının uygulanmasını denetleme" görevini verir. Form düzeni ve ölçütler mevzuatta yoktur; modüldeki liste okul uygulamasıdır ve düzenlenebilir.` },
   { cat: "Ders Denetimi", q: "Ölçütleri değiştirebilir miyim?", a: `Evet, "Ölçütler" sekmesinden ekleyebilir, düzenleyebilir ya da pasifleştirebilirsin. Pasif ölçüt yeni formlarda görünmez; eski kayıtlardaki puanlar silinmez, o kayıtların formunda görünmeye devam eder.` },
   { cat: "Ek Ders", q: "Katsayıyı neden panel vermiyor?", a: `Memur aylık katsayısı her yıl Ocak ve Temmuz'da Hazine ve Maliye Bakanlığı genelgesiyle değişir; panelde sabit bir sayı tutmak yanlış ödeme riski yaratır. Dönem genelgesindeki katsayıyı çizelge ayarlarına gir; girilmezse tutar sütunu boş kalır ama saat sınırları yine denetlenir. Gösterge rakamları (140/150, %25, %100) 657 sayılı Kanun md.176'dan sabittir.` },
