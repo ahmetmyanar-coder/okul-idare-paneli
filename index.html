@@ -672,7 +672,7 @@ async function maybeShowPendingBadges(school) {
     sb.from("requests").select("id", { count: "exact", head: true }).eq("school_id", school.id).eq("status", "bekliyor"),
     sb.from("monthly_tasks").select("month").eq("school_id", school.id).eq("is_done", false),
     sb.from("maintenance_items").select("last_done_on, period_months").eq("school_id", school.id).eq("is_active", true),
-    sb.from("discipline_cases").select("id, stage, sanction, decision_date, notified_on, ilce_sent_on, eokul_entered, created_at").eq("school_id", school.id).neq("stage", "tamam"),
+    sb.from("discipline_cases").select("id, stage, sanction, decision_date, notified_on, ilce_sent_on, eokul_entered, created_at, appeal_on, appeal_sent_on, tedbir_start, tedbir_end").eq("school_id", school.id).neq("stage", "tamam"),
     sb.from("lesson_observations").select("followup_due").eq("school_id", school.id).eq("followup_done", false).not("followup_due", "is", null),
   ]);
   const denOverdue = (denFollowups || []).filter(o => o.followup_due < toLocalISO(new Date())).length;
@@ -680,7 +680,7 @@ async function maybeShowPendingBadges(school) {
   const aylikPendingThisMonth = (aylikTasks || []).filter(t => t.month === currentMonth).length;
   const bakimToday = toLocalISO(new Date());
   const bakimOverdue = (bakimItems || []).filter(i => bakimStatusOf(i, bakimToday).status === "gecikti").length;
-  const disOverdue = (disCases || []).filter(c => disDeadlines(c, []).some(d => d.state === "gecti")).length;
+  const disOverdue = (disCases || []).filter(c => disDeadlines(c, [], disRegime(school)).some(d => d.state === "gecti")).length;
 
   function addBadge(modName, count) {
     if (!count) return;
@@ -4983,103 +4983,223 @@ async function renderEkdersSheet(profile, school, content, sheetId) {
   document.getElementById("ek-doc-onay").onclick = () => disShowPreview(document.getElementById("ekd-preview"), ekdersOnayHtml(school, liveSheet(), rows), fname("Olur Yazısı"));
 }
 
-/* ============ ÖĞRENCİ DİSİPLİN DOSYASI (ortaokul — Öğrenci Davranışlarını Değerlendirme Kurulu) ============ */
+/* ============ ÖĞRENCİ DİSİPLİN DOSYASI (ortaokul: ÖDDK · lise: Okul Öğrenci Ödül ve Disiplin Kurulu) ============ */
 
 /**
- * Dayanak: MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği (RG 26/7/2014-29072;
- * MEB'in Kasım 2025 tarihli konsolide metninden birebir okunarak doğrulandı):
- *  - Madde 54: yaptırımlar (uyarma / kınama / okul değiştirme) ve uyarma SÜRECİ (sözlü uyarı →
- *    EK-9 öğrenci sözleşmesi → veli görüşmesi → dosya raporla kurula).
- *  - Madde 55: yaptırım gerektiren davranışların listesi (aşağıda DIS_BEHAVIORS).
- *  - Madde 56: takdirde dikkat edilecek hususlar; uyarma/kınama okul müdürü, okul değiştirme ilçe
- *    kurulu onayı; tekrarında üst yaptırım; veli tebliğden itibaren 5 iş günü içinde itiraz;
- *    itiraz sonuçlanana kadar yaptırım uygulanmaz; yaptırımlar e-Okul'a işlenir.
- *  - Madde 57: kurul = müdür yardımcısı (başkan) + gizli oyla seçilen 3 öğretmen + OAB'den 1 veli
- *    (+3 yedek; rehberlik öğretmeni oy hakkı olmadan katılabilir).
- *  - Madde 59: kurul en geç 5 iş günü içinde inceler, kararı en geç 2 iş günü içinde müdürlüğe bildirir.
- *  - Madde 60: ifadeler kurul başkanınca rehberlik öğretmeni (yoksa bir öğretmen) eşliğinde tutanakla
- *    alınır; gelmeyen/ifade vermeyen tutanakla tespit edilir; karar gerekçeli, dayanılan maddeler
- *    yazılı, üyeler imzalı, EK-10'a uygun; müdür uygun bulmazsa 5 iş günü içinde iade eder.
- *  - Madde 61: okul değiştirme dosyası 5 iş günü içinde ilçe kuruluna; dosya içeriği listesi.
- *  - Madde 62: uyarma/kınama müdür onayıyla sonuçlanır ve veliye tebliğ edilir; okul değiştirmede veli
- *    okula çağrılarak tebliğ, gelmezse 7201 sayılı Tebligat Kanunu; dönem sonu toplantısında yaptırım
- *    kaldırılabilir, 5 iş günü içinde e-Okul'dan çıkarılır.
- * Bu modül ortaokul (ve imam-hatip ortaokulu) içindir; Madde 54/1 yaptırımları ortaokul öğrencileri
- * için tanımlar. Lise, ayrı bir yönetmeliğe (Ortaöğretim Kurumları Yönetmeliği, Ödül ve Disiplin
- * Kurulu) tabidir — bu sürümde lise akışı YOK, uydurulmadı; ekranda açıkça belirtilir.
- * EK-9/EK-10 resmî form düzenleri yönetmelik PDF'inin metin katmanında bulunmadığı için birebir
- * kopyalanmadı; karar belgesi Madde 60/3'ün zorunlu unsurlarını içerir ve karar defterine EK-10'a
- * uygun yazılması gerektiği belgede hatırlatılır.
+ * İki rejim, ikisi de birincil kaynaktan birebir okunarak doğrulandı:
+ *
+ * ORTAOKUL — MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği (Kasım 2025 konsolide metin):
+ *  md.54 yaptırımlar ve uyarma süreci (sözlü uyarı → EK-9 sözleşme → veli görüşmesi); md.55 davranış listesi;
+ *  md.56 takdir hususları, uyarma/kınama okul müdürü, okul değiştirme ilçe kurulu onayı, tekrarında üst yaptırım,
+ *  veli tebliğden itibaren 5 iş günü itiraz, itiraz sonuçlanana kadar uygulanmaz, e-Okul; md.57 kurul yapısı;
+ *  md.59 5 iş günü inceleme + 2 iş günü bildirim; md.60 ifadeler tutanakla, gerekçeli karar EK-10, müdür 5 iş günü iade;
+ *  md.61 okul değiştirme dosyası 5 iş günü içinde ilçeye, dosya içeriği; md.62 onay ve tebliğ (7201 Tebligat Kanunu),
+ *  dönem sonu kaldırma 5 iş günü içinde e-Okul'dan çıkarılır.
+ *
+ * LİSE — MEB Ortaöğretim Kurumları Yönetmeliği (Mevzuat Bilgi Sistemi PDF'i, mevzuatNo 18812):
+ *  md.163 cezalar (kınama, okuldan kısa süreli uzaklaştırma, okul değiştirme, örgün eğitim dışına çıkarma) ve onay
+ *  mercileri; md.164 davranış listeleri; md.166 bir öğretim yılında tekrarda bir derece ağır ceza; md.167 şikâyetler yazılı;
+ *  md.168 takdir hususları, alt ceza, zihinsel engel/otizm → ceza uygulanmaz; md.169 onay/itiraz/tebliğ (tebliği izleyen
+ *  5 iş günü itiraz, okul 5 iş günü içinde yetkili kurula gönderir, itiraz kararı kesin, Tebligat Yönetmeliği);
+ *  md.170 davranış puanı indirimi (10/20/40/80); md.171 e-Okul, kaldırma ve 5 iş günü; md.172 uygulama (1–5 gün,
+ *  özürlü devamsızlık, okul değiştirme sonrası dönülemez); md.173 katılamadığı sınavlar; md.174 zarar; md.175 tedbir
+ *  (10 iş günü, 3 iş günü içinde işlem, sevkten 10 iş günü karar); md.185–188 kurul yapısı; md.191 toplantı ve karar;
+ *  md.192 sevk ve 10 iş günü; md.193 ifadeler; md.194 savunma; md.195 vermeyenler; md.196 karar (EK-1); md.197 müdür iadesi.
+ * EK-1/EK-9/EK-10 resmî form düzenleri PDF metin katmanında yok; belgeler zorunlu unsurları içerir, eke uygun yazılması hatırlatılır.
  */
-const DIS_YON = "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği";
 const DIS_TA = 'style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px"';
+const DIS_SANCTION_PILL = { yok: "muted", yaptirimsiz: "good", uyarma: "warn", kinama: "warn", kisa_sureli: "crit", okul_degistirme: "crit", orgun_disi: "crit" };
+const DIS_STAGE_IDS = ["olay", "uyarma_sureci", "ifade", "kurul", "onay", "teblig", "itiraz", "tamam"];
 
-const DIS_STAGES = [
-  { id: "olay", label: "Olay & Tutanak", hint: "Olay tespit tutanağı düzenlenir, ilk tedbirler kaydedilir. Uyarma sürecine (Madde 54/3) ya da doğrudan kurula sevke geçilir." },
-  { id: "uyarma_sureci", label: "Uyarma Süreci", hint: "Madde 54/3: (a) sözlü uyarma, (b) öğrenci ile sözleşme (EK-9), (c) okul yöneticisi + rehberlik öğretmeni katılımıyla veli görüşmesi — veli gelmezse tutanak. Davranış sürerse öğretmen dosyayı raporla kurula verir." },
-  { id: "ifade", label: "İfadeler", hint: "Madde 60/1-2: öğrenci ve tanık ifadeleri kurul başkanı tarafından rehberlik öğretmeni (yoksa bir öğretmen) eşliğinde tutanakla alınır. Çağrıldığı hâlde gelmeyen/ifade vermeyen tutanakla tespit edilir; özürsüz gelinmezse dosyadaki belgelere göre işlem yapılır." },
-  { id: "kurul", label: "Kurul & Karar", hint: "Madde 59/3: kurul en geç 5 iş günü içinde inceler, kararı en geç 2 iş günü içinde müdürlüğe bildirir. Madde 60/3: karar gerekçeli yazılır, takdirde esas alınan hususlar özetlenir, dayanılan maddeler belirtilir, üyeler imzalar (EK-10). Madde 59/2: şikâyetçi, zarar gören veya ikinci dereceye kadar akrabalığı olan üye kurula katılamaz." },
-  { id: "onay", label: "Onay", hint: "Madde 56/6 ve 62/1: uyarma/kınama okul müdürünün onayıyla sonuçlanır. Okul değiştirme: dosya 5 iş günü içinde ilçe öğrenci davranışlarını değerlendirme kuruluna gönderilir (Madde 61/1), onay oradan gelir. Müdür kararı uygun bulmazsa 5 iş günü içinde gerekçesiyle kurula iade eder; ikinci karar nihaidir (Madde 60/4)." },
-  { id: "teblig", label: "Veliye Tebliğ", hint: "Madde 62/1-2: karar veliye tebliğ edilir. Okul değiştirmede veli okula çağrılarak tebliğ edilir; çağrıya uymazsa 7201 sayılı Tebligat Kanunu'na göre bildirilir, tebellüğ belgesi dosyada saklanır." },
-  { id: "itiraz", label: "İtiraz Penceresi", hint: "Madde 56/11-12: veli tebliğden itibaren 5 iş günü içinde okul müdürlüğüne itiraz edebilir. Okul değiştirme itirazı görüşleriyle birlikte 5 iş günü içinde ilçe kuruluna gönderilir; itiraz sonuçlanana kadar yaptırım uygulanmaz." },
-  { id: "tamam", label: "e-Okul & Kapanış", hint: "Madde 56/13: yaptırım e-Okul'daki öğrenci bilgileri bölümüne işlenir. Madde 62/3: davranışı tekrarlamayan ve olumlu davranışları gözlenen öğrencinin yaptırımı dönem sonu toplantısında kaldırılabilir; karar 5 iş günü içinde e-Okul'dan çıkarılır." },
-];
-const DIS_STAGE_IDX = Object.fromEntries(DIS_STAGES.map((s, i) => [s.id, i]));
-const DIS_SANCTIONS = { yok: "Karar bekleniyor", yaptirimsiz: "Yaptırım gerekmedi", uyarma: "Uyarma", kinama: "Kınama", okul_degistirme: "Okul değiştirme" };
-const DIS_SANCTION_PILL = { yok: "muted", yaptirimsiz: "good", uyarma: "warn", kinama: "warn", okul_degistirme: "crit" };
+const DIS_ORTA = {
+  key: "ortaokul",
+  yon: "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği",
+  kurul: "Öğrenci Davranışlarını Değerlendirme Kurulu", kurulKisa: "ÖDDK",
+  ustKurulAdi: { ilce: "İlçe Öğrenci Davranışlarını Değerlendirme Kurulu" },
+  kurulSure: 5, itirazSure: 5, ilceSure: 5, kaldirmaSure: 5,
+  stages: [
+    { id: "olay", label: "Olay & Tutanak", hint: "Olay tespit tutanağı düzenlenir, ilk tedbirler kaydedilir. Uyarma sürecine (Madde 54/3) ya da doğrudan kurula sevke geçilir." },
+    { id: "uyarma_sureci", label: "Uyarma Süreci", hint: "Madde 54/3: (a) sözlü uyarma, (b) öğrenci ile sözleşme (EK-9), (c) okul yöneticisi + rehberlik öğretmeni katılımıyla veli görüşmesi — veli gelmezse tutanak. Davranış sürerse öğretmen dosyayı raporla kurula verir." },
+    { id: "ifade", label: "İfadeler", hint: "Madde 60/1-2: öğrenci ve tanık ifadeleri kurul başkanı tarafından rehberlik öğretmeni (yoksa bir öğretmen) eşliğinde tutanakla alınır. Çağrıldığı hâlde gelmeyen/ifade vermeyen tutanakla tespit edilir; özürsüz gelinmezse dosyadaki belgelere göre işlem yapılır." },
+    { id: "kurul", label: "Kurul & Karar", hint: "Madde 59/3: kurul en geç 5 iş günü içinde inceler, kararı en geç 2 iş günü içinde müdürlüğe bildirir. Madde 60/3: karar gerekçeli yazılır, takdirde esas alınan hususlar özetlenir, dayanılan maddeler belirtilir, üyeler imzalar (EK-10). Madde 59/2: şikâyetçi, zarar gören veya ikinci dereceye kadar akrabalığı olan üye kurula katılamaz." },
+    { id: "onay", label: "Onay", hint: "Madde 56/6 ve 62/1: uyarma/kınama okul müdürünün onayıyla sonuçlanır. Okul değiştirme: dosya 5 iş günü içinde ilçe öğrenci davranışlarını değerlendirme kuruluna gönderilir (Madde 61/1), onay oradan gelir. Müdür kararı uygun bulmazsa 5 iş günü içinde gerekçesiyle kurula iade eder; ikinci karar nihaidir (Madde 60/4)." },
+    { id: "teblig", label: "Veliye Tebliğ", hint: "Madde 62/1-2: karar veliye tebliğ edilir. Okul değiştirmede veli okula çağrılarak tebliğ edilir; çağrıya uymazsa 7201 sayılı Tebligat Kanunu'na göre bildirilir, tebellüğ belgesi dosyada saklanır." },
+    { id: "itiraz", label: "İtiraz Penceresi", hint: "Madde 56/11-12: veli tebliğden itibaren 5 iş günü içinde okul müdürlüğüne itiraz edebilir. Okul değiştirme itirazı görüşleriyle birlikte 5 iş günü içinde ilçe kuruluna gönderilir; itiraz sonuçlanana kadar yaptırım uygulanmaz." },
+    { id: "tamam", label: "e-Okul & Kapanış", hint: "Madde 56/13: yaptırım e-Okul'daki öğrenci bilgileri bölümüne işlenir. Madde 62/3: davranışı tekrarlamayan ve olumlu davranışları gözlenen öğrencinin yaptırımı dönem sonu toplantısında kaldırılabilir; karar 5 iş günü içinde e-Okul'dan çıkarılır." },
+  ],
+  sanctions: { yok: "Karar bekleniyor", yaptirimsiz: "Yaptırım gerekmedi", uyarma: "Uyarma", kinama: "Kınama", okul_degistirme: "Okul değiştirme" },
+  approvalBy: s => s === "okul_degistirme" ? "ilce" : "mudur",
+  appealTo: s => s === "okul_degistirme" ? "ilce" : "mudur",
+  puan: null,
+  behaviorGroups: [["uyarma", "Uyarma gerektiren (Madde 55/a)"], ["kinama", "Kınama gerektiren (Madde 55/b)"], ["okul_degistirme", "Okul değiştirme gerektiren (Madde 55/c)"]],
+  behaviors: [
+    { code: "55/a-1", s: "uyarma", t: "Derse ve diğer etkinliklere vaktinde gelmemek ve geçerli bir neden olmaksızın bu davranışı tekrar etmek" },
+    { code: "55/a-2", s: "uyarma", t: "Özürsüz devamsızlığı belgelendirmemek, alışkanlık hâline getirmek, izin süresini özürsüz uzatmak" },
+    { code: "55/a-3", s: "uyarma", t: "(Yatılı) öğrenci dolabını amacı dışında kullanmak, yasaklı malzeme bulundurmak, dolabı bildirmeden devretmek" },
+    { code: "55/a-4", s: "uyarma", t: "Okula yönetimce yasaklanmış malzeme getirmek ve bunları kullanmak" },
+    { code: "55/a-5", s: "uyarma", t: "Yalan söylemek" },
+    { code: "55/a-6", s: "uyarma", t: "Duvarları, sıraları ve okul çevresini kirletmek" },
+    { code: "55/a-7", s: "uyarma", t: "Görgü kurallarına uymamak" },
+    { code: "55/a-8", s: "uyarma", t: "Kütüphane/laboratuvardan aldığı kitap, araç, gereç ve malzemeyi zamanında teslim etmemek veya geri vermemek" },
+    { code: "55/a-10", s: "uyarma", t: "Kılık ve kıyafetle ilgili kurallara uymamak" },
+    { code: "55/b-1", s: "kinama", t: "Yöneticilere, öğretmenlere, görevlilere ve arkadaşlarına kaba ve saygısız davranmak" },
+    { code: "55/b-2", s: "kinama", t: "Okul kurallarını ve ders ortamını bozmak, ders ve ders dışı etkinliklerin yapılmasını engellemek" },
+    { code: "55/b-3", s: "kinama", t: "Okul yönetimini yanlış bilgilendirmek, yalan söylemeyi alışkanlık hâline getirmek" },
+    { code: "55/b-4", s: "kinama", t: "Okulda bulunduğu hâlde törenlere özürsüz katılmamak, törenlerde uygun olmayan davranışlarda bulunmak" },
+    { code: "55/b-5", s: "kinama", t: "Okulda ya da okul dışında sigara içmek" },
+    { code: "55/b-6", s: "kinama", t: "Resmî evrakta değişiklik yapmak" },
+    { code: "55/b-7", s: "kinama", t: "Okulda kavga etmek" },
+    { code: "55/b-8", s: "kinama", t: "Sınıfta cep telefonu kullanmak" },
+    { code: "55/b-9", s: "kinama", t: "Başkasının malını haberi olmadan almak" },
+    { code: "55/b-10", s: "kinama", t: "Okulun ve öğrencilerin eşya, araç ve gerecine kasıtlı olarak zarar vermek" },
+    { code: "55/b-11", s: "kinama", t: "Kılık ve kıyafetle ilgili kurallara uymamakta ısrar etmek" },
+    { code: "55/b-12", s: "kinama", t: "Okul ile ilgili mekân ve malzemeyi izinsiz ve eğitimin amaçları dışında kullanmak" },
+    { code: "55/b-13", s: "kinama", t: "(Yatılı) izinsiz okulu terk etmek ve gece dışarıda kalmak" },
+    { code: "55/b-14", s: "kinama", t: "Sınavda kopya çekmek veya kopya vermek" },
+    { code: "55/b-15", s: "kinama", t: "Diğer öğrencilerin sosyal/duygusal gelişimini, akran ve arkadaşlık ilişkilerini olumsuz etkileyecek davranışları alışkanlık hâline getirmek" },
+    { code: "55/c-1", s: "okul_degistirme", t: "Anayasanın başlangıcındaki temel ilkelere dayalı millî, demokratik, lâik, sosyal ve hukuk devleti niteliklerine aykırı davranmak veya başkalarını zorlamak" },
+    { code: "55/c-2", s: "okul_degistirme", t: "Sarkıntılık, hakaret, iftira, tehdit ve taciz etmek veya başkalarını bu davranışlara kışkırtmak" },
+    { code: "55/c-3", s: "okul_degistirme", t: "Okula yaralayıcı, öldürücü aletler getirmek ve bunları bulundurmak" },
+    { code: "55/c-4", s: "okul_degistirme", t: "Okul ve çevresinde kasıtlı olarak yangın çıkarmak" },
+    { code: "55/c-5", s: "okul_degistirme", t: "Okul mekân ve malzemesini izinsiz ve eğitim amaçları dışında kullanmayı alışkanlık hâline getirmek" },
+    { code: "55/c-6", s: "okul_degistirme", t: "Okul içinde ve dışında siyasi parti ve sendikaların propagandasını yapmak, bunlarla ilgili eylemlere katılmak" },
+    { code: "55/c-7", s: "okul_degistirme", t: "Herhangi bir kurum ve örgüt adına yardım ve para toplamak" },
+    { code: "55/c-8", s: "okul_degistirme", t: "Kişi veya grupları dil, ırk, cinsiyet, siyasi düşünce ve inançlarına göre ayırmak, kınamak, kötülemek; bu tür eylemlere katılmak" },
+    { code: "55/c-9", s: "okul_degistirme", t: "Başkasının malına zarar vermek, haberi olmadan almayı alışkanlık hâline getirmek" },
+    { code: "55/c-10", s: "okul_degistirme", t: "Okulun bina, eklenti ve donanımlarını, taşınır ve taşınmaz mallarını kasıtlı tahrip etmeyi alışkanlık hâline getirmek" },
+    { code: "55/c-11", s: "okul_degistirme", t: "Okula, derslere, sınavlara girilmesine; derslerin ve sınavların sağlıklı yapılmasına engel olmak" },
+    { code: "55/c-12", s: "okul_degistirme", t: "Yöneticilere, öğretmenlere, personele ve arkadaşlarına şiddet uygulamak, saldırıda bulunmak; bunları düzenlemek veya kışkırtmak" },
+    { code: "55/c-13", s: "okul_degistirme", t: "(Yatılı) gece izinsiz dışarıda kalmayı alışkanlık hâline getirmek" },
+    { code: "55/c-14", s: "okul_degistirme", t: "Okul ile ilişiği olmayan kişileri okulda veya okula ait yerlerde barındırmak" },
+    { code: "55/c-15", s: "okul_degistirme", t: "Kendi yerine başkasının sınava girmesini sağlamak, başkasının yerine sınava girmek" },
+    { code: "55/c-16", s: "okul_degistirme", t: "Alkol veya bağımlılık yapan maddeleri kullanmak veya başkalarını kullanmaya teşvik etmek" },
+    { code: "55/c-18", s: "okul_degistirme", t: "Okul personeli ve öğrencileriyle ilgili dijital araçlar/sosyal medya yoluyla kişilik haklarını ihlal edecek şekilde ses ya da görüntü kaydetmek veya yayımlamak" },
+  ],
+  takdir: [
+    "Davranışın niteliği, önemi ve ne gibi şartlarda gerçekleştiği; o andaki psikolojik durumu ve kişisel özellikleri (Madde 56/1-a)",
+    "Okul içinde ve dışındaki genel durumu (56/1-b)",
+    "Yaş ve cinsiyeti (56/1-c)",
+    "Derslerdeki ilgi ve başarısı (56/1-ç)",
+    "Okuldaki sosyal ve kültürel faaliyetlere katılım ve başarı durumu (56/1-d)",
+    "Aynı eğitim-öğretim yılı içinde daha önce yaptırım uygulanıp uygulanmadığı (56/1-e)",
+  ],
+  refs: { ifade: "Madde 60/1", tanik: "Madde 60/2", vermeme: "Madde 60/2", sevk: "Madde 59/3", karar: "Madde 60/3", ek: "EK-10", onay: "Madde 62/1", teblig: "Madde 62", itiraz: "Madde 56/11", itirazDurdur: "Madde 56/12", ustYazi: "Madde 61", eokul: "Madde 56/13", kaldirma: "Madde 62/3", takdirRef: "Madde 56/1" },
+};
 
-/* Madde 55 — yaptırım gerektiren davranışlar (yönetmelik metninden; mülga bentler atlandı). */
-const DIS_BEHAVIORS = [
-  { code: "55/a-1", s: "uyarma", t: "Derse ve diğer etkinliklere vaktinde gelmemek ve geçerli bir neden olmaksızın bu davranışı tekrar etmek" },
-  { code: "55/a-2", s: "uyarma", t: "Özürsüz devamsızlığı belgelendirmemek, alışkanlık hâline getirmek, izin süresini özürsüz uzatmak" },
-  { code: "55/a-3", s: "uyarma", t: "(Yatılı) öğrenci dolabını amacı dışında kullanmak, yasaklı malzeme bulundurmak, dolabı bildirmeden devretmek" },
-  { code: "55/a-4", s: "uyarma", t: "Okula yönetimce yasaklanmış malzeme getirmek ve bunları kullanmak" },
-  { code: "55/a-5", s: "uyarma", t: "Yalan söylemek" },
-  { code: "55/a-6", s: "uyarma", t: "Duvarları, sıraları ve okul çevresini kirletmek" },
-  { code: "55/a-7", s: "uyarma", t: "Görgü kurallarına uymamak" },
-  { code: "55/a-8", s: "uyarma", t: "Kütüphane/laboratuvardan aldığı kitap, araç, gereç ve malzemeyi zamanında teslim etmemek veya geri vermemek" },
-  { code: "55/a-10", s: "uyarma", t: "Kılık ve kıyafetle ilgili kurallara uymamak" },
-  { code: "55/b-1", s: "kinama", t: "Yöneticilere, öğretmenlere, görevlilere ve arkadaşlarına kaba ve saygısız davranmak" },
-  { code: "55/b-2", s: "kinama", t: "Okul kurallarını ve ders ortamını bozmak, ders ve ders dışı etkinliklerin yapılmasını engellemek" },
-  { code: "55/b-3", s: "kinama", t: "Okul yönetimini yanlış bilgilendirmek, yalan söylemeyi alışkanlık hâline getirmek" },
-  { code: "55/b-4", s: "kinama", t: "Okulda bulunduğu hâlde törenlere özürsüz katılmamak, törenlerde uygun olmayan davranışlarda bulunmak" },
-  { code: "55/b-5", s: "kinama", t: "Okulda ya da okul dışında sigara içmek" },
-  { code: "55/b-6", s: "kinama", t: "Resmî evrakta değişiklik yapmak" },
-  { code: "55/b-7", s: "kinama", t: "Okulda kavga etmek" },
-  { code: "55/b-8", s: "kinama", t: "Sınıfta cep telefonu kullanmak" },
-  { code: "55/b-9", s: "kinama", t: "Başkasının malını haberi olmadan almak" },
-  { code: "55/b-10", s: "kinama", t: "Okulun ve öğrencilerin eşya, araç ve gerecine kasıtlı olarak zarar vermek" },
-  { code: "55/b-11", s: "kinama", t: "Kılık ve kıyafetle ilgili kurallara uymamakta ısrar etmek" },
-  { code: "55/b-12", s: "kinama", t: "Okul ile ilgili mekân ve malzemeyi izinsiz ve eğitimin amaçları dışında kullanmak" },
-  { code: "55/b-13", s: "kinama", t: "(Yatılı) izinsiz okulu terk etmek ve gece dışarıda kalmak" },
-  { code: "55/b-14", s: "kinama", t: "Sınavda kopya çekmek veya kopya vermek" },
-  { code: "55/b-15", s: "kinama", t: "Diğer öğrencilerin sosyal/duygusal gelişimini, akran ve arkadaşlık ilişkilerini olumsuz etkileyecek davranışları alışkanlık hâline getirmek" },
-  { code: "55/c-1", s: "okul_degistirme", t: "Anayasanın başlangıcındaki temel ilkelere dayalı millî, demokratik, lâik, sosyal ve hukuk devleti niteliklerine aykırı davranmak veya başkalarını zorlamak" },
-  { code: "55/c-2", s: "okul_degistirme", t: "Sarkıntılık, hakaret, iftira, tehdit ve taciz etmek veya başkalarını bu davranışlara kışkırtmak" },
-  { code: "55/c-3", s: "okul_degistirme", t: "Okula yaralayıcı, öldürücü aletler getirmek ve bunları bulundurmak" },
-  { code: "55/c-4", s: "okul_degistirme", t: "Okul ve çevresinde kasıtlı olarak yangın çıkarmak" },
-  { code: "55/c-5", s: "okul_degistirme", t: "Okul mekân ve malzemesini izinsiz ve eğitim amaçları dışında kullanmayı alışkanlık hâline getirmek" },
-  { code: "55/c-6", s: "okul_degistirme", t: "Okul içinde ve dışında siyasi parti ve sendikaların propagandasını yapmak, bunlarla ilgili eylemlere katılmak" },
-  { code: "55/c-7", s: "okul_degistirme", t: "Herhangi bir kurum ve örgüt adına yardım ve para toplamak" },
-  { code: "55/c-8", s: "okul_degistirme", t: "Kişi veya grupları dil, ırk, cinsiyet, siyasi düşünce ve inançlarına göre ayırmak, kınamak, kötülemek; bu tür eylemlere katılmak" },
-  { code: "55/c-9", s: "okul_degistirme", t: "Başkasının malına zarar vermek, haberi olmadan almayı alışkanlık hâline getirmek" },
-  { code: "55/c-10", s: "okul_degistirme", t: "Okulun bina, eklenti ve donanımlarını, taşınır ve taşınmaz mallarını kasıtlı tahrip etmeyi alışkanlık hâline getirmek" },
-  { code: "55/c-11", s: "okul_degistirme", t: "Okula, derslere, sınavlara girilmesine; derslerin ve sınavların sağlıklı yapılmasına engel olmak" },
-  { code: "55/c-12", s: "okul_degistirme", t: "Yöneticilere, öğretmenlere, personele ve arkadaşlarına şiddet uygulamak, saldırıda bulunmak; bunları düzenlemek veya kışkırtmak" },
-  { code: "55/c-13", s: "okul_degistirme", t: "(Yatılı) gece izinsiz dışarıda kalmayı alışkanlık hâline getirmek" },
-  { code: "55/c-14", s: "okul_degistirme", t: "Okul ile ilişiği olmayan kişileri okulda veya okula ait yerlerde barındırmak" },
-  { code: "55/c-15", s: "okul_degistirme", t: "Kendi yerine başkasının sınava girmesini sağlamak, başkasının yerine sınava girmek" },
-  { code: "55/c-16", s: "okul_degistirme", t: "Alkol veya bağımlılık yapan maddeleri kullanmak veya başkalarını kullanmaya teşvik etmek" },
-  { code: "55/c-18", s: "okul_degistirme", t: "Okul personeli ve öğrencileriyle ilgili dijital araçlar/sosyal medya yoluyla kişilik haklarını ihlal edecek şekilde ses ya da görüntü kaydetmek veya yayımlamak" },
-];
-const DIS_TAKDIR = [
-  "Davranışın niteliği, önemi ve ne gibi şartlarda gerçekleştiği; o andaki psikolojik durumu ve kişisel özellikleri (Madde 56/1-a)",
-  "Okul içinde ve dışındaki genel durumu (56/1-b)",
-  "Yaş ve cinsiyeti (56/1-c)",
-  "Derslerdeki ilgi ve başarısı (56/1-ç)",
-  "Okuldaki sosyal ve kültürel faaliyetlere katılım ve başarı durumu (56/1-d)",
-  "Aynı eğitim-öğretim yılı içinde daha önce yaptırım uygulanıp uygulanmadığı (56/1-e)",
-];
+const DIS_LISE = {
+  key: "lise",
+  yon: "MEB Ortaöğretim Kurumları Yönetmeliği",
+  kurul: "Okul Öğrenci Ödül ve Disiplin Kurulu", kurulKisa: "ÖDK",
+  ustKurulAdi: { ilce: "İlçe Öğrenci Disiplin Kurulu", il: "İl Öğrenci Disiplin Kurulu", ust: "Öğrenci Üst Disiplin Kurulu" },
+  kurulSure: 10, itirazSure: 5, itirazSevkSure: 5, ilceSure: 5, kaldirmaSure: 5, tedbirBaslama: 3, tedbirMax: 10,
+  stages: [
+    { id: "olay", label: "Olay & Tutanak", hint: "md.167: şikâyetler okul müdürlüğüne yazılı bildirilir; isimsiz/imzasız başvurular kural olarak işleme alınmaz, belgeli ya da önemli iddialarda ihbara işlem yapılır. Gerekirse md.175 tedbir kararı: müdür, MEM'i bilgilendirerek en çok 10 iş günü geçici uzaklaştırabilir; izleyen 3 iş günü içinde disiplin işlemi başlar." },
+    { id: "uyarma_sureci", label: "Rehberlik Raporu & Sevk", hint: "md.192/1: konu önce rehberlik servisine gider; servis, öğrencinin kişilik ve sosyal durumuna ilişkin raporu müdüre verir; müdür yönlendirir ve kurula sevk eder. md.168/5: zihinsel engeli ya da otizmi olan öğrenciye disiplin cezası uygulanmaz, BEP birimi tedbir alır." },
+    { id: "ifade", label: "İfadeler & Savunma", hint: "md.193: öğrenci ve tanıkların yazılı ifadeleri kurul başkanınca alınır; olay sınıfta/toplulukta olduysa çoğunluğun ifadesine başvurulur; dosya kurula sunulur. md.194: savunma yazılı, gerekirse sözlü (tutanağa geçirilir); çağrı yazılı ve imza karşılığı; özürsüz gelinmezse dosyadaki belgelere göre karar. md.195: ifade/savunma vermeyen tutanakla tespit edilir." },
+    { id: "kurul", label: "Kurul & Karar", hint: "md.191: üyelerin salt çoğunluğuyla toplanır, oy çokluğuyla karar; çekimser oy yok; şikâyetçi veya zarar gören üye katılamaz, yerine yedek. md.192/3: kurula gelişten itibaren en geç 10 iş günü içinde karar (müdür onayıyla bir kez uzatılabilir). md.196: karar gerekçeli, EK-1'e uygun, takdir hususları özetlenir, dayanılan maddeler yazılır, tüm üyeler imzalar. md.166: aynı öğretim yılında tekrarda bir derece ağır ceza; md.168/3: rehberlik ve sınıf rehber öğretmeni görüşüyle bir alt ceza verilebilir." },
+    { id: "onay", label: "Onay", hint: "md.169/2: kınama ve kısa süreli uzaklaştırma okul müdürünün; okul değiştirme ilçe öğrenci disiplin kurulunun; örgün eğitim dışına çıkarma il öğrenci disiplin kurulunun onayından sonra uygulanır (dosya MEM aracılığıyla gönderilir, md.169/1). md.197: müdür uygun bulmazsa dosyayı gerekçesiyle kurula iade eder; kurul ısrar ederse müdür görüşünü ekleyip 5 iş günü içinde ilçe kuruluna gönderir." },
+    { id: "teblig", label: "Veliye Tebliğ", hint: "md.169/5: bütün cezalar velilere Tebligat Kanununun Uygulanmasına Dair Yönetmelik hükümlerine uygun bildirilir; tebellüğ belgesi disiplin dosyasında saklanır." },
+    { id: "itiraz", label: "İtiraz", hint: "md.169/3: cezanın tebliğini izleyen 5 iş günü içinde okul müdürü, 18 yaşını tamamlamış öğrenci veya veli okul müdürlüğü kanalıyla itiraz eder; okul, başvuruyu ve görüşünü 5 iş günü içinde yetkili kurula gönderir (kınama/kısa süreli → ilçe; okul değiştirme → il; örgün eğitim dışı → üst kurul). md.169/4: onaylayan kurul itiraza bakamaz; itiraz kararı kesindir. md.172/2-ç: okul değiştirmede itiraz karara bağlanana kadar ceza uygulanmaz." },
+    { id: "tamam", label: "e-Okul & Kapanış", hint: "md.171/1: ceza e-Okul/e-Mesem'e işlenir; md.170: davranış puanından kınama 10, kısa süreli uzaklaştırma 20, okul değiştirme 40, örgün eğitim dışı 80 puan indirilir. md.172: kısa süreli uzaklaştırmada öğrenci 1–5 gün etkinliklere katılamaz, süre özürlü devamsızlık sayılır; md.173: katılamadığı sınavlar okul yönetimince belirlenen tarihte yapılır. md.171/2: iyi hâli görülen öğrencinin cezası sonraki dönemde ÖDK'da değerlendirilip öğretmenler kuruluna sunulur; kaldırılan ceza 5 iş günü içinde e-Okul'dan çıkarılır." },
+  ],
+  sanctions: { yok: "Karar bekleniyor", yaptirimsiz: "Ceza gerekmedi", kinama: "Kınama", kisa_sureli: "Okuldan kısa süreli uzaklaştırma", okul_degistirme: "Okul değiştirme", orgun_disi: "Örgün eğitim dışına çıkarma" },
+  approvalBy: s => ({ kinama: "mudur", kisa_sureli: "mudur", okul_degistirme: "ilce", orgun_disi: "il" })[s] || "mudur",
+  appealTo: s => ({ kinama: "ilce", kisa_sureli: "ilce", okul_degistirme: "il", orgun_disi: "ust" })[s] || "ilce",
+  puan: { kinama: 10, kisa_sureli: 20, okul_degistirme: 40, orgun_disi: 80 },
+  behaviorGroups: [["kinama", "Kınama gerektiren (md.164/1)"], ["kisa_sureli", "Okuldan 1–5 gün kısa süreli uzaklaştırma gerektiren (md.164/2)"], ["okul_degistirme", "Okul değiştirme gerektiren (md.164/3)"], ["orgun_disi", "Örgün eğitim dışına çıkarma gerektiren (md.164/4)"]],
+  behaviors: [
+    { code: "164/1-a", s: "kinama", t: "Okulu, okul eşyasını ve çevresini kirletmek" },
+    { code: "164/1-b", s: "kinama", t: "Okul yönetimi veya öğretmenler tarafından verilen eğitim ve öğretime ilişkin görevleri yapmamak" },
+    { code: "164/1-c", s: "kinama", t: "Kılık-kıyafete ilişkin mevzuat hükümlerine uymamak" },
+    { code: "164/1-ç", s: "kinama", t: "Tütün, tütün mamulleri veya tütün mamulünü taklit eden ürünleri bulundurmak veya kullanmak" },
+    { code: "164/1-d", s: "kinama", t: "Başkasına ait eşyayı izinsiz almak veya kullanmak" },
+    { code: "164/1-e", s: "kinama", t: "Yalan söylemek" },
+    { code: "164/1-f", s: "kinama", t: "Okula geldiği hâlde özürsüz eğitim-öğretim faaliyetlerine, törenlere, sosyal etkinliklere ve pansiyon etüdüne katılmamak, geç katılmak veya erken ayrılmak" },
+    { code: "164/1-g", s: "kinama", t: "Kütüphane, atölye, laboratuvar, pansiyon veya diğer bölümlerden aldığı kitap, araç-gereç ve malzemeyi eksik vermek veya kötü kullanmak" },
+    { code: "164/1-ğ", s: "kinama", t: "Okul yöneticilerine, öğretmenlerine, çalışanlarına ve arkadaşlarına kaba ve saygısız davranmak" },
+    { code: "164/1-h", s: "kinama", t: "Dersin ve ders dışı eğitim faaliyetlerinin akışını ve düzenini bozacak davranışlarda bulunmak" },
+    { code: "164/1-ı", s: "kinama", t: "Kopya çekmek veya çekilmesine yardımcı olmak" },
+    { code: "164/1-i", s: "kinama", t: "(Yatılı) okul yönetimince belirlenen pansiyon kurallarına uymamak" },
+    { code: "164/1-j", s: "kinama", t: "Müstehcen veya yasaklanmış araç, gereç ve dokümanları okula sokmak veya yanında bulundurmak" },
+    { code: "164/1-k", s: "kinama", t: "Kumar oynamaya yarayan araç-gereç ve doküman bulundurmak" },
+    { code: "164/1-l", s: "kinama", t: "Bilişim araçlarını öğretmenler kurulunca belirlenen usul ve esaslara aykırı şekilde kullanmak" },
+    { code: "164/1-m", s: "kinama", t: "Alınan sağlık ve güvenlik tedbirlerine uymamak" },
+    { code: "164/1-n", s: "kinama", t: "Ders saatleri içinde öğretmenin bilgisi ve kontrolü dışında bilişim araçlarını açık tutarak dersin akışını bozmak" },
+    { code: "164/1-o", s: "kinama", t: "Dersler arası ve öğle arası dinlenme sürelerinde okul yönetiminin izni dışında bilişim araçlarını yanında bulundurmak ve kullanmak" },
+    { code: "164/1-ö", s: "kinama", t: "Okula, okul yönetiminin izni dışında okulla ilgisi olmayan kişileri getirmek" },
+    { code: "164/2-a", s: "kisa_sureli", t: "Yöneticilere, öğretmenlere, çalışanlara, öğrencilere ve eğitim ortamındaki diğer kişilere sözle, davranışla veya sosyal medya üzerinden hakaret etmek, hakareti paylaşmak, kışkırtmak, tehdit etmek" },
+    { code: "164/2-b", s: "kisa_sureli", t: "Pansiyonun düzenini bozmak, pansiyonu terk etmek, gece izinsiz dışarıda kalmak" },
+    { code: "164/2-c", s: "kisa_sureli", t: "Kişileri veya grupları dil, ırk, cinsiyet, siyasi düşünce, felsefi ve dinî inançlarına göre ayırmayı, kınamayı, kötülemeyi amaçlayan davranışlarda bulunmak veya ayrımcılığı körükleyici semboller taşımak" },
+    { code: "164/2-ç", s: "kisa_sureli", t: "Okul binası ve eklentilerinde izinsiz gösteri, etkinlik ve toplantı düzenlemek veya bunlara katılmak" },
+    { code: "164/2-d", s: "kisa_sureli", t: "Her türlü ortamda kumar oynamak veya oynatmak" },
+    { code: "164/2-e", s: "kisa_sureli", t: "Okul kurallarının uygulanmasını ve öğrencilere verilen görevlerin yapılmasını engellemek" },
+    { code: "164/2-g", s: "kisa_sureli", t: "Siyasi, ideolojik, müstehcen veya yasaklanmış araç, gereç, doküman ve benzerlerini paylaşmak, dağıtmak, asmak, yazmak; bu amaçla bilişim araçlarını ve okul araç-gerecini kullanmak" },
+    { code: "164/2-ğ", s: "kisa_sureli", t: "Bilişim araçları veya sosyal medya yoluyla eğitim ve öğretim faaliyetlerine, kişilere ve kurumlara zarar vermek" },
+    { code: "164/2-h", s: "kisa_sureli", t: "Okula geldiği hâlde özürsüz faaliyetlere, törenlere ve sosyal etkinliklere katılmamayı, geç katılmayı veya erken ayrılmayı alışkanlık hâline getirmek" },
+    { code: "164/2-ı", s: "kisa_sureli", t: "Kavga etmek, başkalarına fiilî şiddet uygulamak" },
+    { code: "164/2-i", s: "kisa_sureli", t: "Okul binası, eklenti ve donanımlarına, arkadaşlarının araç-gerecine siyasi, ideolojik veya müstehcen amaçlı yazılar yazmak, resim veya semboller çizmek" },
+    { code: "164/2-j", s: "kisa_sureli", t: "Toplu kopya çekmek veya çekilmesine yardımcı olmak" },
+    { code: "164/2-k", s: "kisa_sureli", t: "Sarhoşluk veren zararlı maddeleri bulundurmak veya kullanmak" },
+    { code: "164/2-l", s: "kisa_sureli", t: "Millî ve manevi değerlere, genel ahlak ve adaba uygun olmayan tutum ve davranışlarda bulunmak" },
+    { code: "164/2-m", s: "kisa_sureli", t: "Okul personelinin taşınır veya taşınmaz malına zarar vermek ve/veya tahrip etmek" },
+    { code: "164/2-n", s: "kisa_sureli", t: "Yöneticilerin, öğretmenlerin, çalışanların ve diğer öğrencilerin izinsiz görüntülerini çekmek, kaydetmek, paylaşmak" },
+    { code: "164/2-o", s: "kisa_sureli", t: "Okul, pansiyon ve eklentilerini belirlenen kurallar dışında kullanmak, pansiyonda izinsiz kalmak" },
+    { code: "164/2-ö", s: "kisa_sureli", t: "Tekrarlayan davranışlarıyla başka bir öğrencinin sosyal veya duygusal gelişimini olumsuz etkileyecek şekilde akran zorbalığı yapmak" },
+    { code: "164/3-a", s: "okul_degistirme", t: "Türk Bayrağına, ülkeyi, milleti ve devleti temsil eden sembollere saygısızlık etmek" },
+    { code: "164/3-b", s: "okul_degistirme", t: "Millî ve manevi değerleri söz, yazı, resim veya başka bir şekilde aşağılamak; bu değerlere küfür ve hakaret etmek" },
+    { code: "164/3-c", s: "okul_degistirme", t: "Okul çalışanlarının görevlerini yapmalarına engel olmak" },
+    { code: "164/3-ç", s: "okul_degistirme", t: "Hırsızlık yapmak, yaptırmak ve yapılmasına yardımcı olmak" },
+    { code: "164/3-d", s: "okul_degistirme", t: "Okulla ilişkisi olmayan kişileri okulda veya eklentilerinde barındırmak" },
+    { code: "164/3-e", s: "okul_degistirme", t: "Resmî belgelerde değişiklik yapmak; sahte belge düzenlemek, kullanmak ve başkalarını yararlandırmak" },
+    { code: "164/3-f", s: "okul_degistirme", t: "Okul sınırları içinde herhangi bir yeri izinsiz olarak eğitim ve öğretim amaçları dışında kullanmak veya kullanılmasına yardımcı olmak" },
+    { code: "164/3-g", s: "okul_degistirme", t: "Okula ait taşınır veya taşınmaz mallara zarar vermek" },
+    { code: "164/3-ğ", s: "okul_degistirme", t: "Ders, sınav, uygulama ve diğer faaliyetlerin yapılmasını engellemek veya arkadaşlarını bu eylemlere kışkırtmak" },
+    { code: "164/3-h", s: "okul_degistirme", t: "Eğitim ortamına yaralayıcı, öldürücü silah ve patlayıcı madde ile her türlü aletleri getirmek veya bulundurmak" },
+    { code: "164/3-ı", s: "okul_degistirme", t: "Zor kullanarak veya tehditle kopya çekmek veya çekilmesini sağlamak" },
+    { code: "164/3-i", s: "okul_degistirme", t: "Bağımlılık yapan zararlı maddeleri bulundurmak veya kullanmak" },
+    { code: "164/3-j", s: "okul_degistirme", t: "Yerine başkasını sınava sokmak, başkasının yerine sınava girmek" },
+    { code: "164/3-k", s: "okul_degistirme", t: "Eğitim ortamında siyasi ve ideolojik amaçlı eylem düzenlemek, kışkırtmak, düzenlenmiş eylemlere katılmak" },
+    { code: "164/3-l", s: "okul_degistirme", t: "Siyasi partilere, yan kuruluşlarına, derneklere, sendikalara üye olmak, üye kaydetmek, para toplamak ve bağışa zorlamak" },
+    { code: "164/3-m", s: "okul_degistirme", t: "Bilişim araçları veya sosyal medya yoluyla eğitim ve öğretimi engellemek, kişilere ağır derecede maddi ve manevi zarar vermek" },
+    { code: "164/3-n", s: "okul_degistirme", t: "İzin almadan okulla ilgili bilgi vermek, basın toplantısı yapmak, bildiri yayınlamak/dağıtmak, faaliyet tertip etmek" },
+    { code: "164/3-o", s: "okul_degistirme", t: "Bir kimseyi ya da grubu suç sayılan bir eylemi yapmaya, katılmaya, yalan bildirimde bulunmaya veya suçu yüklenmeye zorlamak" },
+    { code: "164/3-ö", s: "okul_degistirme", t: "Zor kullanarak başkasına ait mal ve eşyaya el koymak, başkalarını bu işleri yapmaya zorlamak" },
+    { code: "164/3-p", s: "okul_degistirme", t: "Genel ahlak ve adaba uygun olmayan tutum ve davranışları alışkanlık hâline getirmek" },
+    { code: "164/3-r", s: "okul_degistirme", t: "Kişilere, arkadaşlarına ve okul çalışanlarına söz ve davranışlarla sarkıntılık yapmak, iftira etmek, kışkırtmak veya zorlamak; bu fiilleri sosyal medyada paylaşmak, yaymak" },
+    { code: "164/3-s", s: "okul_degistirme", t: "Pansiyon düzenini bozmayı, pansiyonu terk etmeyi ve gece izinsiz dışarıda kalmayı alışkanlık hâline getirmek" },
+    { code: "164/3-ş", s: "okul_degistirme", t: "Kesici, delici, yaralayıcı ve benzeri aletlerle kendine zarar vermek" },
+    { code: "164/4-a", s: "orgun_disi", t: "Türk Bayrağına, ülkeyi, milleti ve devleti temsil eden sembollere hakaret etmek" },
+    { code: "164/4-b", s: "orgun_disi", t: "Devletin ülkesi ve milletiyle bölünmez bütünlüğüne ve Anayasanın temel ilkelerine aykırı miting, forum, direniş, yürüyüş, boykot, işgal gibi eylemler düzenlemek, kışkırtmak, etkin katılmak veya zorlamak" },
+    { code: "164/4-c", s: "orgun_disi", t: "Dil, ırk, cinsiyet, siyasi düşünce, felsefi ve dinî inanç temelli bölücü ve yıkıcı toplu eylemler düzenlemek, katılmak, organizasyonunda yer almak" },
+    { code: "164/4-ç", s: "orgun_disi", t: "Kurul ve komisyonların çalışmasını tehdit veya zor kullanarak engellemek" },
+    { code: "164/4-d", s: "orgun_disi", t: "Bağımlılık yapan zararlı maddelerin ticaretini yapmak" },
+    { code: "164/4-e", s: "orgun_disi", t: "Okul ve eklentilerinde güvenlik güçlerince aranan kişileri saklamak ve barındırmak" },
+    { code: "164/4-f", s: "orgun_disi", t: "Eğitim ve öğretim ortamını işgal etmek" },
+    { code: "164/4-g", s: "orgun_disi", t: "Okul içinde ve dışında tek veya toplu hâlde okul yönetici, öğretmen ve personeline saldırıda bulunmak, bu hareketleri düzenlemek veya kışkırtmak" },
+    { code: "164/4-ğ", s: "orgun_disi", t: "Okul çalışanlarının görevlerini yapmalarına engel olmak için fiilî saldırıda bulunmak ve başkalarını kışkırtmak" },
+    { code: "164/4-h", s: "orgun_disi", t: "Okulun taşınır veya taşınmaz mallarını kasıtlı olarak tahrip etmek" },
+    { code: "164/4-ı", s: "orgun_disi", t: "Yaralayıcı, öldürücü alet, silah, patlayıcı madde veya fizikî güç kullanarak yaralamaya teşebbüs etmek, yaralamak, öldürmek, maddi veya manevi zarara yol açmak" },
+    { code: "164/4-i", s: "orgun_disi", t: "Eziyet etmek, işkence yapmak veya yaptırmak, cinsel istismar ve kanunların suç saydığı fiilleri işlemek" },
+    { code: "164/4-j", s: "orgun_disi", t: "Çete kurmak, çetede yer almak, yol kesmek, adam kaçırmak, kapkaç ve gasp yapmak, fidye ve haraç almak" },
+    { code: "164/4-k", s: "orgun_disi", t: "Yasa dışı örgütlerin propagandasını yapmak, eylem düzenlemek, katılmak, üye olmak, üye kaydetmek, para toplamak ve bağışa zorlamak" },
+    { code: "164/4-l", s: "orgun_disi", t: "Bilişim araçları veya sosyal medya yoluyla bölücü, yıkıcı, ahlak dışı ve şiddeti özendiren içerikler oluşturmak, çoğaltmak, yaymak ve ticaretini yapmak" },
+  ],
+  takdir: [
+    "Öğrencinin 18 yaşına kadar çocuk olduğu (md.168/1-a)",
+    "Öğrencinin üstün yararı (168/1-b)",
+    "Gizlilik ilkesi (168/1-c)",
+    "Sınıf rehber öğretmeni, gerektiğinde diğer öğretmenler ve öğrenci velisinin görüşleri (168/1-ç)",
+    "Öğrencinin ailesi ve çevresiyle ilgili bilgiler (168/1-d)",
+    "Öğrencinin kişisel özellikleri ve psikolojik durumu (168/1-e)",
+    "Fiil ve davranışın hangi şartlar altında yapıldığı, öğrenciyi tahrik eden unsurlar (168/1-f)",
+    "Öğrencinin yaşı ve cinsiyeti (168/1-g)",
+    "Öğrencinin daha önce ceza alıp almadığı (168/1-h)",
+    "Yönetici ve öğretmenlere yönelik suçlarda öğretmenlik mesleğinin saygınlığı (168/1-ı)",
+  ],
+  refs: { ifade: "md.193", tanik: "md.193", vermeme: "md.195", sevk: "md.192", karar: "md.196", ek: "EK-1", onay: "md.169/2", teblig: "md.169/5", itiraz: "md.169/3", itirazDurdur: "md.172/2-ç", ustYazi: "md.169", eokul: "md.171/1", kaldirma: "md.171/2", takdirRef: "md.168/1" },
+};
+function disRegime(school) { return school && school.okul_turu === "lise" ? DIS_LISE : DIS_ORTA; }
+const DIS_STAGE_IDX = Object.fromEntries(DIS_STAGE_IDS.map((s, i) => [s, i]));
 
 /* İş günü: Cumartesi/Pazar hariç (resmî tatiller modellenmedi — ekranda belirtilir). */
 function addBusinessDays(iso, n) {
@@ -5089,41 +5209,62 @@ function addBusinessDays(iso, n) {
   return toLocalISO(d);
 }
 function disCaseNo(c) { return `${c.case_year}/${String(c.case_seq).padStart(3, "0")}`; }
+function disSanctionLabel(R, s) { return R.sanctions[s] || DIS_ORTA.sanctions[s] || DIS_LISE.sanctions[s] || s; }
+function disUstKurul(R, key) { return R.ustKurulAdi[key] || R.ustKurulAdi.ilce; }
+function disApprovalTarget(R, sanction) { const t = R.approvalBy(sanction); return t === "mudur" ? "okul müdürlüğü" : disUstKurul(R, t); }
 
 /* Yönetmelikteki süreli adımlar → her biri için son tarih ve durum. */
-function disDeadlines(c, docs) {
+function disDeadlines(c, docs, R) {
+  R = R || DIS_ORTA;
   const today = toLocalISO(new Date());
   const out = [];
   const state = (due, done) => done ? "tamam" : (due < today ? "gecti" : (addBusinessDays(today, 2) >= due ? "yaklasiyor" : "uygun"));
   const sevk = (docs || []).find(d => d.doc_type === "kurula_sevk");
   const karar = (docs || []).find(d => d.doc_type === "kurul_karari");
-  if (sevk) {
-    const due = addBusinessDays(sevk.doc_date || sevk.created_at.slice(0, 10), 5);
-    out.push({ key: "kurul", label: "Kurulun inceleme süresi (Madde 59/3: 5 iş günü)", due, state: state(due, !!karar || !!c.decision_date) });
+  const decided = !!karar || !!c.decision_date;
+  if (R.key === "lise" && c.tedbir_start) {
+    const due = addBusinessDays(c.tedbir_start, R.tedbirBaslama);
+    out.push({ key: "tedbir", label: `Tedbir kararını izleyen ${R.tedbirBaslama} iş günü içinde disiplin işlemine başlanması (md.175/2)`, due, state: state(due, !!sevk || decided) });
+    const tEnd = addBusinessDays(c.tedbir_start, R.tedbirMax);
+    if (!c.tedbir_end || c.tedbir_end > tEnd) out.push({ key: "tedbir_max", label: `Tedbir süresi en çok ${R.tedbirMax} iş günü (md.175/1); MEM onayıyla iki kez uzatılabilir`, due: tEnd, state: state(tEnd, !!c.tedbir_end && c.tedbir_end <= tEnd) });
   }
-  if (c.sanction === "okul_degistirme" && c.decision_date) {
-    const due = addBusinessDays(c.decision_date, 5);
-    out.push({ key: "ilce", label: "Dosyanın ilçe kuruluna gönderilmesi (Madde 61/1: 5 iş günü)", due, state: state(due, !!c.ilce_sent_on) });
+  if (sevk) {
+    const due = addBusinessDays(sevk.doc_date || sevk.created_at.slice(0, 10), R.kurulSure);
+    out.push({ key: "kurul", label: R.key === "lise" ? `Kurulun karar süresi (md.192/3: kurula gelişten itibaren ${R.kurulSure} iş günü)` : `Kurulun inceleme süresi (Madde 59/3: ${R.kurulSure} iş günü)`, due, state: state(due, decided) });
+  }
+  const appr = R.approvalBy(c.sanction);
+  if (appr !== "mudur" && c.decision_date && R.key === "ortaokul") {
+    const due = addBusinessDays(c.decision_date, R.ilceSure);
+    out.push({ key: "ilce", label: `Dosyanın ilçe kuruluna gönderilmesi (Madde 61/1: ${R.ilceSure} iş günü)`, due, state: state(due, !!c.ilce_sent_on) });
   }
   if (c.notified_on) {
-    const due = addBusinessDays(c.notified_on, 5);
-    const closed = !!c.appeal_on || due < today;
-    out.push({ key: "itiraz", label: "Velinin itiraz süresi (Madde 56/11: tebliğden itibaren 5 iş günü)", due, state: c.appeal_on ? "itiraz" : (due < today ? "kapandi" : "acik") });
+    const due = addBusinessDays(c.notified_on, R.itirazSure);
+    out.push({ key: "itiraz", label: `Velinin itiraz süresi (${R.refs.itiraz}: tebliğden itibaren ${R.itirazSure} iş günü)`, due, state: c.appeal_on ? "itiraz" : (due < today ? "kapandi" : "acik") });
+    if (R.key === "lise" && c.appeal_on) {
+      const due2 = addBusinessDays(c.appeal_on, R.itirazSevkSure);
+      out.push({ key: "itiraz_sevk", label: `İtirazın görüşlerle birlikte ${disUstKurul(R, R.appealTo(c.sanction))}'na gönderilmesi (md.169/3: ${R.itirazSevkSure} iş günü)`, due: due2, state: state(due2, !!c.appeal_sent_on) });
+    }
     if (!c.appeal_on && due < today && c.sanction !== "yok" && c.sanction !== "yaptirimsiz" && !c.eokul_entered && c.stage !== "tamam") {
-      out.push({ key: "eokul", label: "İtiraz süresi doldu — yaptırımın e-Okul'a işlenmesi (Madde 56/13)", due, state: "gecti" });
+      out.push({ key: "eokul", label: `İtiraz süresi doldu — yaptırımın e-Okul'a işlenmesi (${R.refs.eokul})`, due, state: "gecti" });
     }
   }
   return out;
 }
 
-/* Belge şablonları — alanlar dosyadan önceden dolar, belge kaydedilir ve yeniden yazdırılabilir. */
-const DIS_DOCS = [
-  { key: "olay_tutanagi", stage: "olay", title: "Olay Tespit Tutanağı",
+/* Belge şablonları — rejime göre. Alanlar dosyadan önceden dolar, belge kaydedilir ve yeniden yazdırılabilir. */
+function disDocsFor(R) {
+  const L = R.key === "lise";
+  const ogrTxt = c => `${c.student_name}${c.class_label ? ` (${c.class_label}${c.student_no ? ` / No: ${c.student_no}` : ""})` : ""}`;
+  const sig = (a, b, c3) => `<table style="width:100%;margin-top:36px"><tr>${[a, b, c3].filter(Boolean).map(x => `<td style="text-align:center;width:${Math.floor(100 / [a, b, c3].filter(Boolean).length)}%">${x}</td>`).join("")}</tr></table>`;
+  const blank = "………………";
+  const docs = [];
+
+  docs.push({ key: "olay_tutanagi", stage: "olay", title: "Olay Tespit Tutanağı",
     fields: c => [
       { id: "tarih", label: "Tutanak tarihi", type: "date", v: c.incident_date || toLocalISO(new Date()) },
       { id: "saat", label: "Olay saati", type: "text", v: c.incident_time || "" },
       { id: "yer", label: "Olay yeri", type: "text", v: c.incident_place || "" },
-      { id: "ogrenciler", label: "İlgili öğrenci(ler)", type: "text", v: `${c.student_name}${c.class_label ? ` (${c.class_label}${c.student_no ? ` / No: ${c.student_no}` : ""})` : ""}` },
+      { id: "ogrenciler", label: "İlgili öğrenci(ler)", type: "text", v: ogrTxt(c) },
       { id: "anlatim", label: "Olayın kronolojik ve somut anlatımı", type: "textarea", v: c.description || c.summary || "" },
       { id: "tedbir", label: "İlk alınan tedbirler / yapılan işlemler", type: "textarea", v: c.first_measures || "" },
       { id: "duzenleyen", label: "Tutanağı düzenleyen(ler)", type: "text", v: c.reported_by || "" },
@@ -5141,12 +5282,10 @@ const DIS_DOCS = [
       <p style="text-align:justify;white-space:pre-wrap">${esc(d.anlatim)}</p>
       <p><strong>İLK ALINAN TEDBİRLER / YAPILAN İŞLEMLER</strong></p>
       <p style="text-align:justify;white-space:pre-wrap">${esc(d.tedbir)}</p>
-      <p style="text-align:justify;text-indent:1.25cm;margin-top:10px">İş bu tutanak, olayın tespiti amacıyla tarafımızca düzenlenerek imza altına alınmıştır.</p>
-      <table style="width:100%;margin-top:40px"><tr>
-        <td style="width:50%;text-align:center"><strong>Düzenleyen(ler)</strong><br><br><br>${esc(d.duzenleyen)}</td>
-        <td style="width:50%;text-align:center"><strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü</td>
-      </tr></table>` },
-  { key: "veli_gorusme", stage: "uyarma_sureci", title: "Veli Görüşme / Bilgilendirme Tutanağı (Madde 54/3-c)",
+      <p style="text-align:justify;text-indent:1.25cm;margin-top:10px">İş bu tutanak, olayın tespiti amacıyla tarafımızca düzenlenerek imza altına alınmıştır.${L ? " (Şikâyetler okul müdürlüğüne yazılı olarak bildirilir — md.167.)" : ""}</p>
+      ${sig(`<strong>Düzenleyen(ler)</strong><br><br><br>${esc(d.duzenleyen)}`, `<strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü`)}` });
+
+  if (!L) docs.push({ key: "veli_gorusme", stage: "uyarma_sureci", title: "Veli Görüşme / Bilgilendirme Tutanağı (Madde 54/3-c)",
     fields: c => [
       { id: "tarih", label: "Görüşme tarihi", type: "date", v: toLocalISO(new Date()) },
       { id: "veli", label: "Veli adı", type: "text", v: c.veli_adi || "" },
@@ -5160,20 +5299,65 @@ const DIS_DOCS = [
       <p><strong>Öğrenci:</strong> ${esc(c.student_name)} ${c.class_label ? `(${esc(c.class_label)})` : ""} &nbsp; <strong>Dosya No:</strong> ${esc(disCaseNo(c))}</p>
       <p><strong>Veli:</strong> ${esc(d.veli)} &nbsp; <strong>Tarih:</strong> ${fmtDate(d.tarih)} &nbsp; <strong>Katılım:</strong> ${esc(d.geldi)}</p>
       <p><strong>Görüşmeye katılanlar (okul yönetimi / rehberlik):</strong> ${esc(d.katilanlar)}</p>
-      <p style="text-align:justify;text-indent:1.25cm">${DIS_YON} Madde 54/3-c uyarınca öğrenci velisi okula davet edilmiş; öğrencinin olumsuz davranışları ve bu davranışların sürmesi hâlinde uygulanabilecek yaptırımlar veliye bildirilmiştir:</p>
+      <p style="text-align:justify;text-indent:1.25cm">${R.yon} Madde 54/3-c uyarınca öğrenci velisi okula davet edilmiş; öğrencinin olumsuz davranışları ve bu davranışların sürmesi hâlinde uygulanabilecek yaptırımlar veliye bildirilmiştir:</p>
       <p style="text-align:justify;white-space:pre-wrap">${esc(d.icerik)}</p>
       ${/^h/i.test(d.geldi || "") ? `<p style="text-align:justify;text-indent:1.25cm">Veli, davet edildiği hâlde görüşmeye katılmamıştır; bu durum iş bu tutanakla tespit edilmiştir.</p>` : ""}
-      <table style="width:100%;margin-top:40px"><tr>
-        <td style="width:33%;text-align:center"><strong>Veli</strong><br><br><br>${esc(d.veli)}</td>
-        <td style="width:33%;text-align:center"><strong>Rehberlik Öğretmeni / Öğretmen</strong><br><br><br>………………</td>
-        <td style="width:33%;text-align:center"><strong>Okul Yöneticisi</strong><br><br><br>………………</td>
-      </tr></table>` },
-  { key: "ogrenci_ifade", stage: "ifade", title: "Öğrenci İfade Tutanağı (Madde 60/1)",
+      ${sig(`<strong>Veli</strong><br><br><br>${esc(d.veli)}`, `<strong>Rehberlik Öğretmeni / Öğretmen</strong><br><br><br>${blank}`, `<strong>Okul Yöneticisi</strong><br><br><br>${blank}`)}` });
+
+  if (L) docs.push({ key: "tedbir_karari", stage: "olay", title: "Tedbir Kararı — Geçici Uzaklaştırma (md.175)",
+    fields: c => [
+      { id: "tarih", label: "Karar tarihi", type: "date", v: c.tedbir_start || toLocalISO(new Date()) },
+      { id: "baslangic", label: "Uzaklaştırma başlangıcı", type: "date", v: c.tedbir_start || toLocalISO(new Date()) },
+      { id: "bitis", label: "Uzaklaştırma bitişi (en çok 10 iş günü)", type: "date", v: c.tedbir_end || addBusinessDays(c.tedbir_start || toLocalISO(new Date()), 5) },
+      { id: "gerekce", label: "Gerekçe (acele tedbiri gerektiren durum)", type: "textarea", v: c.summary || "" },
+      { id: "mem", label: "Millî eğitim müdürlüğü bilgilendirmesi (tarih/sayı)", type: "text", v: "" },
+    ],
+    meta: d => ({ konu: "Öğrenci hakkında tedbir kararı (md.175)", tarih: d.tarih }),
+    render: (d, c, s) => `
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">TEDBİR KARARI</h3>
+      <p><strong>Dosya No:</strong> ${esc(disCaseNo(c))} &nbsp; <strong>Öğrenci:</strong> ${esc(ogrTxt(c))}</p>
+      <p style="text-align:justify;text-indent:1.25cm">${R.yon} md.175/1 uyarınca, ${fmtDate(c.incident_date)} tarihli olay nedeniyle adı geçen öğrencinin, kovuşturmanın tamamlanması ve sonucu beklenmeksizin acele bir tedbir olarak <strong>${fmtDate(d.baslangic)} – ${fmtDate(d.bitis)}</strong> tarihleri arasında okuldan geçici olarak uzaklaştırılmasına karar verilmiştir. Öğrenci bu sürede ders, sınav ve diğer etkinliklere alınmaz; süre devamsızlıktan sayılmaz.</p>
+      <p><strong>Gerekçe:</strong></p><p style="text-align:justify;white-space:pre-wrap">${esc(d.gerekce)}</p>
+      <p style="text-align:justify;text-indent:1.25cm">Millî eğitim müdürlüğü bilgilendirilmiştir${d.mem ? ` (${esc(d.mem)})` : ""}. Tedbir kararının alınmasını izleyen en geç üç iş günü içinde disiplin işlemine başlanır; kurula sevkten itibaren en geç on iş günü içinde durum karara bağlanır, aksi hâlde tedbir kendiliğinden kalkmış sayılır (md.175/2).</p>
+      ${sig(`<strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü<br>${fmtDate(d.tarih)}`)}` });
+
+  docs.push({ key: "rehberlik_gorusu", stage: L ? "uyarma_sureci" : "ifade", title: L ? "Rehberlik Servisi Raporu — Kişilik ve Sosyal Durum (md.192/1)" : "Rehberlik Servisi Görüşü",
+    fields: c => [
+      { id: "tarih", label: "Tarih", type: "date", v: toLocalISO(new Date()) },
+      { id: "hazirlayan", label: "Raporu hazırlayan rehberlik öğretmeni", type: "text", v: "" },
+      { id: "uyum", label: "Öğrencinin genel okul uyumu ve kişilik özellikleri", type: "textarea", v: "" },
+      { id: "ders", label: "Derslere ilgi ve başarı durumu", type: "textarea", v: "" },
+      { id: "akran", label: "Akran ilişkileri / sosyal durum / aile ve çevre", type: "textarea", v: "" },
+      { id: "onceki", label: "Daha önce yapılan rehberlik çalışmaları", type: "textarea", v: "" },
+      { id: "oneri", label: "Görüş ve öneriler", type: "textarea", v: "" },
+    ],
+    meta: d => ({ konu: L ? "Rehberlik Servisi Raporu" : "Rehberlik Görüşü", tarih: d.tarih }),
+    render: (d, c, s) => `
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">${L ? "REHBERLİK SERVİSİ RAPORU" : "REHBERLİK SERVİSİ GÖRÜŞÜ"}</h3>
+      <p><strong>Öğrenci:</strong> ${esc(c.student_name)} ${c.class_label ? `(${esc(c.class_label)})` : ""} &nbsp; <strong>Dosya No:</strong> ${esc(disCaseNo(c))} &nbsp; <strong>Tarih:</strong> ${fmtDate(d.tarih)}</p>
+      ${[["Öğrencinin genel okul uyumu ve kişilik özellikleri", d.uyum], ["Derslere ilgi ve başarı durumu", d.ders], ["Akran ilişkileri / sosyal durum / aile ve çevre", d.akran], ["Daha önce yapılan rehberlik çalışmaları", d.onceki], ["Görüş ve öneriler", d.oneri]].map(([h, v]) => `<p><strong>${h}</strong></p><p style="text-align:justify;white-space:pre-wrap">${esc(v)}</p>`).join("")}
+      <p style="font-size:10pt;color:#444">${L ? "md.192/1: Rehberlik servisi, davranışın yapıldığı andaki kişilik ve sosyal duruma ilişkin raporu okul müdürüne verir; md.168/3: bu görüşler dikkate alınarak bir alt ceza verilebilir; md.168/5: zihinsel engeli ya da otizmi olan öğrenciye disiplin cezası uygulanmaz." : "Not: Rehberlik öğretmeni kurul toplantısına ihtiyaç hâlinde katılır, oy kullanamaz (Madde 57/8). Kurul, yaptırım yerine çatışma çözme ve arabuluculuk gibi yöntemleri de değerlendirir (Madde 58/d)."}</p>
+      ${sig(`<strong>${esc(d.hazirlayan)}</strong><br>Rehberlik Öğretmeni`)}` });
+
+  docs.push({ key: "kurula_sevk", stage: L ? "uyarma_sureci" : "kurul", title: "Kurula Sevk Yazısı",
+    fields: c => [
+      { id: "tarih", label: "Sevk tarihi", type: "date", v: toLocalISO(new Date()) },
+      { id: "ekler", label: "Ekler (her satıra bir belge)", type: "textarea", v: L ? "Olay tespit tutanağı / şikâyet dilekçesi\nRehberlik servisi raporu (md.192/1)\nİlgili diğer bilgi ve belgeler" : "Olay tespit tutanağı\nÖğrenci ifade tutanağı\nTanık ifade tutanağı\nRehberlik görüşü" },
+    ],
+    meta: d => ({ konu: "Öğrenci davranışının kurulda değerlendirilmesi", tarih: d.tarih }),
+    render: (d, c, s) => `
+      <p style="margin-top:24px"><strong>${R.kurul.toLocaleUpperCase("tr-TR")} BAŞKANLIĞINA</strong></p>
+      <p style="text-align:justify;text-indent:1.25cm">Okulumuz ${esc(c.class_label || "")} sınıfı${c.student_no ? ` ${esc(c.student_no)} numaralı` : ""} öğrencisi <strong>${esc(c.student_name)}</strong> hakkında ${fmtDate(c.incident_date)} tarihinde gerçekleşen "${esc(c.summary)}" konulu olay ve ekli belgeler, ${R.yon} hükümleri çerçevesinde (${c.behavior_ref ? `md.${esc(c.behavior_ref)}` : (L ? "md.164" : "Madde 55")}) değerlendirilmek üzere kurulunuza sevk edilmiştir.</p>
+      <p style="text-align:justify;text-indent:1.25cm">${L ? "Kurulun, md.193 uyarınca öğrenci ve tanık ifadelerini yazılı olarak alıp md.194 uyarınca savunmasını almasını ve konuyu kurula gelişinden itibaren en geç on iş günü içinde karara bağlamasını rica ederim (md.192/3)." : "Kurulun, konuyu en geç beş iş günü içinde inceleyip kararını en geç iki iş günü içinde müdürlüğümüze bildirmesini rica ederim (Madde 59/3)."}</p>
+      ${sig(`<strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü`)}
+      <p style="margin-top:20px"><strong>Ekler:</strong></p><ol>${linesToList(d.ekler)}</ol>` });
+
+  docs.push({ key: "ogrenci_ifade", stage: "ifade", title: `Öğrenci İfade Tutanağı (${R.refs.ifade})`,
     fields: c => [
       { id: "tarih", label: "İfade tarihi", type: "date", v: toLocalISO(new Date()) },
       { id: "saat", label: "Saat", type: "text", v: "" },
-      { id: "ogrenci", label: "İfade veren öğrenci", type: "text", v: `${c.student_name}${c.class_label ? ` (${c.class_label}${c.student_no ? ` / No: ${c.student_no}` : ""})` : ""}` },
-      { id: "eslik", label: "Eşlik eden rehberlik öğretmeni (yoksa bir öğretmen)", type: "text", v: "" },
+      { id: "ogrenci", label: "İfade veren öğrenci", type: "text", v: ogrTxt(c) },
+      { id: "eslik", label: L ? "Hazır bulunan (rehberlik öğretmeni / öğretmen — isteğe bağlı)" : "Eşlik eden rehberlik öğretmeni (yoksa bir öğretmen)", type: "text", v: "" },
       { id: "sorucevap", label: "Sorular ve cevaplar (her satıra bir soru/cevap)", type: "textarea", v: "Soru 1: \nCevap: \n\nSoru 2: \nCevap: " },
     ],
     meta: d => ({ konu: "Öğrenci İfade Tutanağı", tarih: d.tarih }),
@@ -5181,22 +5365,19 @@ const DIS_DOCS = [
       <h3 style="text-align:center;text-decoration:underline;margin-top:28px">ÖĞRENCİ İFADE TUTANAĞI</h3>
       <p><strong>Dosya No:</strong> ${esc(disCaseNo(c))} &nbsp; <strong>Olay Tarihi/Yeri:</strong> ${fmtDate(c.incident_date)} ${esc(c.incident_place || "")}</p>
       <p><strong>İfade veren:</strong> ${esc(d.ogrenci)} &nbsp; <strong>Tarih/Saat:</strong> ${fmtDate(d.tarih)} ${esc(d.saat)}</p>
-      <p style="text-align:justify;text-indent:1.25cm">${DIS_YON} Madde 60/1 uyarınca öğrencinin ifadesi, kurul başkanı tarafından ${esc(d.eslik) || "rehberlik öğretmeni"} eşliğinde, olay kendisine açıklanarak alınmıştır.</p>
+      <p style="text-align:justify;text-indent:1.25cm">${R.yon} ${R.refs.ifade} uyarınca öğrencinin ifadesi, ${L ? `${R.kurul} başkanı tarafından yazılı olarak` : `kurul başkanı tarafından ${esc(d.eslik) || "rehberlik öğretmeni"} eşliğinde, olay kendisine açıklanarak`} alınmıştır.</p>
       <p><strong>SORULAR VE CEVAPLAR</strong></p>
       <p style="text-align:justify;white-space:pre-wrap">${esc(d.sorucevap)}</p>
       <p style="text-align:justify;text-indent:1.25cm">İfadem yukarıda yazıldığı gibidir; okudum, doğrudur.</p>
-      <table style="width:100%;margin-top:36px"><tr>
-        <td style="width:33%;text-align:center"><strong>İfade Veren Öğrenci</strong><br><br><br>${esc(c.student_name)}</td>
-        <td style="width:33%;text-align:center"><strong>Eşlik Eden</strong><br><br><br>${esc(d.eslik)}</td>
-        <td style="width:33%;text-align:center"><strong>Kurul Başkanı</strong><br><br><br>………………</td>
-      </tr></table>` },
-  { key: "tanik_ifade", stage: "ifade", title: "Tanık İfade Tutanağı (Madde 60/2)",
+      ${sig(`<strong>İfade Veren Öğrenci</strong><br><br><br>${esc(c.student_name)}`, `<strong>${L ? "Hazır Bulunan" : "Eşlik Eden"}</strong><br><br><br>${esc(d.eslik) || blank}`, `<strong>Kurul Başkanı</strong><br><br><br>${blank}`)}` });
+
+  docs.push({ key: "tanik_ifade", stage: "ifade", title: `Tanık İfade Tutanağı (${R.refs.tanik})`,
     fields: c => [
       { id: "tarih", label: "İfade tarihi", type: "date", v: toLocalISO(new Date()) },
       { id: "tanik", label: "Tanığın adı soyadı", type: "text", v: "" },
       { id: "sinif", label: "Sınıfı/şubesi veya görevi", type: "text", v: "" },
       { id: "iliski", label: "Olayla ilişkisi", type: "text", v: "Olay yerinde bulunan" },
-      { id: "eslik", label: "Eşlik eden rehberlik öğretmeni / öğretmen", type: "text", v: "" },
+      { id: "eslik", label: L ? "Hazır bulunan (isteğe bağlı)" : "Eşlik eden rehberlik öğretmeni / öğretmen", type: "text", v: "" },
       { id: "ifade", label: "İfade", type: "textarea", v: "" },
     ],
     meta: d => ({ konu: "Tanık İfade Tutanağı", tarih: d.tarih }),
@@ -5206,58 +5387,56 @@ const DIS_DOCS = [
       <p><strong>Tanık:</strong> ${esc(d.tanik)} (${esc(d.sinif)}) &nbsp; <strong>Olayla ilişkisi:</strong> ${esc(d.iliski)} &nbsp; <strong>Tarih:</strong> ${fmtDate(d.tarih)}</p>
       <p><strong>İFADE</strong></p>
       <p style="text-align:justify;white-space:pre-wrap">${esc(d.ifade)}</p>
-      <table style="width:100%;margin-top:36px"><tr>
-        <td style="width:33%;text-align:center"><strong>Tanık</strong><br><br><br>${esc(d.tanik)}</td>
-        <td style="width:33%;text-align:center"><strong>Eşlik Eden</strong><br><br><br>${esc(d.eslik)}</td>
-        <td style="width:33%;text-align:center"><strong>Kurul Başkanı</strong><br><br><br>………………</td>
-      </tr></table>` },
-  { key: "ifade_vermeme", stage: "ifade", title: "Çağrıya Uymama / İfade Vermeme Tutanağı (Madde 60/2)",
+      ${L ? `<p style="font-size:10pt;color:#444">md.193: olay sınıfta veya topluluğun bulunduğu yerde gerçekleşmişse topluluğun çoğunluğunun ifadesine başvurulur. md.195: tanık olduğu tespit edilip çağrıldığı hâlde özürsüz gelmeyenler hakkında ayrıca disiplin soruşturması yapılır.</p>` : ""}
+      ${sig(`<strong>Tanık</strong><br><br><br>${esc(d.tanik)}`, `<strong>${L ? "Hazır Bulunan" : "Eşlik Eden"}</strong><br><br><br>${esc(d.eslik) || blank}`, `<strong>Kurul Başkanı</strong><br><br><br>${blank}`)}` });
+
+  if (L) docs.push({ key: "savunma_cagri", stage: "ifade", title: "Savunma Çağrı Yazısı (md.194)",
+    fields: c => [
+      { id: "tarih", label: "Yazı tarihi", type: "date", v: toLocalISO(new Date()) },
+      { id: "gunsaat", label: "Savunma için gün ve saat", type: "text", v: "" },
+      { id: "yer", label: "Yer", type: "text", v: "Okul toplantı salonu" },
+      { id: "suresi", label: "Yazılı savunma için verilen süre", type: "text", v: "Kurul toplantı tarihine kadar" },
+    ],
+    meta: d => ({ konu: "Savunma çağrısı", tarih: d.tarih }),
+    render: (d, c, s) => `
+      <p style="margin-top:24px"><strong>Sayın ${esc(c.student_name)}</strong>${c.veli_adi ? `<br><span style="font-size:10.5pt">Veli: ${esc(c.veli_adi)}</span>` : ""}</p>
+      <p style="text-align:justify;text-indent:1.25cm">${fmtDate(c.incident_date)} tarihinde gerçekleştiği bildirilen "${esc(c.summary)}" konulu olay${c.behavior_ref ? ` (${R.yon} md.${esc(c.behavior_ref)})` : ""} nedeniyle hakkınızda başlatılan disiplin işlemi ${R.kurul}na sevk edilmiştir.</p>
+      <p style="text-align:justify;text-indent:1.25cm">${R.yon} md.194 uyarınca yazılı savunmanızı ${esc(d.suresi).toLocaleLowerCase("tr-TR")} kurul başkanlığına vermeniz; sözlü savunmanızın alınması için <strong>${esc(d.gunsaat)}</strong> tarihinde ${esc(d.yer)}nda hazır bulunmanız gerekmektedir. Çağrıya özürsüz uyulmaması hâlinde dosyada bulunan bilgi ve belgelere göre karar verilecektir (md.194/3).</p>
+      ${sig(`<strong>${blank}</strong><br>${R.kurul} Başkanı`)}
+      <div style="border-top:1px dashed #999;margin-top:26px;padding-top:8px"><p style="text-align:center"><strong>TEBELLÜĞ</strong></p><p>Bu çağrı yazısını …/…/…… tarihinde imza karşılığı aldım.</p>${sig(`<strong>Öğrenci</strong><br><br><br>${esc(c.student_name)}`, `<strong>Veli</strong><br><br><br>${esc(c.veli_adi || blank)}`)}</div>` });
+
+  if (L) docs.push({ key: "savunma_tutanagi", stage: "ifade", title: "Savunma Tutanağı (md.194)",
+    fields: c => [
+      { id: "tarih", label: "Tarih", type: "date", v: toLocalISO(new Date()) },
+      { id: "sekil", label: "Savunma şekli (Yazılı / Sözlü / Yazılı ve sözlü)", type: "text", v: "Yazılı ve sözlü" },
+      { id: "savunma", label: "Savunma metni / sözlü savunmanın özeti", type: "textarea", v: "" },
+      { id: "hazir", label: "Hazır bulunan kurul üyeleri", type: "textarea", v: "" },
+    ],
+    meta: d => ({ konu: "Savunma Tutanağı", tarih: d.tarih }),
+    render: (d, c, s) => `
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">SAVUNMA TUTANAĞI</h3>
+      <p><strong>Dosya No:</strong> ${esc(disCaseNo(c))} &nbsp; <strong>Öğrenci:</strong> ${esc(ogrTxt(c))} &nbsp; <strong>Tarih:</strong> ${fmtDate(d.tarih)} &nbsp; <strong>Şekli:</strong> ${esc(d.sekil)}</p>
+      <p style="text-align:justify;text-indent:1.25cm">${R.yon} md.194 uyarınca öğrencinin savunması alınmış, sözlü savunma tutanağa geçirilmiştir:</p>
+      <p style="text-align:justify;white-space:pre-wrap">${esc(d.savunma)}</p>
+      <p><strong>Hazır bulunanlar:</strong></p><p style="white-space:pre-wrap">${esc(d.hazir)}</p>
+      ${sig(`<strong>Savunmayı Veren Öğrenci</strong><br><br><br>${esc(c.student_name)}`, `<strong>Kurul Başkanı</strong><br><br><br>${blank}`)}` });
+
+  docs.push({ key: "ifade_vermeme", stage: "ifade", title: `Çağrıya Uymama / İfade-Savunma Vermeme Tutanağı (${R.refs.vermeme})`,
     fields: c => [
       { id: "kisi", label: "Çağrılan kişi (öğrenci/tanık)", type: "text", v: c.student_name },
       { id: "cagri", label: "Çağrı tarihi/saati", type: "text", v: "" },
       { id: "tespit", label: "Tespit tarihi", type: "date", v: toLocalISO(new Date()) },
-      { id: "aciklama", label: "Açıklama", type: "textarea", v: "Çağrıldığı hâlde belirtilen tarih ve saatte gelmemiş / ifade vermemiştir." },
+      { id: "aciklama", label: "Açıklama", type: "textarea", v: "Çağrıldığı hâlde belirtilen tarih ve saatte gelmemiş / ifade veya savunma vermemiştir." },
     ],
-    meta: d => ({ konu: "İfade Vermeme Tutanağı", tarih: d.tespit }),
+    meta: d => ({ konu: "İfade/Savunma Vermeme Tutanağı", tarih: d.tespit }),
     render: (d, c, s) => `
-      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">ÇAĞRIYA UYMAMA / İFADE VERMEME TUTANAĞI</h3>
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">ÇAĞRIYA UYMAMA / İFADE-SAVUNMA VERMEME TUTANAĞI</h3>
       <p><strong>Dosya No:</strong> ${esc(disCaseNo(c))} &nbsp; <strong>Çağrılan:</strong> ${esc(d.kisi)} &nbsp; <strong>Çağrı:</strong> ${esc(d.cagri)} &nbsp; <strong>Tespit:</strong> ${fmtDate(d.tespit)}</p>
       <p style="text-align:justify;white-space:pre-wrap">${esc(d.aciklama)}</p>
-      <p style="text-align:justify;text-indent:1.25cm">${DIS_YON} Madde 60/2 uyarınca durum iş bu tutanakla tespit edilmiş olup, çağrıya özürsüz uyulmaması hâlinde dosyada bulunan bilgi ve belgelere göre işlem yapılacaktır.</p>
-      <table style="width:100%;margin-top:36px"><tr>
-        <td style="width:50%;text-align:center"><strong>Kurul Başkanı</strong><br><br><br>………………</td>
-        <td style="width:50%;text-align:center"><strong>Öğretmen / Rehberlik Öğretmeni</strong><br><br><br>………………</td>
-      </tr></table>` },
-  { key: "rehberlik_gorusu", stage: "ifade", title: "Rehberlik Servisi Görüşü",
-    fields: c => [
-      { id: "tarih", label: "Tarih", type: "date", v: toLocalISO(new Date()) },
-      { id: "hazirlayan", label: "Görüşü hazırlayan rehberlik öğretmeni", type: "text", v: "" },
-      { id: "uyum", label: "Öğrencinin genel okul uyumu", type: "textarea", v: "" },
-      { id: "ders", label: "Derslere ilgi ve başarı durumu", type: "textarea", v: "" },
-      { id: "akran", label: "Akran ilişkileri / sosyal durum", type: "textarea", v: "" },
-      { id: "onceki", label: "Daha önce yapılan rehberlik çalışmaları", type: "textarea", v: "" },
-      { id: "oneri", label: "Görüş ve öneriler", type: "textarea", v: "" },
-    ],
-    meta: d => ({ konu: "Rehberlik Görüşü", tarih: d.tarih }),
-    render: (d, c, s) => `
-      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">REHBERLİK SERVİSİ GÖRÜŞÜ</h3>
-      <p><strong>Öğrenci:</strong> ${esc(c.student_name)} ${c.class_label ? `(${esc(c.class_label)})` : ""} &nbsp; <strong>Dosya No:</strong> ${esc(disCaseNo(c))} &nbsp; <strong>Tarih:</strong> ${fmtDate(d.tarih)}</p>
-      ${[["Öğrencinin genel okul uyumu", d.uyum], ["Derslere ilgi ve başarı durumu", d.ders], ["Akran ilişkileri / sosyal durum", d.akran], ["Daha önce yapılan rehberlik çalışmaları", d.onceki], ["Görüş ve öneriler", d.oneri]].map(([h, v]) => `<p><strong>${h}</strong></p><p style="text-align:justify;white-space:pre-wrap">${esc(v)}</p>`).join("")}
-      <p style="font-size:10pt;color:#444">Not: Rehberlik öğretmeni kurul toplantısına ihtiyaç hâlinde katılır, oy kullanamaz (Madde 57/8). Kurul, yaptırım yerine çatışma çözme ve arabuluculuk gibi yöntemleri de değerlendirir (Madde 58/d).</p>
-      <table style="width:100%;margin-top:30px"><tr><td style="text-align:center"><strong>${esc(d.hazirlayan)}</strong><br>Rehberlik Öğretmeni</td></tr></table>` },
-  { key: "kurula_sevk", stage: "kurul", title: "Kurula Sevk Yazısı",
-    fields: c => [
-      { id: "tarih", label: "Sevk tarihi", type: "date", v: toLocalISO(new Date()) },
-      { id: "ekler", label: "Ekler (her satıra bir belge)", type: "textarea", v: "Olay tespit tutanağı\nÖğrenci ifade tutanağı\nTanık ifade tutanağı\nRehberlik görüşü" },
-    ],
-    meta: d => ({ konu: "Öğrenci davranışının kurulda değerlendirilmesi", tarih: d.tarih }),
-    render: (d, c, s) => `
-      <p style="margin-top:24px"><strong>ÖĞRENCİ DAVRANIŞLARINI DEĞERLENDİRME KURULU BAŞKANLIĞINA</strong></p>
-      <p style="text-align:justify;text-indent:1.25cm">Okulumuz ${esc(c.class_label || "")} sınıfı${c.student_no ? ` ${esc(c.student_no)} numaralı` : ""} öğrencisi <strong>${esc(c.student_name)}</strong> hakkında ${fmtDate(c.incident_date)} tarihinde gerçekleşen "${esc(c.summary)}" konulu olay ve ekli belgeler, ${DIS_YON} hükümleri çerçevesinde (${c.behavior_ref ? `Madde ${esc(c.behavior_ref)}` : "Madde 55"}) değerlendirilmek üzere kurulunuza sevk edilmiştir.</p>
-      <p style="text-align:justify;text-indent:1.25cm">Kurulun, konuyu en geç beş iş günü içinde inceleyip kararını en geç iki iş günü içinde müdürlüğümüze bildirmesini rica ederim (Madde 59/3).</p>
-      <table style="width:100%;margin-top:36px"><tr><td style="text-align:center"><strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü</td></tr></table>
-      <p style="margin-top:20px"><strong>Ekler:</strong></p><ol>${linesToList(d.ekler)}</ol>` },
-  { key: "kurul_karari", stage: "kurul", title: "Kurul Toplantı Tutanağı ve Kararı (Madde 60/3, EK-10)",
+      <p style="text-align:justify;text-indent:1.25cm">${R.yon} ${R.refs.vermeme} uyarınca durum iş bu tutanakla tespit edilmiş olup, çağrıya özürsüz uyulmaması hâlinde dosyada bulunan bilgi ve belgelere göre ${L ? "karar verilir (md.194/3)" : "işlem yapılacaktır"}.</p>
+      ${sig(`<strong>Kurul Başkanı</strong><br><br><br>${blank}`, `<strong>Öğretmen / Rehberlik Öğretmeni</strong><br><br><br>${blank}`)}` });
+
+  docs.push({ key: "kurul_karari", stage: "kurul", title: `Kurul Toplantı Tutanağı ve Kararı (${R.refs.karar}, ${R.refs.ek})`,
     fields: c => [
       { id: "tarih", label: "Toplantı tarihi", type: "date", v: c.decision_date || toLocalISO(new Date()) },
       { id: "saat", label: "Saat", type: "text", v: "" },
@@ -5265,32 +5444,33 @@ const DIS_DOCS = [
       { id: "karar_no", label: "Karar no", type: "text", v: c.decision_no || "" },
       { id: "baskan", label: "Kurul başkanı (müdür yardımcısı)", type: "text", v: "" },
       { id: "uyeler", label: "Üyeler (her satıra bir üye: ad — görev)", type: "textarea", v: "" },
-      { id: "belgeler", label: "İncelenen belge ve deliller", type: "textarea", v: "Olay tespit tutanağı, öğrenci ve tanık ifadeleri, rehberlik görüşü" },
+      { id: "belgeler", label: "İncelenen belge ve deliller", type: "textarea", v: L ? "Olay tespit tutanağı, rehberlik servisi raporu, öğrenci ve tanık ifadeleri, öğrencinin yazılı/sözlü savunması" : "Olay tespit tutanağı, öğrenci ve tanık ifadeleri, rehberlik görüşü" },
       { id: "gerekce", label: "Değerlendirme / gerekçe", type: "textarea", v: c.decision_rationale || "" },
-      { id: "takdir", label: "Takdirde esas alınan hususlar (Madde 56/1)", type: "textarea", v: DIS_TAKDIR.join("\n") },
-      { id: "karar", label: "Karar (yaptırım türü ve dayanılan maddeler)", type: "textarea", v: c.sanction && c.sanction !== "yok" ? `${DIS_SANCTIONS[c.sanction]} — ${DIS_YON} Madde 54, ${c.behavior_ref ? "Madde " + c.behavior_ref + ", " : ""}Madde 56` : "" },
+      { id: "takdir", label: `Takdirde esas alınan hususlar (${R.refs.takdirRef})`, type: "textarea", v: R.takdir.join("\n") },
+      { id: "karar", label: "Karar (yaptırım/ceza türü ve dayanılan maddeler)", type: "textarea", v: c.sanction && c.sanction !== "yok" ? `${disSanctionLabel(R, c.sanction)}${c.sanction === "kisa_sureli" && c.uzaklastirma_gun ? ` (${c.uzaklastirma_gun} gün)` : ""} — ${R.yon} ${L ? `md.163, ${c.behavior_ref ? "md." + c.behavior_ref + ", " : ""}md.168${R.puan && R.puan[c.sanction] ? `; davranış puanından ${R.puan[c.sanction]} puan indirilir (md.170)` : ""}` : `Madde 54, ${c.behavior_ref ? "Madde " + c.behavior_ref + ", " : ""}Madde 56`}` : "" },
       { id: "oy", label: "Oy durumu (oy birliği / oy çokluğu; karşı oy varsa gerekçesi)", type: "text", v: "Oy birliği" },
     ],
-    meta: d => ({ konu: `Öğrenci Davranışlarını Değerlendirme Kurulu Kararı (Karar No: ${d.karar_no || "-"})`, tarih: d.tarih }),
+    meta: d => ({ konu: `${R.kurul} Kararı (Karar No: ${d.karar_no || "-"})`, tarih: d.tarih }),
     render: (d, c, s) => `
-      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">ÖĞRENCİ DAVRANIŞLARINI DEĞERLENDİRME KURULU<br>TOPLANTI TUTANAĞI VE KARARI</h3>
+      <h3 style="text-align:center;text-decoration:underline;margin-top:28px">${R.kurul.toLocaleUpperCase("tr-TR")}<br>TOPLANTI TUTANAĞI VE KARARI</h3>
       <table style="width:100%;border-collapse:collapse;font-size:11pt">
         <tr><td style="width:32%;padding:3px 0"><strong>Karar No / Dosya No</strong></td><td>: ${esc(d.karar_no)} / ${esc(disCaseNo(c))}</td></tr>
         <tr><td style="padding:3px 0"><strong>Toplantı Tarihi / Saati / Yeri</strong></td><td>: ${fmtDate(d.tarih)} ${esc(d.saat)} — ${esc(d.yer)}</td></tr>
-        <tr><td style="padding:3px 0"><strong>Öğrenci</strong></td><td>: ${esc(c.student_name)} ${c.class_label ? `(${esc(c.class_label)}${c.student_no ? ` / No: ${esc(c.student_no)}` : ""})` : ""}</td></tr>
+        <tr><td style="padding:3px 0"><strong>Öğrenci</strong></td><td>: ${esc(ogrTxt(c))}</td></tr>
         <tr><td style="padding:3px 0"><strong>Olay</strong></td><td>: ${fmtDate(c.incident_date)} — ${esc(c.summary)}</td></tr>
       </table>
       <p style="margin-top:12px"><strong>İNCELENEN BELGE VE DELİLLER</strong></p><p style="text-align:justify;white-space:pre-wrap">${esc(d.belgeler)}</p>
       <p><strong>DEĞERLENDİRME / GEREKÇE</strong></p><p style="text-align:justify;white-space:pre-wrap">${esc(d.gerekce)}</p>
-      <p><strong>TAKDİRDE ESAS ALINAN HUSUSLAR (Madde 56/1)</strong></p><ul>${linesToList(d.takdir)}</ul>
+      <p><strong>TAKDİRDE ESAS ALINAN HUSUSLAR (${R.refs.takdirRef})</strong></p><ul>${linesToList(d.takdir)}</ul>
       <p><strong>KARAR</strong></p><p style="text-align:justify;white-space:pre-wrap">${esc(d.karar)}</p>
       <p><strong>Oy durumu:</strong> ${esc(d.oy)}</p>
-      <p style="font-size:10pt;color:#444;text-align:justify">Bu karar ${DIS_YON} Madde 60/3 uyarınca gerekçeli olarak karar defterine EK-10 Karar Örneği'ne uygun şekilde yazılır; karara katılan üyelerce imzalanır, katılmayan üye gerekçesini yazarak imzalar. Uyarma ve kınama okul müdürünün onayı ile (Madde 62/1), okul değiştirme ilçe öğrenci davranışlarını değerlendirme kurulunun onayı ile (Madde 56/6) uygulanır.</p>
+      <p style="font-size:10pt;color:#444;text-align:justify">${L ? `Bu karar ${R.yon} md.196 uyarınca gerekçeli olarak karar defterine EK-1'e uygun şekilde yazılır; cezanın takdirinde esas alınan hususlar özetlenir, dayanılan yönetmelik maddeleri belirtilir, karar bütün üyelerce imzalanır; karara katılmayan üye gerekçesini yazarak imzalar. md.191: kurul üyelerin salt çoğunluğuyla toplanır, oy çokluğuyla karar alır; çekimser oy kullanılamaz. Kınama ve kısa süreli uzaklaştırma okul müdürünün, okul değiştirme ilçe öğrenci disiplin kurulunun, örgün eğitim dışına çıkarma il öğrenci disiplin kurulunun onayıyla uygulanır (md.169/2).` : `Bu karar ${R.yon} Madde 60/3 uyarınca gerekçeli olarak karar defterine EK-10 Karar Örneği'ne uygun şekilde yazılır; karara katılan üyelerce imzalanır, katılmayan üye gerekçesini yazarak imzalar. Uyarma ve kınama okul müdürünün onayı ile (Madde 62/1), okul değiştirme ilçe öğrenci davranışlarını değerlendirme kurulunun onayı ile (Madde 56/6) uygulanır.`}</p>
       <table style="width:100%;margin-top:30px;border-collapse:collapse">
         <tr><td style="width:50%;text-align:center;padding:8px"><strong>Kurul Başkanı</strong><br><br><br>${esc(d.baskan)}</td><td style="text-align:center;padding:8px"><strong>Üyeler</strong><br><br><br><span style="white-space:pre-wrap">${esc(d.uyeler)}</span></td></tr>
       </table>
-      <p style="margin-top:24px;text-align:right"><strong>OLUR / UYGUNDUR</strong><br>…/…/……<br><br>${officialSignatureName(s.mudur_adi)}<br>Okul Müdürü</p>` },
-  { key: "mudur_onayi", stage: "onay", title: "Müdür Onay Yazısı (Madde 62/1)",
+      <p style="margin-top:24px;text-align:right"><strong>OLUR / UYGUNDUR</strong><br>…/…/……<br><br>${officialSignatureName(s.mudur_adi)}<br>Okul Müdürü</p>` });
+
+  docs.push({ key: "mudur_onayi", stage: "onay", title: `Müdür Onay Yazısı (${R.refs.onay})`,
     fields: c => [
       { id: "tarih", label: "Onay tarihi", type: "date", v: c.approval_date || toLocalISO(new Date()) },
       { id: "karar_no", label: "Onaylanan karar no / tarihi", type: "text", v: `${c.decision_no || ""}${c.decision_date ? " / " + fmtDate(c.decision_date) : ""}` },
@@ -5299,59 +5479,72 @@ const DIS_DOCS = [
     meta: d => ({ konu: "Kurul kararının onayı", tarih: d.tarih }),
     render: (d, c, s) => `
       <h3 style="text-align:center;text-decoration:underline;margin-top:28px">ONAY</h3>
-      <p style="text-align:justify;text-indent:1.25cm">Öğrenci Davranışlarını Değerlendirme Kurulunun ${esc(d.karar_no)} sayılı kararı ile öğrenci <strong>${esc(c.student_name)}</strong> hakkında verilen <strong>${esc(DIS_SANCTIONS[c.sanction] || "")}</strong> yaptırımı, ${DIS_YON} Madde 56/6 ve Madde 62/1 uyarınca incelenmiştir.</p>
+      <p style="text-align:justify;text-indent:1.25cm">${R.kurul}nun ${esc(d.karar_no)} sayılı kararı ile öğrenci <strong>${esc(c.student_name)}</strong> hakkında verilen <strong>${esc(disSanctionLabel(R, c.sanction))}${c.sanction === "kisa_sureli" && c.uzaklastirma_gun ? ` (${c.uzaklastirma_gun} gün)` : ""}</strong> ${L ? "cezası" : "yaptırımı"}, ${R.yon} ${L ? "md.169/2-a" : "Madde 56/6 ve Madde 62/1"} uyarınca incelenmiştir.</p>
       <p style="text-align:justify;text-indent:1.25cm">${esc(d.sonuc)}</p>
-      <p style="font-size:10pt;color:#444">Okul müdürü kararı uygun bulmazsa, itirazını içeren görüş ve önerisini ekleyerek dosyayı en geç beş iş günü içinde kurula iade eder; kurulda ikinci kez görüşülüp verilen karar okulun nihai kararıdır (Madde 60/4).</p>
-      <table style="width:100%;margin-top:36px"><tr><td style="text-align:center"><strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü<br>${fmtDate(d.tarih)}</td></tr></table>` },
-  { key: "veli_teblig", stage: "teblig", title: "Veliye Tebliğ Yazısı ve Tebellüğ Belgesi (Madde 62)",
+      <p style="font-size:10pt;color:#444">${L ? "Müdür, kararı uygun bulmazsa bir defa daha görüşülmek üzere dosyayı gerekçeleriyle kurula iade eder; kurul kararında ısrar ederse müdür görüş ve tekliflerini ekleyerek dosyayı en geç beş iş günü içinde ilçe öğrenci disiplin kuruluna gönderir (md.197). Okul değiştirme ve örgün eğitim dışına çıkarma cezalarında onay yetkisi ilçe/il öğrenci disiplin kurulundadır (md.169/2)." : "Okul müdürü kararı uygun bulmazsa, itirazını içeren görüş ve önerisini ekleyerek dosyayı en geç beş iş günü içinde kurula iade eder; kurulda ikinci kez görüşülüp verilen karar okulun nihai kararıdır (Madde 60/4)."}</p>
+      ${sig(`<strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü<br>${fmtDate(d.tarih)}`)}` });
+
+  docs.push({ key: "veli_teblig", stage: "teblig", title: `Veliye Tebliğ Yazısı ve Tebellüğ Belgesi (${R.refs.teblig})`,
     fields: c => [
       { id: "tarih", label: "Yazı tarihi", type: "date", v: toLocalISO(new Date()) },
       { id: "veli", label: "Veli adı", type: "text", v: c.veli_adi || "" },
       { id: "karar_no", label: "Karar no / tarihi", type: "text", v: `${c.decision_no || ""}${c.decision_date ? " / " + fmtDate(c.decision_date) : ""}` },
-      { id: "aciklama", label: "Ek açıklama (opsiyonel)", type: "textarea", v: "" },
+      { id: "uygulama", label: L && c.sanction === "kisa_sureli" ? "Uzaklaştırma tarihleri (örn. 12.10.2026 – 14.10.2026)" : "Ek açıklama (opsiyonel)", type: "textarea", v: "" },
     ],
     meta: d => ({ konu: "Öğrenci hakkındaki kurul kararının tebliği", tarih: d.tarih }),
-    render: (d, c, s) => `
+    render: (d, c, s) => {
+      const onayMercii = disApprovalTarget(R, c.sanction);
+      const itirazMercii = disUstKurul(R, R.appealTo(c.sanction));
+      return `
       <p style="margin-top:24px"><strong>Sayın ${esc(d.veli)}</strong><br><span style="font-size:10pt">(${esc(c.student_name)} öğrencisinin velisi)</span></p>
-      <p style="text-align:justify;text-indent:1.25cm">Okulumuz ${esc(c.class_label || "")} sınıfı öğrencisi <strong>${esc(c.student_name)}</strong> hakkında, ${fmtDate(c.incident_date)} tarihli olay nedeniyle Öğrenci Davranışlarını Değerlendirme Kurulunca ${esc(d.karar_no)} sayılı kararla <strong>${esc(DIS_SANCTIONS[c.sanction] || "")}</strong> yaptırımı takdir edilmiş ve ${c.sanction === "okul_degistirme" ? "ilçe öğrenci davranışlarını değerlendirme kurulunca" : "okul müdürlüğünce"} onaylanmıştır.</p>
-      ${d.aciklama ? `<p style="text-align:justify;text-indent:1.25cm;white-space:pre-wrap">${esc(d.aciklama)}</p>` : ""}
-      <p style="text-align:justify;text-indent:1.25cm">${DIS_YON} Madde 56/11 uyarınca bu karara karşı, tebliğ tarihinden itibaren <strong>beş iş günü</strong> içinde okul müdürlüğüne yazılı olarak itirazda bulunabilirsiniz. İtiraz işlemleri sonuçlanıncaya kadar yaptırım uygulanmaz (Madde 56/12).</p>
+      <p style="text-align:justify;text-indent:1.25cm">Okulumuz ${esc(c.class_label || "")} sınıfı öğrencisi <strong>${esc(c.student_name)}</strong> hakkında, ${fmtDate(c.incident_date)} tarihli olay nedeniyle ${R.kurul}nca ${esc(d.karar_no)} sayılı kararla <strong>${esc(disSanctionLabel(R, c.sanction))}${c.sanction === "kisa_sureli" && c.uzaklastirma_gun ? ` (${c.uzaklastirma_gun} gün)` : ""}</strong> ${L ? "cezası" : "yaptırımı"} takdir edilmiş ve ${esc(onayMercii)}${onayMercii === "okul müdürlüğü" ? "nce" : "nca"} onaylanmıştır.${L && R.puan && R.puan[c.sanction] ? ` Öğrencinin davranış puanından ${R.puan[c.sanction]} puan indirilmiştir (md.170).` : ""}</p>
+      ${d.uygulama ? `<p style="text-align:justify;text-indent:1.25cm;white-space:pre-wrap">${L && c.sanction === "kisa_sureli" ? `Öğrenci, md.172/1 uyarınca ${esc(d.uygulama)} tarihlerinde okul binası ve eklentilerinde yapılan eğitim-öğretim etkinlikleri ile sınavlara katılamaz; bu süre özürlü devamsızlıktan sayılır. Katılamadığı sınavlar okul yönetimince belirlenecek tarihlerde yapılır (md.173).` : esc(d.uygulama)}</p>` : ""}
+      <p style="text-align:justify;text-indent:1.25cm">${L ? `${R.yon} md.169/3 uyarınca bu cezaya karşı, tebliğ tarihini izleyen <strong>beş iş günü</strong> içinde okul müdürlüğü kanalıyla itirazda bulunabilirsiniz; itiraz ${esc(itirazMercii)}nca değerlendirilir ve verilen karar kesindir (md.169/4).${c.sanction === "okul_degistirme" ? " Süresi içinde itiraz edilmesi hâlinde itiraz karara bağlanıncaya kadar ceza uygulanmaz (md.172/2-ç)." : ""}` : `${R.yon} Madde 56/11 uyarınca bu karara karşı, tebliğ tarihinden itibaren <strong>beş iş günü</strong> içinde okul müdürlüğüne yazılı olarak itirazda bulunabilirsiniz. İtiraz işlemleri sonuçlanıncaya kadar yaptırım uygulanmaz (Madde 56/12).`}</p>
       <p style="text-align:justify;text-indent:1.25cm">Bilgilerinizi rica ederim.</p>
-      <table style="width:100%;margin-top:30px"><tr><td style="text-align:center"><strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü</td></tr></table>
+      ${sig(`<strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü`)}
       <div style="border-top:1px dashed #999;margin-top:28px;padding-top:10px">
         <p style="text-align:center"><strong>TEBELLÜĞ BELGESİ</strong></p>
         <p style="text-align:justify;text-indent:1.25cm">Yukarıda özetlenen kararı …/…/…… tarihinde tebellüğ ettim; bir örneğini teslim aldım.</p>
-        <table style="width:100%;margin-top:20px"><tr>
-          <td style="width:50%;text-align:center"><strong>Tebliğ Eden</strong><br><br><br>………………</td>
-          <td style="width:50%;text-align:center"><strong>Tebellüğ Eden (Veli)</strong><br><br><br>${esc(d.veli)}</td>
-        </tr></table>
-        <p style="font-size:9.5pt;color:#444;margin-top:10px">Okul değiştirme yaptırımında veli okula çağrılarak tebliğ edilir; çağrıya uyulmaması hâlinde 7201 sayılı Tebligat Kanunu'na göre bildirilir ve tebellüğ belgesi dosyada saklanır (Madde 62/2).</p>
-      </div>` },
-  { key: "ilce_ust_yazi", stage: "onay", title: "İlçe Kuruluna Gönderme Üst Yazısı (Madde 61)",
-    fields: c => [
-      { id: "tarih", label: "Yazı tarihi", type: "date", v: c.ilce_sent_on || toLocalISO(new Date()) },
-      { id: "amac", label: "Gönderme amacı", type: "text", v: c.appeal_on ? "İtirazın değerlendirilmesi" : "Okul değiştirme yaptırımının onayı" },
-      { id: "ekler", label: "Dosyadaki belgeler (Madde 61/2)", type: "textarea", v: "Yazılı ifadeler, savunma ve soruşturmaya ilişkin diğer belgeler\nÖğrenci davranışlarını değerlendirme kurulu kararı onaylı örneği (EK-10)\nİtiraz edilmişse buna ilişkin belgeler\nKararların bildirildiğine ilişkin tebellüğ belgesi" },
-    ],
-    meta: d => ({ konu: `${d.amac} — ${"öğrenci"} dosyası`, tarih: d.tarih }),
+        ${sig(`<strong>Tebliğ Eden</strong><br><br><br>${blank}`, `<strong>Tebellüğ Eden (Veli)</strong><br><br><br>${esc(d.veli)}`)}
+        <p style="font-size:9.5pt;color:#444;margin-top:10px">${L ? "Bütün cezalar velilere Tebligat Kanununun Uygulanmasına Dair Yönetmelik hükümlerine uygun olarak bildirilir; tebellüğ belgesi disiplin dosyasında saklanır (md.169/5)." : "Okul değiştirme yaptırımında veli okula çağrılarak tebliğ edilir; çağrıya uyulmaması hâlinde 7201 sayılı Tebligat Kanunu'na göre bildirilir ve tebellüğ belgesi dosyada saklanır (Madde 62/2)."}</p>
+      </div>`; } });
+
+  docs.push({ key: "ilce_ust_yazi", stage: "onay", title: L ? "İlçe/İl Kuruluna Gönderme Üst Yazısı (md.169)" : "İlçe Kuruluna Gönderme Üst Yazısı (Madde 61)",
+    fields: c => {
+      const forAppeal = !!c.appeal_on;
+      const target = L ? disUstKurul(R, forAppeal ? R.appealTo(c.sanction) : R.approvalBy(c.sanction)) : R.ustKurulAdi.ilce;
+      return [
+        { id: "tarih", label: "Yazı tarihi", type: "date", v: (forAppeal ? c.appeal_sent_on : c.ilce_sent_on) || toLocalISO(new Date()) },
+        { id: "kurul", label: "Gönderilen kurul", type: "text", v: target },
+        { id: "amac", label: "Gönderme amacı", type: "text", v: forAppeal ? "İtirazın değerlendirilmesi" : `${disSanctionLabel(R, c.sanction)} ${L ? "cezasının" : "yaptırımının"} onayı` },
+        { id: "ekler", label: L ? "Dosyadaki belgeler" : "Dosyadaki belgeler (Madde 61/2)", type: "textarea", v: L ? "Olay tutanağı ve şikâyet belgeleri\nRehberlik servisi raporu\nYazılı ifadeler ve savunma\nKurul kararının onaylı örneği (EK-1)\nİtiraz edilmişse itiraz dilekçesi ve okul müdürlüğü görüşü\nTebellüğ belgesi" : "Yazılı ifadeler, savunma ve soruşturmaya ilişkin diğer belgeler\nÖğrenci davranışlarını değerlendirme kurulu kararı onaylı örneği (EK-10)\nİtiraz edilmişse buna ilişkin belgeler\nKararların bildirildiğine ilişkin tebellüğ belgesi" },
+      ];
+    },
+    meta: d => ({ konu: `${d.amac} — öğrenci dosyası`, tarih: d.tarih }),
     render: (d, c, s) => `
-      <p style="margin-top:24px"><strong>İLÇE MİLLÎ EĞİTİM MÜDÜRLÜĞÜNE<br><span style="font-size:10.5pt">(İlçe Öğrenci Davranışlarını Değerlendirme Kurulu Başkanlığına)</span></strong></p>
-      <p style="text-align:justify;text-indent:1.25cm">Okulumuz ${esc(c.class_label || "")} sınıfı öğrencisi <strong>${esc(c.student_name)}</strong> hakkında Öğrenci Davranışlarını Değerlendirme Kurulumuzca ${esc(c.decision_no || "")} sayılı ve ${fmtDate(c.decision_date)} tarihli kararla takdir edilen <strong>${esc(DIS_SANCTIONS[c.sanction] || "")}</strong> yaptırımına ilişkin dosya, ${DIS_YON} Madde 61 uyarınca <strong>${esc(d.amac).toLocaleLowerCase("tr-TR")}</strong> için ekte sunulmuştur.</p>
-      ${c.appeal_on ? `<p style="text-align:justify;text-indent:1.25cm">Veli tarafından ${fmtDate(c.appeal_on)} tarihinde itiraz edilmiş olup, itiraz gerekçeleri hakkındaki müdürlüğümüz görüşleri dosyada yer almaktadır (Madde 56/12).</p>` : ""}
+      <p style="margin-top:24px"><strong>${/il millî|il milli/i.test(d.kurul) && !/ilçe/i.test(d.kurul) || /^İl /.test(d.kurul) ? "İL" : "İLÇE"} MİLLÎ EĞİTİM MÜDÜRLÜĞÜNE<br><span style="font-size:10.5pt">(${esc(d.kurul)} Başkanlığına)</span></strong></p>
+      <p style="text-align:justify;text-indent:1.25cm">Okulumuz ${esc(c.class_label || "")} sınıfı öğrencisi <strong>${esc(c.student_name)}</strong> hakkında ${R.kurul}muzca ${esc(c.decision_no || "")} sayılı ve ${fmtDate(c.decision_date)} tarihli kararla takdir edilen <strong>${esc(disSanctionLabel(R, c.sanction))}</strong> ${L ? "cezasına" : "yaptırımına"} ilişkin dosya, ${R.yon} ${R.refs.ustYazi} uyarınca <strong>${esc(d.amac).toLocaleLowerCase("tr-TR")}</strong> için ekte sunulmuştur.</p>
+      ${c.appeal_on ? `<p style="text-align:justify;text-indent:1.25cm">${L ? "Veli/öğrenci" : "Veli"} tarafından ${fmtDate(c.appeal_on)} tarihinde itiraz edilmiş olup, itiraz gerekçeleri hakkındaki müdürlüğümüz görüşleri dosyada yer almaktadır (${L ? "md.169/3" : "Madde 56/12"}).</p>` : ""}
       <p style="text-align:justify;text-indent:1.25cm">Gereğini arz ederim.</p>
-      <table style="width:100%;margin-top:30px"><tr><td style="text-align:center"><strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü</td></tr></table>
-      <p style="margin-top:20px"><strong>Ekler:</strong></p><ol>${linesToList(d.ekler)}</ol>` },
-];
-const DIS_DOC_BY_KEY = Object.fromEntries(DIS_DOCS.map(d => [d.key, d]));
+      ${sig(`<strong>${officialSignatureName(s.mudur_adi)}</strong><br>Okul Müdürü`)}
+      <p style="margin-top:20px"><strong>Ekler:</strong></p><ol>${linesToList(d.ekler)}</ol>` });
+
+  return docs;
+}
+const DIS_DOCS_CACHE = {};
+function disDocs(R) { return DIS_DOCS_CACHE[R.key] || (DIS_DOCS_CACHE[R.key] = disDocsFor(R)); }
+function disDocTpl(R, key) { return disDocs(R).find(d => d.key === key) || disDocs(R === DIS_LISE ? DIS_ORTA : DIS_LISE).find(d => d.key === key); }
 
 function disDocHtml(school, kase, docType, data) {
-  const tpl = DIS_DOC_BY_KEY[docType];
+  const R = disRegime(school);
+  const tpl = disDocTpl(R, docType);
   if (!tpl) return docWrapper(school, `<p>Bilinmeyen belge türü.</p>`);
   return docWrapper(school, tpl.render(data, kase, school), tpl.meta ? tpl.meta(data, kase) : {});
 }
 
-/* Dizi pusulası: dosyadaki belgelerin listesi (Madde 61/2 sırası gözetilerek) — belgelerden otomatik. */
+/* Dizi pusulası: dosyadaki belgelerin listesi — belgelerden otomatik. */
 function disDiziPusulasiHtml(school, kase, docs) {
+  const R = disRegime(school);
   const rows = docs.slice().sort((a, b) => (a.doc_date || a.created_at).localeCompare(b.doc_date || b.created_at));
   return docWrapper(school, `
     <h3 style="text-align:center;text-decoration:underline;margin-top:28px">DİZİ PUSULASI</h3>
@@ -5361,8 +5554,8 @@ function disDiziPusulasiHtml(school, kase, docs) {
       <tbody>${rows.map((d, i) => `<tr><td style="border:1px solid #999;padding:5px;text-align:center">${i + 1}</td><td style="border:1px solid #999;padding:5px">${esc(d.title)}</td><td style="border:1px solid #999;padding:5px;text-align:center">${fmtDate(d.doc_date || d.created_at.slice(0, 10))}</td><td style="border:1px solid #999;padding:5px"></td></tr>`).join("")}
       ${rows.length ? "" : `<tr><td colspan="4" style="border:1px solid #999;padding:5px;text-align:center">Dosyada henüz belge yok.</td></tr>`}</tbody>
     </table>
-    <p style="margin-top:14px;font-size:10pt;color:#444">Madde 61/2'ye göre ilçe kuruluna gönderilecek dosyada: yazılı ifadeler/savunma ve diğer belgeler, kurul kararının onaylı örneği (EK-10), varsa itiraz belgeleri ve tebellüğ belgesi bulunur.</p>
-    <table style="width:100%;margin-top:30px"><tr><td style="text-align:center"><strong>${officialSignatureName(school.mudur_adi)}</strong><br>Okul Müdürü</td></tr></table>
+    <p style="margin-top:14px;font-size:10pt;color:#444">${R.key === "lise" ? "md.169/1: onay ve itiraza ilişkin dosya ve yazılar millî eğitim müdürlüğü aracılığıyla ilgili disiplin kuruluna gönderilir; md.171/4: kurul belgeleri ve soruşturma dosyası ilgili mevzuata göre saklanır." : "Madde 61/2'ye göre ilçe kuruluna gönderilecek dosyada: yazılı ifadeler/savunma ve diğer belgeler, kurul kararının onaylı örneği (EK-10), varsa itiraz belgeleri ve tebellüğ belgesi bulunur."}</p>
+    ${`<table style="width:100%;margin-top:30px"><tr><td style="text-align:center"><strong>${officialSignatureName(school.mudur_adi)}</strong><br>Okul Müdürü</td></tr></table>`}
   `, { konu: "Dizi Pusulası", tarih: toLocalISO(new Date()) });
 }
 
@@ -5389,15 +5582,16 @@ function disShowPreview(container, fullHtml, filename) {
 }
 
 async function renderDisiplinModule(profile, school, caseId = null) {
-  const isOrtaokul = school.okul_turu === "ortaokul";
+  const R = disRegime(school);
+  const noSanction = ["ilkokul", "okul_oncesi"].includes(school.okul_turu);
   app.innerHTML = `
     <div class="wrap wide">
       <button class="navlink" id="back-dash">← Panele dön</button>
       <div class="eyebrow">Öğrenci Disiplin Dosyası</div>
       <h1>${esc(school.name)}</h1>
-      <div class="subtitle">Olay tutanağından kurul kararına, veli tebliğine, itiraz penceresine ve e-Okul kaydına kadar dosya akışı — ${DIS_YON} Madde 54–65'e göre. Süreler yönetmelikten; belgeler dosya bilgisiyle otomatik dolar.</div>
-      ${!isOrtaokul ? `<div class="card" style="border-color:var(--warn);margin-bottom:14px"><strong>Dikkat:</strong> Bu akış ${DIS_YON}'ne (Madde 54/1: ortaokul ve imam-hatip ortaokulu öğrencileri) göre kuruldu. ${school.okul_turu === "lise" ? "Lise, Ortaöğretim Kurumları Yönetmeliği'ne (Okul Öğrenci Ödül ve Disiplin Kurulu, farklı yaptırım türleri ve süreler) tabidir — bu sürümde lise akışı henüz yok; buradaki madde ve süreleri lise dosyasında kullanma." : "Okul öncesi/ilkokul öğrencileri için yönetmelikte yaptırım öngörülmez; bu modülü yalnızca kayıt/takip amacıyla kullan."}</div>` : ""}
-      <div class="card" style="margin-bottom:14px;font-size:12.5px;color:var(--muted)">🔒 Bu modül öğrenci kişisel verisi içerir; yalnızca idareci hesapları erişebilir (okul bazlı izolasyon). Dosyayı gereğinden uzun tutma; Madde 62/3 kapsamında kaldırılan yaptırımları e-Okul'dan da çıkar (5 iş günü).</div>
+      <div class="subtitle">${R.key === "lise" ? "Şikâyet/olay tutanağından rehberlik raporuna, kurul kararına, onaya, tebliğe, itiraza ve e-Okul kaydına kadar dosya akışı — MEB Ortaöğretim Kurumları Yönetmeliği md.163–176 ve 185–198'e göre (Okul Öğrenci Ödül ve Disiplin Kurulu)." : `Olay tutanağından kurul kararına, veli tebliğine, itiraz penceresine ve e-Okul kaydına kadar dosya akışı — ${R.yon} Madde 54–65'e göre (${R.kurul}).`} Süreler yönetmelikten; belgeler dosya bilgisiyle otomatik dolar.</div>
+      ${noSanction ? `<div class="card" style="border-color:var(--warn);margin-bottom:14px"><strong>Dikkat:</strong> ${R.yon} Madde 54/1 yaptırımları ortaokul ve imam-hatip ortaokulu öğrencileri için tanımlar; okul öncesi ve ilkokul öğrencilerine yaptırım uygulanmaz. Bu modülü yalnızca olay kaydı ve veli görüşmesi takibi için kullan.</div>` : ""}
+      <div class="card" style="margin-bottom:14px;font-size:12.5px;color:var(--muted)">🔒 Bu modül öğrenci kişisel verisi içerir; yalnızca idareci hesapları erişebilir (okul bazlı izolasyon).${R.key === "lise" ? " md.168/1-c gizlilik ilkesini gözet; md.171/2 kapsamında kaldırılan cezaları 5 iş günü içinde e-Okul'dan çıkar." : " Dosyayı gereğinden uzun tutma; Madde 62/3 kapsamında kaldırılan yaptırımları e-Okul'dan da çıkar (5 iş günü)."}</div>
       <div id="dis-content"></div>
     </div>
   `;
@@ -5409,11 +5603,12 @@ async function renderDisiplinModule(profile, school, caseId = null) {
 }
 
 async function renderDisiplinList(profile, school, content, filter = "acik") {
+  const R = disRegime(school);
   const { data: cases } = await sb.from("discipline_cases").select("*").eq("school_id", school.id).order("created_at", { ascending: false });
   const { data: allDocs } = await sb.from("discipline_docs").select("case_id, doc_type, doc_date, created_at").eq("school_id", school.id);
   const docsByCase = {};
   (allDocs || []).forEach(d => (docsByCase[d.case_id] ??= []).push(d));
-  const rows = (cases || []).map(c => ({ ...c, deadlines: disDeadlines(c, docsByCase[c.id] || []) }));
+  const rows = (cases || []).map(c => ({ ...c, deadlines: disDeadlines(c, docsByCase[c.id] || [], R) }));
   const open = rows.filter(c => c.stage !== "tamam"), closed = rows.filter(c => c.stage === "tamam");
   const overdue = open.filter(c => c.deadlines.some(d => d.state === "gecti"));
   const shown = filter === "acik" ? open : filter === "tamam" ? closed : filter === "gecikmis" ? overdue : rows;
@@ -5424,7 +5619,7 @@ async function renderDisiplinList(profile, school, content, filter = "acik") {
       <h3 style="margin-top:0">Yeni Dosya Aç</h3>
       <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px">
         <div><label>Öğrenci adı soyadı</label><input id="dc-name" placeholder="Ad Soyad"></div>
-        <div><label>Sınıf / şube</label><input id="dc-class" placeholder="örn. 7-B"></div>
+        <div><label>Sınıf / şube</label><input id="dc-class" placeholder="örn. ${R.key === "lise" ? "10-B" : "7-B"}"></div>
         <div><label>Okul no</label><input id="dc-no" placeholder="opsiyonel"></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -5436,10 +5631,10 @@ async function renderDisiplinList(profile, school, content, filter = "acik") {
         <div><label>Saat <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label><input id="dc-time" placeholder="örn. 10.40"></div>
         <div><label>Olay yeri</label><input id="dc-place" placeholder="örn. 2. kat koridoru"></div>
       </div>
-      <label>Davranış türü (Madde 55) <span style="color:var(--muted);font-weight:400">— bilgi amaçlı ön eşleştirme; nihai takdir kurulun</span></label>
+      <label>Davranış türü (${R.key === "lise" ? "md.164" : "Madde 55"}) <span style="color:var(--muted);font-weight:400">— bilgi amaçlı ön eşleştirme; nihai takdir kurulun</span></label>
       <select id="dc-behavior">
         <option value="">Seçilmedi</option>
-        ${["uyarma", "kinama", "okul_degistirme"].map(s => `<optgroup label="${DIS_SANCTIONS[s]} gerektiren (Madde 55/${s === "uyarma" ? "a" : s === "kinama" ? "b" : "c"})">${DIS_BEHAVIORS.filter(b => b.s === s).map(b => `<option value="${b.code}">${b.code} — ${esc(b.t)}</option>`).join("")}</optgroup>`).join("")}
+        ${R.behaviorGroups.map(([s, label]) => `<optgroup label="${esc(label)}">${R.behaviors.filter(b => b.s === s).map(b => `<option value="${b.code}">${b.code} — ${esc(b.t)}</option>`).join("")}</optgroup>`).join("")}
       </select>
       <label>Olayın kısa konusu</label>
       <input id="dc-summary" placeholder="örn. Teneffüste arkadaşıyla kavga">
@@ -5464,7 +5659,7 @@ async function renderDisiplinList(profile, school, content, filter = "acik") {
       <h3 style="margin-top:0">Dosyalar</h3>
       ${shown.length ? `
       <div class="table-wrap"><table class="data">
-        <thead><tr><th>Dosya No</th><th>Öğrenci</th><th>Olay</th><th>Aşama</th><th>Yaptırım</th><th>Süre</th><th></th></tr></thead>
+        <thead><tr><th>Dosya No</th><th>Öğrenci</th><th>Olay</th><th>Aşama</th><th>${R.key === "lise" ? "Ceza" : "Yaptırım"}</th><th>Süre</th><th></th></tr></thead>
         <tbody>${shown.map(c => {
           const late = c.deadlines.filter(d => d.state === "gecti");
           const soon = c.deadlines.filter(d => d.state === "yaklasiyor");
@@ -5472,9 +5667,9 @@ async function renderDisiplinList(profile, school, content, filter = "acik") {
             <td style="white-space:nowrap"><strong>${esc(disCaseNo(c))}</strong></td>
             <td><strong>${esc(c.student_name)}</strong>${c.class_label ? `<div style="font-size:11.5px;color:var(--muted)">${esc(c.class_label)}${c.student_no ? ` · ${esc(c.student_no)}` : ""}</div>` : ""}</td>
             <td>${fmtDate(c.incident_date)}<div style="font-size:11.5px;color:var(--muted)">${esc(c.summary)}</div></td>
-            <td><span class="pill ${c.stage === "tamam" ? "good" : ""}">${DIS_STAGES[DIS_STAGE_IDX[c.stage]].label}</span></td>
-            <td><span class="pill ${DIS_SANCTION_PILL[c.sanction]}">${DIS_SANCTIONS[c.sanction]}</span></td>
-            <td>${late.length ? `<span class="pill crit">${late.length} süre geçti</span>` : soon.length ? `<span class="pill warn">${soon.length} süre yaklaşıyor</span>` : (c.docsCount ? "" : "")}${(docsByCase[c.id] || []).length ? `<div style="font-size:11px;color:var(--muted)">${(docsByCase[c.id] || []).length} belge</div>` : ""}</td>
+            <td><span class="pill ${c.stage === "tamam" ? "good" : ""}">${R.stages[DIS_STAGE_IDX[c.stage]].label}</span></td>
+            <td><span class="pill ${DIS_SANCTION_PILL[c.sanction] || "muted"}">${esc(disSanctionLabel(R, c.sanction))}${c.sanction === "kisa_sureli" && c.uzaklastirma_gun ? ` (${c.uzaklastirma_gun} gün)` : ""}</span></td>
+            <td>${late.length ? `<span class="pill crit">${late.length} süre geçti</span>` : soon.length ? `<span class="pill warn">${soon.length} süre yaklaşıyor</span>` : ""}${(docsByCase[c.id] || []).length ? `<div style="font-size:11px;color:var(--muted)">${(docsByCase[c.id] || []).length} belge</div>` : ""}</td>
             <td class="row-actions" style="white-space:nowrap"><button data-open-case="${c.id}">Aç</button><button data-del-case="${c.id}">Sil</button></td>
           </tr>`; }).join("")}</tbody>
       </table></div>` : `<p style="color:var(--muted)">${rows.length ? "Bu filtrede dosya yok." : "Henüz dosya açılmadı."}</p>`}
@@ -5517,10 +5712,11 @@ async function renderDisiplinList(profile, school, content, filter = "acik") {
 }
 
 async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
+  const R = disRegime(school), L = R.key === "lise";
   const [{ data: kase }, { data: docs }, { data: committees }, { data: teachers }] = await Promise.all([
     sb.from("discipline_cases").select("*").eq("id", caseId).single(),
     sb.from("discipline_docs").select("*").eq("case_id", caseId).order("created_at"),
-    sb.from("committees").select("id, name").eq("school_id", school.id).ilike("name", "%davranış%"),
+    sb.from("committees").select("id, name").eq("school_id", school.id).or("name.ilike.%davranış%,name.ilike.%disiplin%"),
     sb.from("teachers").select("full_name, branch").eq("school_id", school.id),
   ]);
   if (!kase) { content.innerHTML = `<div class="card">Dosya bulunamadı.</div>`; return; }
@@ -5530,11 +5726,25 @@ async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
     kurulUyeleri = (members || []).map(m => `${m.member_name}${m.role ? ` — ${m.role}` : ""}`).join("\n");
   }
   const rehber = (teachers || []).find(t => /rehber|pdr/i.test(t.branch || ""))?.full_name || "";
-  const deadlines = disDeadlines(kase, docs || []);
+  const deadlines = disDeadlines(kase, docs || [], R);
   const stageIdx = DIS_STAGE_IDX[kase.stage];
   const has = (k) => (docs || []).some(d => d.doc_type === k);
+  const today = toLocalISO(new Date());
   const rerender = (patch = {}) => renderDisiplinCase(profile, school, content, caseId, { ...ui, ...patch });
-  const checklist = [
+  const approvalTarget = R.approvalBy(kase.sanction);
+  const checklist = L ? [
+    ["Olay tutanağı / yazılı şikâyet dosyada (md.167)", has("olay_tutanagi")],
+    ["Rehberlik servisi raporu alındı (md.192/1)", has("rehberlik_gorusu")],
+    ["Kurula sevk yazısı", has("kurula_sevk")],
+    ["Öğrenci ve tanık ifadeleri yazılı alındı (md.193)", has("ogrenci_ifade") || has("tanik_ifade") || has("ifade_vermeme")],
+    ["Savunma alındı ya da vermeme tutanağı düzenlendi (md.194–195)", has("savunma_tutanagi") || has("ifade_vermeme")],
+    ["Kurul kararı gerekçeli, maddeler belirtilmiş (md.196)", has("kurul_karari") && !!kase.decision_rationale],
+    ["Ceza ve karar bilgileri işlendi", kase.sanction !== "yok" && !!kase.decision_date],
+    [approvalTarget === "mudur" ? "Müdür onayı tarihi girildi (md.169/2-a)" : `Dosya ${disUstKurul(R, approvalTarget)}'na gönderildi (md.169/1-2)`, approvalTarget === "mudur" ? !!kase.approval_date : !!kase.ilce_sent_on],
+    ["Veliye tebliğ edildi, tebellüğ belgesi dosyada (md.169/5)", !!kase.notified_on],
+    ["İtiraz süresi (5 iş günü) tamamlandı / itiraz yetkili kurula gönderildi (md.169/3)", !!kase.notified_on && (kase.appeal_on ? !!kase.appeal_sent_on : addBusinessDays(kase.notified_on, R.itirazSure) < today)],
+    ["e-Okul'a işlendi, davranış puanı indirildi (md.170–171)", kase.eokul_entered],
+  ] : [
     ["Olay tespit tutanağı düzenlendi", has("olay_tutanagi")],
     ["Öğrenci ifadesi tutanakla alındı (Madde 60/1)", has("ogrenci_ifade")],
     ["Tanık ifadesi / ifade vermeme tutanağı (Madde 60/2)", has("tanik_ifade") || has("ifade_vermeme")],
@@ -5542,20 +5752,21 @@ async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
     ["Kurula sevk yazısı", has("kurula_sevk")],
     ["Kurul kararı gerekçeli ve madde belirtilmiş (Madde 60/3)", has("kurul_karari") && !!kase.decision_rationale],
     ["Yaptırım ve karar bilgileri işlendi", kase.sanction !== "yok" && !!kase.decision_date],
-    [kase.sanction === "okul_degistirme" ? "Dosya ilçe kuruluna gönderildi (Madde 61/1)" : "Müdür onayı tarihi girildi (Madde 62/1)", kase.sanction === "okul_degistirme" ? !!kase.ilce_sent_on : !!kase.approval_date],
+    [approvalTarget !== "mudur" ? "Dosya ilçe kuruluna gönderildi (Madde 61/1)" : "Müdür onayı tarihi girildi (Madde 62/1)", approvalTarget !== "mudur" ? !!kase.ilce_sent_on : !!kase.approval_date],
     ["Veliye tebliğ edildi (Madde 62)", !!kase.notified_on],
-    ["İtiraz süresi (5 iş günü) tamamlandı / itiraz işlendi", !!kase.notified_on && (!!kase.appeal_on || addBusinessDays(kase.notified_on, 5) < toLocalISO(new Date()))],
+    ["İtiraz süresi (5 iş günü) tamamlandı / itiraz işlendi", !!kase.notified_on && (!!kase.appeal_on || addBusinessDays(kase.notified_on, R.itirazSure) < today)],
     ["e-Okul'a işlendi (Madde 56/13)", kase.eokul_entered],
   ];
   const doneCount = checklist.filter(([, ok]) => ok).length;
   const dlState = { gecti: ["crit", "Süre geçti"], yaklasiyor: ["warn", "Yaklaşıyor"], uygun: ["good", "Süre içinde"], tamam: ["good", "Tamamlandı"], itiraz: ["warn", "İtiraz var"], kapandi: ["muted", "Süre doldu"], acik: ["warn", "Açık"] };
-  const docTpl = ui.newDoc ? DIS_DOC_BY_KEY[ui.newDoc] : null;
+  const docTpl = ui.newDoc ? disDocTpl(R, ui.newDoc) : null;
   const docFields = docTpl ? docTpl.fields(kase).map(f => {
     if (f.id === "uyeler" && kurulUyeleri) return { ...f, v: kurulUyeleri };
     if ((f.id === "eslik" || f.id === "hazirlayan") && rehber && !f.v) return { ...f, v: rehber };
     if (f.id === "baskan" && kurulUyeleri) { const bask = kurulUyeleri.split("\n").find(l => /başkan/i.test(l)); if (bask) return { ...f, v: bask.split(" — ")[0] }; }
     return f;
   }) : [];
+  const puanIndirimi = L && R.puan && R.puan[kase.sanction] ? R.puan[kase.sanction] : null;
 
   content.innerHTML = `
     <button class="navlink" id="dis-back-list">← Dosya listesi</button>
@@ -5565,14 +5776,14 @@ async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
           <div class="eyebrow" style="margin-bottom:4px">Dosya ${esc(disCaseNo(kase))}</div>
           <h3 style="margin:0">${esc(kase.student_name)} ${kase.class_label ? `<span style="font-weight:400;color:var(--muted)">· ${esc(kase.class_label)}${kase.student_no ? ` · No ${esc(kase.student_no)}` : ""}</span>` : ""}</h3>
           <div style="font-size:13px;margin-top:4px">${fmtDate(kase.incident_date)}${kase.incident_time ? ` ${esc(kase.incident_time)}` : ""}${kase.incident_place ? ` · ${esc(kase.incident_place)}` : ""} — ${esc(kase.summary)}</div>
-          ${kase.behavior_ref ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">Madde ${esc(kase.behavior_ref)}: ${esc(DIS_BEHAVIORS.find(b => b.code === kase.behavior_ref)?.t || "")}</div>` : ""}
+          ${kase.behavior_ref ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">${L ? "md." : "Madde "}${esc(kase.behavior_ref)}: ${esc((R.behaviors.find(b => b.code === kase.behavior_ref) || {}).t || "")}</div>` : ""}
         </div>
-        <div style="text-align:right"><span class="pill ${DIS_SANCTION_PILL[kase.sanction]}">${DIS_SANCTIONS[kase.sanction]}</span><div style="font-size:12px;color:var(--muted);margin-top:6px">Kontrol listesi ${doneCount}/${checklist.length}</div></div>
+        <div style="text-align:right"><span class="pill ${DIS_SANCTION_PILL[kase.sanction] || "muted"}">${esc(disSanctionLabel(R, kase.sanction))}${kase.sanction === "kisa_sureli" && kase.uzaklastirma_gun ? ` (${kase.uzaklastirma_gun} gün)` : ""}</span>${puanIndirimi ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">Davranış puanı −${puanIndirimi} (md.170)</div>` : ""}<div style="font-size:12px;color:var(--muted);margin-top:6px">Kontrol listesi ${doneCount}/${checklist.length}</div></div>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:14px">
-        ${DIS_STAGES.map((s, i) => `<div class="subtab ${i === stageIdx ? "active" : ""}" data-stage="${s.id}" style="${i < stageIdx ? "border-color:var(--good);color:var(--good)" : ""}" title="${esc(s.hint)}">${i + 1}. ${s.label}</div>`).join("")}
+        ${R.stages.map((s, i) => `<div class="subtab ${i === stageIdx ? "active" : ""}" data-stage="${s.id}" style="${i < stageIdx ? "border-color:var(--good);color:var(--good)" : ""}" title="${esc(s.hint)}">${i + 1}. ${s.label}</div>`).join("")}
       </div>
-      <p style="font-size:12.5px;color:var(--muted);margin:10px 0 0">${esc(DIS_STAGES[stageIdx].hint)}</p>
+      <p style="font-size:12.5px;color:var(--muted);margin:10px 0 0">${esc(R.stages[stageIdx].hint)}</p>
     </div>
 
     ${deadlines.length ? `
@@ -5588,28 +5799,36 @@ async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
       </div>
       <div class="card">
         <h3 style="margin-top:0">Karar ve Süreç Bilgileri</h3>
-        <label>Yaptırım</label>
-        <select id="dk-sanction">${Object.entries(DIS_SANCTIONS).map(([k, v]) => `<option value="${k}" ${kase.sanction === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+        <label>${L ? "Ceza" : "Yaptırım"}</label>
+        <select id="dk-sanction">${Object.entries(R.sanctions).map(([k, v]) => `<option value="${k}" ${kase.sanction === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+        ${L ? `<div id="dk-gun-wrap" class="${kase.sanction === "kisa_sureli" ? "" : "hidden"}"><label>Uzaklaştırma süresi (gün, 1–5 — md.164/2, 172/1)</label><input id="dk-gun" type="number" min="1" max="5" value="${kase.uzaklastirma_gun || ""}"></div>` : ""}
         <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end">
           <div><label>Karar no</label><input id="dk-decno" value="${esc(kase.decision_no || "")}"></div>
           <div><label>Karar tarihi</label>${dateInputHtml("dk-decdate", kase.decision_date || "")}</div>
         </div>
-        <label>Karar gerekçesi <span style="color:var(--muted);font-weight:400">(Madde 60/3 — karar belgesine geçer)</span></label>
+        <label>Karar gerekçesi <span style="color:var(--muted);font-weight:400">(${R.refs.karar} — karar belgesine geçer)</span></label>
         <textarea id="dk-rationale" rows="2" ${DIS_TA}>${esc(kase.decision_rationale || "")}</textarea>
+        ${L ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label>Tedbir başlangıcı <span style="color:var(--muted);font-weight:400">(md.175, varsa)</span></label>${dateInputHtml("dk-tedbir-start", kase.tedbir_start || "")}</div>
+          <div><label>Tedbir bitişi</label>${dateInputHtml("dk-tedbir-end", kase.tedbir_end || "")}</div>
+        </div>` : ""}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div><label>Müdür onay tarihi</label>${dateInputHtml("dk-approval", kase.approval_date || "")}</div>
           <div><label>Veliye tebliğ tarihi</label>${dateInputHtml("dk-notified", kase.notified_on || "")}</div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div><label>İtiraz tarihi <span style="color:var(--muted);font-weight:400">(varsa)</span></label>${dateInputHtml("dk-appeal", kase.appeal_on || "")}</div>
-          <div><label>İlçe kuruluna gönderim</label>${dateInputHtml("dk-ilce", kase.ilce_sent_on || "")}</div>
+          <div><label>${L ? "Onay için ilçe/il kuruluna gönderim" : "İlçe kuruluna gönderim"}</label>${dateInputHtml("dk-ilce", kase.ilce_sent_on || "")}</div>
         </div>
-        <label>İtiraz sonucu <span style="color:var(--muted);font-weight:400">(varsa)</span></label>
-        <input id="dk-appealres" value="${esc(kase.appeal_result || "")}" placeholder="örn. ilçe kurulu itirazı reddetti">
-        <div class="check-row"><input type="checkbox" id="dk-eokul" ${kase.eokul_entered ? "checked" : ""}><label for="dk-eokul">e-Okul'a işlendi (Madde 56/13)</label></div>
+        ${L ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label>İtirazın yetkili kurula gönderimi <span style="color:var(--muted);font-weight:400">(md.169/3, 5 iş günü)</span></label>${dateInputHtml("dk-appeal-sent", kase.appeal_sent_on || "")}</div>
+          <div><label>İtiraz sonucu <span style="color:var(--muted);font-weight:400">(kesin, md.169/4)</span></label><input id="dk-appealres" value="${esc(kase.appeal_result || "")}" placeholder="örn. ilçe kurulu itirazı reddetti"></div>
+        </div>` : `<label>İtiraz sonucu <span style="color:var(--muted);font-weight:400">(varsa)</span></label>
+        <input id="dk-appealres" value="${esc(kase.appeal_result || "")}" placeholder="örn. ilçe kurulu itirazı reddetti">`}
+        <div class="check-row"><input type="checkbox" id="dk-eokul" ${kase.eokul_entered ? "checked" : ""}><label for="dk-eokul">e-Okul'a işlendi (${R.refs.eokul})${puanIndirimi ? ` — davranış puanı −${puanIndirimi}` : ""}</label></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div><label>e-Okul işlem tarihi</label>${dateInputHtml("dk-eokuldate", kase.eokul_entered_on || "")}</div>
-          <div><label>Yaptırımın kaldırılma tarihi <span style="color:var(--muted);font-weight:400">(Madde 62/3)</span></label>${dateInputHtml("dk-lifted", kase.lifted_on || "")}</div>
+          <div><label>${L ? "Cezanın kaldırılma tarihi" : "Yaptırımın kaldırılma tarihi"} <span style="color:var(--muted);font-weight:400">(${R.refs.kaldirma})</span></label>${dateInputHtml("dk-lifted", kase.lifted_on || "")}</div>
         </div>
         <label>Not</label>
         <input id="dk-notes" value="${esc(kase.notes || "")}">
@@ -5624,7 +5843,7 @@ async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select id="dd-type" style="width:auto;margin:0">
             <option value="">Yeni belge ekle…</option>
-            ${DIS_STAGES.map(s => { const list = DIS_DOCS.filter(d => d.stage === s.id); return list.length ? `<optgroup label="${s.label}">${list.map(d => `<option value="${d.key}">${d.title}</option>`).join("")}</optgroup>` : ""; }).join("")}
+            ${R.stages.map(s => { const list = disDocs(R).filter(d => d.stage === s.id); return list.length ? `<optgroup label="${esc(s.label)}">${list.map(d => `<option value="${d.key}">${esc(d.title)}</option>`).join("")}</optgroup>` : ""; }).join("")}
           </select>
           <button class="secondary" id="dd-dizi" style="width:auto;padding:7px 12px;font-size:12.5px;margin:0">Dizi Pusulası</button>
         </div>
@@ -5645,7 +5864,9 @@ async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
   `;
 
   ["dk-decdate", "dk-approval", "dk-notified", "dk-appeal", "dk-ilce", "dk-eokuldate", "dk-lifted"].forEach(wireDate3);
+  if (L) ["dk-tedbir-start", "dk-tedbir-end", "dk-appeal-sent"].forEach(wireDate3);
   docFields.filter(f => f.type === "date").forEach(f => wireDate3("dd-" + f.id));
+  if (L) document.getElementById("dk-sanction").onchange = (ev) => document.getElementById("dk-gun-wrap").classList.toggle("hidden", ev.target.value !== "kisa_sureli");
 
   document.getElementById("dis-back-list").onclick = () => renderDisiplinModule(profile, school);
   content.querySelectorAll("[data-stage]").forEach(el => el.onclick = async () => {
@@ -5655,7 +5876,7 @@ async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
 
   document.getElementById("dk-save").onclick = async () => {
     const msg = document.getElementById("dk-msg");
-    const v = (id) => document.getElementById(id).value;
+    const v = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
     const patch = {
       sanction: v("dk-sanction"), decision_no: v("dk-decno").trim() || null, decision_date: v("dk-decdate") || null,
       decision_rationale: v("dk-rationale").trim() || null, approval_date: v("dk-approval") || null, notified_on: v("dk-notified") || null,
@@ -5663,8 +5884,14 @@ async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
       eokul_entered: document.getElementById("dk-eokul").checked, eokul_entered_on: v("dk-eokuldate") || null, lifted_on: v("dk-lifted") || null,
       notes: v("dk-notes").trim() || null, updated_at: new Date().toISOString(),
     };
-    if (patch.sanction === "okul_degistirme" && patch.approval_date && !patch.ilce_sent_on) {
-      msg.innerHTML = `<div class="msg err">Okul değiştirme yaptırımı okul müdürü tarafından onaylanamaz; onay ilçe kurulundan gelir (Madde 56/6). "İlçe kuruluna gönderim" tarihini gir.</div>`; return;
+    if (L) {
+      patch.uzaklastirma_gun = patch.sanction === "kisa_sureli" ? (parseInt(v("dk-gun"), 10) || null) : null;
+      patch.tedbir_start = v("dk-tedbir-start") || null; patch.tedbir_end = v("dk-tedbir-end") || null; patch.appeal_sent_on = v("dk-appeal-sent") || null;
+      if (patch.sanction === "kisa_sureli" && !(patch.uzaklastirma_gun >= 1 && patch.uzaklastirma_gun <= 5)) { msg.innerHTML = `<div class="msg err">Okuldan kısa süreli uzaklaştırma 1–5 gün arasındadır (md.164/2, 172/1); gün sayısını gir.</div>`; return; }
+      if (patch.tedbir_start && patch.tedbir_end && patch.tedbir_end > addBusinessDays(patch.tedbir_start, R.tedbirMax)) { msg.innerHTML = `<div class="msg err">Tedbir kararıyla uzaklaştırma ${R.tedbirMax} iş gününü geçemez (md.175/1); uzatma ancak millî eğitim müdürünün onayıyla iki kez yapılabilir — bitişi düzelt ya da notta onayı belirt.</div>`; return; }
+    }
+    if (R.approvalBy(patch.sanction) !== "mudur" && patch.approval_date && !patch.ilce_sent_on) {
+      msg.innerHTML = `<div class="msg err">${esc(disSanctionLabel(R, patch.sanction))} ${L ? "cezası" : "yaptırımı"} okul müdürü tarafından onaylanamaz; onay ${esc(disUstKurul(R, R.approvalBy(patch.sanction)))}ndan gelir (${L ? "md.169/2" : "Madde 56/6"}). Kurula gönderim tarihini gir.</div>`; return;
     }
     const { error } = await sb.from("discipline_cases").update(patch).eq("id", caseId);
     if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
@@ -5686,7 +5913,8 @@ async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
     if (DIS_STAGE_IDX[docTpl.stage] > stageIdx) patch.stage = docTpl.stage;
     if (docTpl.key === "kurul_karari") { if (data.karar_no) patch.decision_no = data.karar_no; if (data.tarih) patch.decision_date = data.tarih; if (data.gerekce) patch.decision_rationale = data.gerekce; }
     if (docTpl.key === "mudur_onayi" && data.tarih) patch.approval_date = data.tarih;
-    if (docTpl.key === "ilce_ust_yazi" && data.tarih) patch.ilce_sent_on = data.tarih;
+    if (docTpl.key === "ilce_ust_yazi" && data.tarih) { if (kase.appeal_on) patch.appeal_sent_on = data.tarih; else patch.ilce_sent_on = data.tarih; }
+    if (docTpl.key === "tedbir_karari") { if (data.baslangic) patch.tedbir_start = data.baslangic; if (data.bitis) patch.tedbir_end = data.bitis; }
     await sb.from("discipline_cases").update(patch).eq("id", caseId);
     await rerender({ newDoc: null, openDocId: saved.id });
   };
@@ -7549,7 +7777,7 @@ const KILAVUZ_SECTIONS = [
     <p style="color:var(--muted)">Tahmini tutar, haftalık plan × birim ücrettir; kesin aylık ödeme MEBBİS Ek Ders Modülünde fiilen yapılan gün/saat üzerinden hesaplanır (md.25: ek ders fiilen yapılmadan ödenmez, düzenleyen ve onaylayan müteselsilen sorumludur).</p>
   ` },
   { id: "disiplin", title: "Öğrenci Disiplin Dosyası", html: `
-    <p>Ortaokul öğrencileri için <strong>MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği Madde 54–65</strong>'e göre kurulmuş dosya akışı: Olay &amp; Tutanak → Uyarma Süreci (Madde 54/3) → İfadeler (Madde 60) → Kurul &amp; Karar (Madde 59-60) → Onay (Madde 56/6, 62/1) → Veliye Tebliğ (Madde 62) → İtiraz Penceresi (Madde 56/11-12) → e-Okul &amp; Kapanış (Madde 56/13, 62/3). Aşama çubuğundaki her adımın üzerine gelince ilgili hüküm görünür.</p>
+    <p>Okul türüne göre iki ayrı rejim: <strong>Ortaokul</strong> — MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği Madde 54–65 (Öğrenci Davranışlarını Değerlendirme Kurulu; uyarma/kınama/okul değiştirme). <strong>Lise</strong> — MEB Ortaöğretim Kurumları Yönetmeliği md.163–176 ve 185–198 (Okul Öğrenci Ödül ve Disiplin Kurulu; kınama / 1–5 gün kısa süreli uzaklaştırma / okul değiştirme / örgün eğitim dışına çıkarma; davranış puanı 10/20/40/80; tedbir kararı md.175; rehberlik raporu md.192; savunma md.194; itiraz md.169/3 ve kesin karar md.169/4). Akış aynı sekiz aşamadan geçer: Olay &amp; Tutanak → Uyarma Süreci / Rehberlik Raporu &amp; Sevk → İfadeler (&amp; Savunma) → Kurul &amp; Karar → Onay → Veliye Tebliğ → İtiraz → e-Okul &amp; Kapanış. Aşama çubuğundaki her adımın üzerine gelince ilgili hüküm görünür.</p>
     <ol>
       <li><strong>Dosya aç</strong>: öğrenci, olay tarihi/yeri, kısa konu; istersen Madde 55'teki davranış türünü seç (bilgi amaçlı — nihai takdir kurulun, Madde 56/1).</li>
       <li><strong>Belge ekle</strong>: olay tutanağı, öğrenci/tanık ifadesi, ifade vermeme tutanağı, rehberlik görüşü, veli görüşme tutanağı, kurula sevk, kurul kararı, müdür onayı, veliye tebliğ + tebellüğ, ilçe üst yazısı. Alanlar dosya bilgisiyle dolu gelir; Planlama İşleri'nde adında "Davranış" geçen bir kurul varsa üyeler de otomatik dolar. Her belge kaydedilir, sonradan yeniden açılıp yazdırılır/Word'e alınır.</li>
@@ -7557,7 +7785,7 @@ const KILAVUZ_SECTIONS = [
       <li><strong>Dizi Pusulası</strong>: dosyadaki belgelerden otomatik üretilir — ilçeye gönderirken ya da teftişte dosyanın içindekiler listesi.</li>
     </ol>
     <p>Kurul kararı belgesi Madde 60/3'ün zorunlu unsurlarını (gerekçe, takdirde esas alınan hususlar, dayanılan maddeler, oy durumu, imzalar) içerir; resmî karar defterine <strong>EK-10</strong> formatında yazılması gerektiğini belgede hatırlatır. Sistem, okul değiştirme yaptırımına "müdür onayı" girilmesini engeller (onay ilçe kurulundan gelir, Madde 56/6).</p>
-    <p style="color:var(--muted)">Lise farklı bir yönetmeliğe (Ortaöğretim Kurumları Yönetmeliği — Okul Öğrenci Ödül ve Disiplin Kurulu) tabidir; bu sürüm lise akışını içermez ve lise okullarında bunu açıkça uyarır.</p>
+    <p style="color:var(--muted)">Lisede ek olarak: tedbir kararı (md.175: en çok 10 iş günü, 3 iş günü içinde işlem başlar), savunma çağrı yazısı ve savunma tutanağı (md.194), kısa süreli uzaklaştırmada gün sayısı (1–5), onay mercii cezaya göre (kınama/kısa süreli → müdür; okul değiştirme → ilçe; örgün eğitim dışı → il), itirazın 5 iş günü içinde yetkili kurula gönderilmesi ve davranış puanı indirimi (md.170). Okul öncesi ve ilkokulda yaptırım yoktur; modül yalnızca kayıt için kullanılır.</p>
   ` },
   { id: "bakim", title: "Periyodik Bakım Takibi", html: `
     <p>Okulun periyodik bakım/kontrol kalemlerini (asansör, yangın tüpü, su deposu, doğalgaz, paratoner, jeneratör…) tek yerden takip eder: <strong>son yapılma tarihi + periyot → sonraki tarih</strong>, kalan gün ve durum (Gecikti / Yaklaşıyor / Uygun) otomatik hesaplanır. "Yaklaşıyor" eşiği 30 gündür; aylık kalemlerde periyodun yarısı (15 gün) alınır ki yeni yapılmış bir bakım hemen uyarı vermesin. Gecikmiş kalem sayısı ana ekrandaki kartta rozet olarak görünür.</p>
@@ -7638,6 +7866,7 @@ const SSS_ITEMS = [
   { cat: "Ek Ders", q: "Aylık ücreti neden hesaplamıyor?", a: `Md.25 gereği ek ders yalnızca fiilen yapılan görevler için ödenir; aylık tutar o ayki fiilî gün/saat, izin-rapor ve tatil günlerine göre MEBBİS Ek Ders Modülünde hesaplanır. Panel haftalık planlanan saat × birim ücret tahmini verir; onay çizelgesi de zaten haftalık saatler üzerinden düzenlenir.` },
   { cat: "Disiplin Dosyası", q: "Davranış türünü seçince yaptırım kendiliğinden belirleniyor mu?", a: `Hayır. Madde 55 listesi sadece ön eşleştirme/bilgi içindir; yaptırımı, Madde 56/1'deki hususları (davranışın niteliği, öğrencinin genel durumu, yaşı, başarısı, daha önce yaptırım alıp almadığı) dikkate alarak kurul takdir eder. Uyarma ve kınamayı kurul verir (Madde 56/4); okul değiştirme ilçe kurulunun onayıyla uygulanır (Madde 56/6).` },
   { cat: "Disiplin Dosyası", q: "İtiraz süresi nasıl hesaplanıyor, resmî tatiller dahil mi?", a: `Madde 56/11: veli, tebliğ tarihinden itibaren 5 iş günü içinde okul müdürlüğüne itiraz edebilir. Panel iş günü hesabında Cumartesi/Pazar'ı atlar ama resmî tatilleri bilmez — araya bayram/idari tatil giriyorsa son günü kendin bir gün ileri al. İtiraz sonuçlanana kadar yaptırım uygulanmaz (Madde 56/12).` },
+  { cat: "Disiplin Dosyası", q: "Lisede süreç ortaokuldan nasıl farklı?", a: `Lise, Ortaöğretim Kurumları Yönetmeliği'ne tabidir: cezalar kınama, 1–5 gün okuldan kısa süreli uzaklaştırma, okul değiştirme ve örgün eğitim dışına çıkarmadır (md.163); her ceza davranış puanından 10/20/40/80 düşer (md.170). Konu önce rehberlik servisine gider ve rapor müdüre verilir (md.192/1); kurul 10 iş günü içinde karar verir (md.192/3); öğrencinin yazılı ve gerekirse sözlü savunması alınır (md.194). Kınama ve kısa süreli uzaklaştırmayı müdür, okul değiştirmeyi ilçe, örgün eğitim dışına çıkarmayı il öğrenci disiplin kurulu onaylar (md.169/2). İtiraz tebliği izleyen 5 iş günü içinde okul müdürlüğü kanalıyla yapılır, okul 5 iş günü içinde yetkili kurula gönderir, verilen karar kesindir (md.169/3-4). Panel okul türü "Lise" ise bu rejimi kendiliğinden uygular.` },
   { cat: "Disiplin Dosyası", q: "Yaptırım sonradan kaldırılabilir mi?", a: `Evet. Madde 62/3: davranışı tekrarlamayan ve olumlu davranışları gözlenen öğrencinin yaptırımı, kurulun dönem sonu toplantısında alacağı kararla kaldırılabilir; karar 5 iş günü içinde e-Okul'daki dosyadan çıkarılır. Dosyada "Yaptırımın kaldırılma tarihi" alanına işle.` },
   { cat: "Periyodik Bakım", q: "Örnek kalemlerdeki periyotlar yasal zorunluluk mu?", a: `Hayır. Örnek periyotlar sahadan gelen yaygın uygulamayı yansıtır, yasal süre değildir. Asansör, yangın tesisatı, doğalgaz, elektrik/topraklama gibi kalemlerde yürürlükteki mevzuatın ve yetkili muayene kuruluşunun belirlediği süre esastır — farklıysa "Düzenle" ile periyodu değiştir.` },
   { cat: "Periyodik Bakım", q: "Eski tarihli bir bakımı sonradan girersem sonraki tarih geriye kayar mı?", a: `Hayır. "✓ Yapıldı" ile girilen tarih, kalemin mevcut son yapılma tarihinden eskiyse sadece Bakım Geçmişi'ne kaydedilir; sonraki bakım tarihi her zaman en güncel yapılma tarihinden hesaplanır.` },
