@@ -174,7 +174,7 @@ const MODULES = [
   { name: "Nöbet Programı", desc: "Otomatik + adil çizelge; yasaklı alan, sabitleme, WhatsApp bildirimi." },
   { name: "Teftişe Hazırlık", desc: "Resmî madde + sahadan gelen pratik notlar." },
   { name: "Aylık Yönetim Akışı", desc: "Ay ay yapılması gereken idari iş ve işlemler." },
-  { name: "Personel İşleri", desc: "Maaş değişikliği, terfi takip, devam çizelgesi — sadece bu cihazda saklanır." },
+  { name: "Personel İşleri", desc: "Tüm personelin asıl kaynağı: öğretmen, yönetici, memur, hizmetli kayıtları (diğer modüller buradan okur); maaş/terfi ve devam kayıtları bu cihazda." },
   { name: "Mevzuata Sor", desc: "Teftişe Hazırlık ve Aylık Yönetim Akışı'ndaki doğrulanmış maddeler arasında ara." },
   { name: "Ders Dağıtım Programı", desc: "Sınıf/öğretmen/ders saatlerinden çakışmasız, dengeli haftalık ders programı üretir." },
   { name: "Sınav Kelebek", desc: "Aynı sınıftan öğrenciler yan yana oturmayacak şekilde sınav oturma planı üretir — sadece bu cihazda saklanır." },
@@ -891,16 +891,23 @@ function localStorageBlockedNotice() {
   `;
 }
 
-/* ============ PERSONEL İŞLERİ (yalnızca tarayıcıda — sunucuya gönderilmez) ============ */
-
+/* ============ PERSONEL İŞLERİ (tek kaynak: teachers tablosu — sunucu; maaş/terfi ve devam kayıtları yalnızca tarayıcıda) ============ */
+/**
+ * 2026-09-07 kararı: öğretmen/personel bilgisinin ASIL KAYNAĞI bu modüldür. Kimlik bilgileri (ad, tür, görev, branş,
+ * telefon, cinsiyet, işe başlama) Supabase `teachers` tablosunda tutulur; Nöbet, Ders Dağıtım, Ek Ders, Ders Denetimi,
+ * Planlama, Talep, LGS ve Disiplin aynı tabloyu okur. Daha önce yalnızca tarayıcıda (localStorage) tutulan personel
+ * listesi ilk açılışta otomatik olarak tabloya taşınır (ad eşleşmesiyle çoğaltma yapılmaz); maaş/terfi ve devam
+ * kayıtları tarayıcıda kalır ve personel kimliğine (teacher id) yeniden bağlanır.
+ */
 function personelKey(school) { return `personel_data_${school.id}`; }
 
 function loadPersonel(school) {
   try {
     const raw = localStorage.getItem(personelKey(school));
-    return raw ? JSON.parse(raw) : { staff: [], changes: [], attendance: [] };
+    const d = raw ? JSON.parse(raw) : {};
+    return { staff: d.staff || [], changes: d.changes || [], attendance: d.attendance || [], migratedAt: d.migratedAt || null };
   } catch {
-    return { staff: [], changes: [], attendance: [] };
+    return { staff: [], changes: [], attendance: [], migratedAt: null };
   }
 }
 
@@ -920,136 +927,189 @@ function localStorageSaveErrHtml() {
   const detail = lastLocalStorageError
     ? `${lastLocalStorageError.name || "Error"}: ${lastLocalStorageError.message || "(mesaj yok)"}`
     : "bilinmeyen hata (istisna nesnesi yakalanamadı)";
-  return `<div class="msg err">Kaydedilemedi — tarayıcının yerel depolaması (localStorage) bu sayfada kapalı ya da dolu olabilir. Gizli/Private sekmede olabilirsin ya da tarayıcı ayarlarından site verilerine izin vermen gerekebilir.<div style="margin-top:6px;font-size:11px;font-family:ui-monospace,monospace;opacity:0.75">Teknik detay: ${esc(detail)}</div></div>`;
+  return `<div class="msg err">Kaydedilemedi — tarayıcının yerel depolaması (localStorage) bu sayfada kapalı ya da dolu olabilir. Gizli/Private sekmede olabilirsin ya da tarayıcı ayarlarında site verileri engellenmiş olabilir. Teknik ayrıntı: ${esc(detail)}</div>`;
 }
 
 function uid() {
   return window.crypto?.randomUUID ? window.crypto.randomUUID() : String(Date.now()) + Math.random();
 }
 
-async function renderPersonelModule(profile, school) {
-  if (!localStorageAvailable()) {
-    app.innerHTML = `
-      <div class="wrap wide">
-        <button class="navlink" id="back-dash">← Panele dön</button>
-        <div class="eyebrow">Personel İşleri</div>
-        <h1>${esc(school.name)}</h1>
-        ${localStorageBlockedNotice()}
-      </div>
-    `;
-    document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
-    return;
+const STAFF_TYPE_LABELS = { ogretmen: "Öğretmen", yonetici: "Yönetici (müdür yrd.)", memur: "Memur", hizmetli: "Hizmetli / Yardımcı personel", diger: "Diğer" };
+const STAFF_TYPE_PILL = { ogretmen: "", yonetici: "good", memur: "warn", hizmetli: "muted", diger: "muted" };
+const personelNorm = s => (s || "").trim().toLocaleLowerCase("tr-TR").replace(/\s+/g, " ");
+function guessStaffType(title) {
+  const t = (title || "").toLocaleLowerCase("tr-TR");
+  if (/müdür yard|md\.? ?yrd|müdür baş/.test(t)) return "yonetici";
+  if (/hizmetli|temizlik|güvenlik|aşçı|kaloriferci|şoför|yardımcı personel|işkur|typ/.test(t)) return "hizmetli";
+  if (/memur|vhki|şef|sekreter|mutemet/.test(t)) return "memur";
+  return "ogretmen";
+}
+
+/* Tarayıcıdaki eski personel listesini sunucuya taşır; ad eşleşmesiyle çoğaltma yapmaz. Dönüş: {added, matched}. */
+async function personelMigrateLocal(school, data, teachers) {
+  if (!data.staff.length) return { added: 0, matched: 0 };
+  const byName = {};
+  (teachers || []).forEach(t => byName[personelNorm(t.full_name)] = t);
+  const idMap = {};
+  let added = 0, matched = 0;
+  for (const s of data.staff) {
+    const key = personelNorm(s.full_name);
+    if (!key) continue;
+    let t = byName[key];
+    if (t) {
+      matched++;
+      if (s.title && !t.title) { await sb.from("teachers").update({ title: s.title }).eq("id", t.id); t.title = s.title; }
+    } else {
+      const staff_type = guessStaffType(s.title);
+      const { data: ins, error } = await sb.from("teachers").insert({ school_id: school.id, full_name: s.full_name.trim(), title: s.title || null, branch: staff_type === "ogretmen" ? (s.title || null) : null, staff_type, is_idareci: staff_type === "yonetici" }).select().single();
+      if (error || !ins) continue;
+      t = ins; byName[key] = t; teachers.push(t); added++;
+    }
+    idMap[s.id] = t.id;
   }
+  data.changes = data.changes.map(c => ({ ...c, staff_id: idMap[c.staff_id] || c.staff_id }));
+  data.attendance = data.attendance.map(a => ({ ...a, staff_id: idMap[a.staff_id] || a.staff_id }));
+  data.staff = data.staff.filter(s => !idMap[s.id]);
+  data.migratedAt = new Date().toISOString();
+  savePersonel(school, data);
+  return { added, matched };
+}
+
+async function renderPersonelModule(profile, school, tab = "staff") {
   app.innerHTML = `
     <div class="wrap wide">
       <button class="navlink" id="back-dash">← Panele dön</button>
       <div class="eyebrow">Personel İşleri</div>
       <h1>${esc(school.name)}</h1>
-      <div class="subtitle">🔒 Bu modüldeki veriler yalnızca bu tarayıcıda saklanır, sunucuya gönderilmez.</div>
+      <div class="subtitle">Okulun tüm personelinin asıl kaynağı. Buradaki kimlik bilgileri (ad, tür, görev, branş, telefon, işe başlama) sunucuda tutulur ve Nöbet, Ders Dağıtım, Ek Ders, Ders Denetimi, Planlama ve LGS aynı listeyi kullanır. 🔒 Maaş/terfi ve devam kayıtları yalnızca bu tarayıcıda kalır.</div>
       <div class="subtabs">
-        <div class="subtab active" data-ptab="staff">Personel</div>
-        <div class="subtab" data-ptab="changes">Maaş &amp; Terfi</div>
-        <div class="subtab" data-ptab="attendance">Devam Çizelgesi</div>
+        <div class="subtab ${tab === "staff" ? "active" : ""}" data-ptab="staff">Personel</div>
+        <div class="subtab ${tab === "changes" ? "active" : ""}" data-ptab="changes">Maaş &amp; Terfi</div>
+        <div class="subtab ${tab === "attendance" ? "active" : ""}" data-ptab="attendance">Devam Çizelgesi</div>
       </div>
       <div id="personel-content"></div>
     </div>
   `;
   document.getElementById("back-dash").onclick = () => renderDashboard(profile, school);
-  function showTab(tab) {
-    document.querySelectorAll("[data-ptab]").forEach(el => el.classList.toggle("active", el.dataset.ptab === tab));
-    const content = document.getElementById("personel-content");
-    if (tab === "changes") renderPersonelChanges(school, content);
-    else if (tab === "attendance") renderPersonelAttendance(school, content);
-    else renderPersonelStaff(school, content);
-  }
-  document.querySelectorAll("[data-ptab]").forEach(el => el.onclick = () => showTab(el.dataset.ptab));
-  showTab("staff");
+  document.querySelectorAll("[data-ptab]").forEach(el => el.onclick = () => renderPersonelModule(profile, school, el.dataset.ptab));
+  const content = document.getElementById("personel-content");
+  content.innerHTML = `<div class="card">Yükleniyor…</div>`;
+  if (tab === "changes") await renderPersonelChanges(school, content);
+  else if (tab === "attendance") await renderPersonelAttendance(school, content);
+  else await renderPersonelStaff(school, content);
 }
 
-async function renderPersonelStaff(school, content, editingId = null) {
+async function personelTeachers(school) {
+  const { data } = await sb.from("teachers").select("*").eq("school_id", school.id).order("full_name");
+  return data || [];
+}
+
+async function renderPersonelStaff(school, content, editingId = null, notice = "") {
   const data = loadPersonel(school);
-  const editStaff = editingId ? data.staff.find(s => s.id === editingId) : null;
-  const { data: teachers } = editStaff ? { data: [] } : await sb.from("teachers").select("id, full_name, branch").eq("school_id", school.id).order("full_name");
+  const teachers = await personelTeachers(school);
+  if (data.staff.length && localStorageAvailable()) {
+    const r = await personelMigrateLocal(school, data, teachers);
+    if (r.added || r.matched) notice = `<div class="msg ok">Bu tarayıcıdaki eski personel listesi sunucuya taşındı: ${r.added} yeni kayıt eklendi${r.matched ? `, ${r.matched} kayıt zaten listede olduğu için birleştirildi` : ""}. Artık tüm modüller aynı listeyi kullanıyor.</div>`;
+    teachers.sort((a, b) => a.full_name.localeCompare(b.full_name, "tr"));
+  }
+  const edit = editingId ? teachers.find(t => t.id === editingId) : null;
+  const counts = {};
+  teachers.forEach(t => counts[t.staff_type] = (counts[t.staff_type] || 0) + 1);
+  const st = edit?.staff_type || "ogretmen";
   content.innerHTML = `
+    ${notice}
     <div class="card" style="margin-bottom:16px">
-      <h3 style="margin-top:0">${editStaff ? "Personeli Düzenle" : "Yeni Personel Ekle"}</h3>
-      ${!editStaff && teachers?.length ? `
-      <label>Öğretmen listesinden doldur <span style="color:var(--muted);font-weight:400">(opsiyonel, sadece adı buraya kopyalar — bu modülün verisi yine sadece bu tarayıcıda kalır)</span></label>
-      <select id="p-teacher-fill">
-        <option value="">— seç —</option>
-        ${teachers.map(t => `<option value="${t.id}">${esc(t.full_name)}</option>`).join("")}
-      </select>
-      ` : ""}
-      <label>Ad Soyad</label>
-      <input id="p-name" value="${editStaff ? esc(editStaff.full_name) : ""}" placeholder="Ad Soyad">
-      <label>Unvan / Branş</label>
-      <input id="p-title" value="${editStaff ? esc(editStaff.title || "") : ""}" placeholder="örn. Sınıf Öğretmeni, Hizmetli">
-      <button class="primary" id="p-save">${editStaff ? "Güncelle" : "Ekle"}</button>
-      ${editStaff ? `<button class="secondary" id="p-cancel" style="margin-top:8px;width:100%">İptal</button>` : ""}
-      <div id="p-msg"></div>
+      <h3 style="margin-top:0">${edit ? "Personeli Düzenle" : "Yeni Personel Ekle"}</h3>
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">
+        <div><label>Ad Soyad</label><input id="ps-name" value="${esc(edit?.full_name || "")}" placeholder="Ad Soyad"></div>
+        <div><label>Personel türü</label><select id="ps-type">${Object.entries(STAFF_TYPE_LABELS).map(([k, v]) => `<option value="${k}" ${st === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label>Görev / unvan <span style="color:var(--muted);font-weight:400">(örn. Müdür Yardımcısı, Sınıf Öğretmeni, Hizmetli)</span></label><input id="ps-title" value="${esc(edit?.title || "")}"></div>
+        <div id="ps-branch-wrap" class="${st === "ogretmen" || st === "yonetici" ? "" : "hidden"}"><label>Branş</label><input id="ps-branch" value="${esc(edit?.branch || "")}" placeholder="örn. Matematik"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end">
+        <div><label>Telefon <span style="color:var(--muted);font-weight:400">(WhatsApp bildirimleri için)</span></label><input id="ps-phone" value="${esc(edit?.phone || "")}" placeholder="05xx xxx xx xx"></div>
+        <div><label>Cinsiyet <span style="color:var(--muted);font-weight:400">(nöbet kıdem muafiyeti için)</span></label><select id="ps-gender"><option value="">—</option><option value="kadin" ${edit?.gender === "kadin" ? "selected" : ""}>Kadın</option><option value="erkek" ${edit?.gender === "erkek" ? "selected" : ""}>Erkek</option></select></div>
+        <div><label>İşe başlama (memuriyet)</label>${dateInputHtml("ps-hire", edit?.hire_date || "")}</div>
+      </div>
+      <label>Not <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
+      <input id="ps-notes" value="${esc(edit?.notes || "")}">
+      <button class="primary" id="ps-save">${edit ? "Güncelle" : "Ekle"}</button>
+      ${edit ? `<button class="secondary" id="ps-cancel" style="margin-top:8px;width:100%">İptal</button>` : ""}
+      <div id="ps-msg"></div>
+      <p style="font-size:12px;color:var(--muted);margin:10px 0 0">Nöbet kotası, muafiyetler, yasaklı alanlar ve davet kodu Nöbet Programı → Öğretmenler sekmesinde; ders yükü Ders Dağıtım'da düzenlenir.</p>
     </div>
     <div class="card">
-      <h3 style="margin-top:0">Personel Listesi (${data.staff.length})</h3>
+      <h3 style="margin-top:0">Personel Listesi (${teachers.length}) <span style="font-size:12px;font-weight:400;color:var(--muted)">${Object.entries(counts).map(([k, n]) => `${STAFF_TYPE_LABELS[k] || k}: ${n}`).join(" · ")}</span></h3>
       <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>Ad</th><th>Unvan</th><th></th></tr></thead>
+        <thead><tr><th>Ad</th><th>Tür / Görev</th><th>Branş</th><th>Telefon</th><th>İşe başlama</th><th>Hesap</th><th></th></tr></thead>
         <tbody>
-          ${data.staff.map(s => `
+          ${teachers.map(t => { const ky = kidemYili(t.hire_date); return `
             <tr>
-              <td>${esc(s.full_name)}</td>
-              <td>${esc(s.title || "")}</td>
-              <td class="row-actions">
-                <button data-edit-staff="${s.id}">Düzenle</button>
-                <button data-del-staff="${s.id}">Sil</button>
-              </td>
-            </tr>
-          `).join("") || `<tr><td colspan="3" style="color:var(--muted)">Henüz personel eklenmedi.</td></tr>`}
+              <td><strong>${esc(t.full_name)}</strong></td>
+              <td><span class="pill ${STAFF_TYPE_PILL[t.staff_type] || ""}">${esc(STAFF_TYPE_LABELS[t.staff_type] || t.staff_type)}</span>${t.title ? `<div style="font-size:11.5px;color:var(--muted)">${esc(t.title)}</div>` : ""}</td>
+              <td>${esc(t.branch || "")}</td>
+              <td>${t.phone ? `<a href="${waLink(t.phone)}" target="_blank" rel="noopener">${esc(t.phone)}</a>` : ""}</td>
+              <td>${t.hire_date ? `${fmtDate(t.hire_date)}${ky !== null ? `<div style="font-size:11.5px;color:var(--muted)">${ky} yıl</div>` : ""}` : ""}</td>
+              <td style="font-size:12px">${t.user_id ? `<span style="color:var(--good)">✅ Bağlı</span>` : t.invite_code ? `Davet kodu: <strong style="font-family:ui-monospace,monospace">${esc(t.invite_code)}</strong>` : `<span style="color:var(--muted)">—</span>`}</td>
+              <td class="row-actions"><button data-ps-edit="${t.id}">Düzenle</button><button data-ps-del="${t.id}">Sil</button></td>
+            </tr>`; }).join("") || `<tr><td colspan="7" style="color:var(--muted)">Henüz personel eklenmedi.</td></tr>`}
         </tbody>
       </table>
       </div>
     </div>
   `;
-  const teacherFillSelect = document.getElementById("p-teacher-fill");
-  if (teacherFillSelect) teacherFillSelect.onchange = (ev) => {
-    const t = teachers.find(x => x.id === ev.target.value);
-    if (!t) return;
-    document.getElementById("p-name").value = t.full_name;
-    if (t.branch) document.getElementById("p-title").value = t.branch;
-  };
-  document.getElementById("p-save").onclick = () => {
-    const full_name = document.getElementById("p-name").value.trim();
-    const title = document.getElementById("p-title").value.trim();
-    const msg = document.getElementById("p-msg");
+  wireDate3("ps-hire");
+  document.getElementById("ps-type").onchange = (ev) => document.getElementById("ps-branch-wrap").classList.toggle("hidden", !(ev.target.value === "ogretmen" || ev.target.value === "yonetici"));
+  document.getElementById("ps-save").onclick = async () => {
+    const msg = document.getElementById("ps-msg");
+    const full_name = document.getElementById("ps-name").value.trim();
     if (!full_name) { msg.innerHTML = `<div class="msg err">Ad soyad gerekli.</div>`; return; }
-    if (editStaff) {
-      editStaff.full_name = full_name;
-      editStaff.title = title;
-    } else {
-      data.staff.push({ id: uid(), full_name, title });
-    }
-    if (!savePersonel(school, data)) { msg.innerHTML = localStorageSaveErrHtml(); return; }
-    renderPersonelStaff(school, content);
+    const staff_type = document.getElementById("ps-type").value;
+    const dup = teachers.find(t => t.id !== edit?.id && personelNorm(t.full_name) === personelNorm(full_name));
+    if (dup && !edit) { msg.innerHTML = `<div class="msg err">"${esc(dup.full_name)}" zaten listede; çoğaltmamak için mevcut kaydı düzenle.</div>`; return; }
+    const payload = {
+      full_name, staff_type, title: document.getElementById("ps-title").value.trim() || null,
+      branch: (staff_type === "ogretmen" || staff_type === "yonetici") ? (document.getElementById("ps-branch").value.trim() || null) : null,
+      phone: document.getElementById("ps-phone").value.trim() || null,
+      gender: document.getElementById("ps-gender").value || null,
+      hire_date: document.getElementById("ps-hire").value || null,
+      notes: document.getElementById("ps-notes").value.trim() || null,
+      is_idareci: staff_type === "yonetici",
+    };
+    const { error } = edit
+      ? await sb.from("teachers").update(payload).eq("id", edit.id)
+      : await sb.from("teachers").insert({ ...payload, school_id: school.id });
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    await renderPersonelStaff(school, content, null, `<div class="msg ok">${esc(full_name)} ${edit ? "güncellendi" : "eklendi"}.</div>`);
   };
-  const cancelBtn = document.getElementById("p-cancel");
+  const cancelBtn = document.getElementById("ps-cancel");
   if (cancelBtn) cancelBtn.onclick = () => renderPersonelStaff(school, content);
-  content.querySelectorAll("[data-edit-staff]").forEach(b => b.onclick = () => renderPersonelStaff(school, content, b.dataset.editStaff));
-  content.querySelectorAll("[data-del-staff]").forEach(b => b.onclick = () => {
-    if (!confirm("Bu personeli silmek istediğine emin misin?")) return;
-    data.staff = data.staff.filter(s => s.id !== b.dataset.delStaff);
-    savePersonel(school, data);
-    renderPersonelStaff(school, content);
+  content.querySelectorAll("[data-ps-edit]").forEach(b => b.onclick = () => renderPersonelStaff(school, content, b.dataset.psEdit));
+  content.querySelectorAll("[data-ps-del]").forEach(b => b.onclick = async () => {
+    const t = teachers.find(x => x.id === b.dataset.psDel);
+    if (!confirm(`${t.full_name} silinsin mi? Nöbet, ders dağıtımı, ek ders ve denetim kayıtlarındaki bağlantıları da etkilenir. Okuldan ayrılan personel için silmek yerine "Not" alanına ayrılış tarihini yazmayı düşün.`)) return;
+    const { error } = await sb.from("teachers").delete().eq("id", t.id);
+    if (error) { await renderPersonelStaff(school, content, null, `<div class="msg err">Silinemedi: ${esc(error.message)} — önce bu personele bağlı nöbet/ders kayıtlarını kaldır.</div>`); return; }
+    await renderPersonelStaff(school, content, null, `<div class="msg ok">${esc(t.full_name)} silindi.</div>`);
   });
 }
 
-function renderPersonelChanges(school, content) {
+async function renderPersonelChanges(school, content) {
+  if (!localStorageAvailable()) { content.innerHTML = localStorageBlockedNotice(); return; }
   const data = loadPersonel(school);
+  const teachers = await personelTeachers(school);
+  const nameOf = id => teachers.find(t => t.id === id)?.full_name || data.staff.find(s => s.id === id)?.full_name || "(silinmiş personel)";
   content.innerHTML = `
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">Yeni Kayıt Ekle</h3>
-      ${!data.staff.length ? `<p style="color:var(--muted);font-size:13px">Önce Personel sekmesinden en az bir personel ekle.</p>` : `
+      <p style="color:var(--muted);font-size:12.5px;margin:0 0 8px">🔒 Bu kayıtlar yalnızca bu tarayıcıda saklanır. Aylık "Maaş Değişiklik Bildirim Formu" (Evrak Deposu) terfi satırlarını buradan doldurur.</p>
+      ${!teachers.length ? `<p style="color:var(--muted);font-size:13px">Önce Personel sekmesinden en az bir personel ekle.</p>` : `
       <label>Personel</label>
       <select id="c-staff">
-        ${data.staff.map(s => `<option value="${s.id}">${esc(s.full_name)}</option>`).join("")}
+        ${teachers.map(s => `<option value="${s.id}">${esc(s.full_name)}</option>`).join("")}
       </select>
       <label>Tür</label>
       <select id="c-type">
@@ -1059,7 +1119,7 @@ function renderPersonelChanges(school, content) {
       <label>Tarih</label>
       ${dateInputHtml("c-date", "")}
       <label>Açıklama</label>
-      <textarea id="c-desc" rows="2" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px" placeholder="örn. Kademe ilerlemesi, 3. derece"></textarea>
+      <textarea id="c-desc" rows="2" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px" placeholder="örn. Kademe ilerlemesi 3/2 → 3/3"></textarea>
       <button class="primary" id="c-save">Ekle</button>
       <div id="c-msg"></div>
       `}
@@ -1070,18 +1130,14 @@ function renderPersonelChanges(school, content) {
       <table class="data">
         <thead><tr><th>Tarih</th><th>Personel</th><th>Tür</th><th>Açıklama</th><th></th></tr></thead>
         <tbody>
-          ${data.changes.slice().sort((a, b) => b.date.localeCompare(a.date)).map(c => {
-            const staff = data.staff.find(s => s.id === c.staff_id);
-            return `
+          ${data.changes.slice().sort((a, b) => b.date.localeCompare(a.date)).map(c => `
             <tr>
               <td>${fmtDate(c.date)}</td>
-              <td>${esc(staff?.full_name || "(silinmiş personel)")}</td>
+              <td>${esc(nameOf(c.staff_id))}</td>
               <td>${c.type === "terfi" ? '<span class="pill">Terfi</span>' : '<span class="pill warn">Maaş</span>'}</td>
               <td>${esc(c.description || "")}</td>
               <td class="row-actions"><button data-del-change="${c.id}">Sil</button></td>
-            </tr>
-          `;
-          }).join("") || `<tr><td colspan="5" style="color:var(--muted)">Henüz kayıt eklenmedi.</td></tr>`}
+            </tr>`).join("") || `<tr><td colspan="5" style="color:var(--muted)">Henüz kayıt eklenmedi.</td></tr>`}
         </tbody>
       </table>
       </div>
@@ -1107,15 +1163,19 @@ function renderPersonelChanges(school, content) {
   });
 }
 
-function renderPersonelAttendance(school, content) {
+async function renderPersonelAttendance(school, content) {
+  if (!localStorageAvailable()) { content.innerHTML = localStorageBlockedNotice(); return; }
   const data = loadPersonel(school);
+  const teachers = await personelTeachers(school);
+  const nameOf = id => teachers.find(t => t.id === id)?.full_name || data.staff.find(s => s.id === id)?.full_name || "(silinmiş personel)";
   content.innerHTML = `
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">Yeni Kayıt Ekle</h3>
-      ${!data.staff.length ? `<p style="color:var(--muted);font-size:13px">Önce Personel sekmesinden en az bir personel ekle.</p>` : `
+      <p style="color:var(--muted);font-size:12.5px;margin:0 0 8px">🔒 Rapor/izin kayıtları yalnızca bu tarayıcıda saklanır.</p>
+      ${!teachers.length ? `<p style="color:var(--muted);font-size:13px">Önce Personel sekmesinden en az bir personel ekle.</p>` : `
       <label>Personel</label>
       <select id="a-staff">
-        ${data.staff.map(s => `<option value="${s.id}">${esc(s.full_name)}</option>`).join("")}
+        ${teachers.map(s => `<option value="${s.id}">${esc(s.full_name)}</option>`).join("")}
       </select>
       <label>Tarih</label>
       ${dateInputHtml("a-date", "")}
@@ -1138,17 +1198,15 @@ function renderPersonelAttendance(school, content) {
         <thead><tr><th>Tarih</th><th>Personel</th><th>Durum</th><th>Not</th><th></th></tr></thead>
         <tbody>
           ${data.attendance.slice().sort((a, b) => b.date.localeCompare(a.date)).map(a => {
-            const staff = data.staff.find(s => s.id === a.staff_id);
             const statusLabel = { raporlu: "Raporlu", izinli: "İzinli", devamsiz: "Devamsız" }[a.status] || a.status;
             return `
             <tr>
               <td>${fmtDate(a.date)}</td>
-              <td>${esc(staff?.full_name || "(silinmiş personel)")}</td>
+              <td>${esc(nameOf(a.staff_id))}</td>
               <td><span class="pill warn">${statusLabel}</span></td>
               <td>${esc(a.note || "")}</td>
               <td class="row-actions"><button data-del-att="${a.id}">Sil</button></td>
-            </tr>
-          `;
+            </tr>`;
           }).join("") || `<tr><td colspan="5" style="color:var(--muted)">Henüz kayıt eklenmedi.</td></tr>`}
         </tbody>
       </table>
@@ -1179,6 +1237,60 @@ function renderPersonelAttendance(school, content) {
 
 const MONTH_ORDER = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
 const MONTH_NAMES = { 1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan", 5: "Mayıs", 6: "Haziran", 7: "Temmuz", 8: "Ağustos", 9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık" };
+
+/**
+ * MEB 2026-2027 Eğitim ve Öğretim Yılı Çalışma Takvimi — Genelge 2026/68 (13.06.2026, sayı 155232180; meb.gov.tr haber 41057).
+ * Genel tatiller: 2429 sayılı Ulusal Bayram ve Genel Tatiller Hakkında Kanun (sabit tarihler) + dini bayramlar Diyanet İşleri
+ * Başkanlığı 2027 dini günler listesinden (vakithesaplama.diyanet.gov.tr). Arife günleri 13.00'ten sonra yarım gün tatildir.
+ * Her yaz yeni genelgeyle güncellenmesi gereken tek yer burasıdır.
+ */
+const MEB_TAKVIM = {
+  yil: "2026-2027", kaynak: "MEB Genelge 2026/68 (13.06.2026)",
+  meslekiCalisma: "2026-09-01", uyumEgitimi: ["2026-09-07", "2026-09-11"],
+  donem1: ["2026-09-14", "2027-01-22"], araTatil1: ["2026-11-16", "2026-11-20"],
+  yariyil: ["2027-01-25", "2027-02-05"], donem2: ["2027-02-08", "2027-06-25"], araTatil2: ["2027-03-08", "2027-03-12"],
+};
+const RESMI_TATILLER = [
+  { d: "2026-10-29", ad: "Cumhuriyet Bayramı" },
+  { d: "2027-01-01", ad: "Yılbaşı" },
+  { d: "2027-03-09", ad: "Ramazan Bayramı 1. gün" }, { d: "2027-03-10", ad: "Ramazan Bayramı 2. gün" }, { d: "2027-03-11", ad: "Ramazan Bayramı 3. gün" },
+  { d: "2027-04-23", ad: "Ulusal Egemenlik ve Çocuk Bayramı" },
+  { d: "2027-05-01", ad: "Emek ve Dayanışma Günü" },
+  { d: "2027-05-16", ad: "Kurban Bayramı 1. gün" }, { d: "2027-05-17", ad: "Kurban Bayramı 2. gün" }, { d: "2027-05-18", ad: "Kurban Bayramı 3. gün" }, { d: "2027-05-19", ad: "Kurban Bayramı 4. gün · Atatürk'ü Anma, Gençlik ve Spor Bayramı" },
+  { d: "2027-07-15", ad: "Demokrasi ve Millî Birlik Günü" },
+  { d: "2027-08-30", ad: "Zafer Bayramı" },
+];
+const YARIM_GUN_TATILLER = [
+  { d: "2026-10-28", ad: "Cumhuriyet Bayramı arifesi (öğleden sonra)" },
+  { d: "2027-03-08", ad: "Ramazan Bayramı arifesi (öğleden sonra)" },
+  { d: "2027-05-15", ad: "Kurban Bayramı arifesi (öğleden sonra)" },
+];
+const RESMI_TATIL_SET = new Set(RESMI_TATILLER.map(x => x.d));
+function isResmiTatil(iso) { return RESMI_TATIL_SET.has(iso); }
+function inRange(iso, [a, b]) { return iso >= a && iso <= b; }
+function isOkulTatili(iso) { return isResmiTatil(iso) || inRange(iso, MEB_TAKVIM.araTatil1) || inRange(iso, MEB_TAKVIM.yariyil) || inRange(iso, MEB_TAKVIM.araTatil2); }
+function tatilAdi(iso) {
+  const r = RESMI_TATILLER.find(x => x.d === iso); if (r) return r.ad;
+  if (inRange(iso, MEB_TAKVIM.araTatil1)) return "1. dönem ara tatili";
+  if (inRange(iso, MEB_TAKVIM.yariyil)) return "Yarıyıl tatili";
+  if (inRange(iso, MEB_TAKVIM.araTatil2)) return "2. dönem ara tatili";
+  return "";
+}
+/* Bir tarih aralığındaki hafta içi tatil günleri (resmî tatil + ara tatil + yarıyıl) — nöbet dönemi için otomatik doldurma. */
+function takvimTatilGunleri(startIso, endIso) {
+  const out = [];
+  if (!startIso || !endIso) return out;
+  const d = new Date(startIso + "T00:00:00"), end = new Date(endIso + "T00:00:00");
+  while (d <= end) { const iso = toLocalISO(d); const w = d.getDay(); if (w !== 0 && w !== 6 && isOkulTatili(iso)) out.push(iso); d.setDate(d.getDate() + 1); }
+  return out;
+}
+function nobetTatilDoldur() {
+  const s = document.getElementById("p-start")?.value, e = document.getElementById("p-end")?.value, inp = document.getElementById("p-holidays"), msg = document.getElementById("p-msg");
+  if (!s || !e) { if (msg) msg.innerHTML = `<div class="msg err">Önce başlangıç ve bitiş tarihini gir.</div>`; return; }
+  const days = takvimTatilGunleri(s, e);
+  inp.value = days.join(",");
+  if (msg) msg.innerHTML = `<div class="msg ok">${days.length} tatil günü MEB ${MEB_TAKVIM.yil} çalışma takviminden dolduruldu (${days.map(x => `${fmtDate(x)} ${tatilAdi(x)}`).slice(0, 4).join("; ")}${days.length > 4 ? "; …" : ""}). Okula özgü idari izin günlerini virgülle ekleyebilirsin.</div>`;
+}
 
 /**
  * Araştırmayla doğrulanmış, birincil kaynaktan (Resmî Gazete/Bakanlık yönerge metni) teyit
@@ -1341,7 +1453,27 @@ async function renderAylik(school, content, editingId = null) {
   const existingTitles = new Set((tasks || []).map(t => t.title));
   const missingSeedTasks = VERIFIED_MONTHLY_SEED_TASKS.filter(t => !existingTitles.has(t.title));
 
+  const takvimSatir = [
+    ["Mesleki çalışma başlangıcı", fmtDate(MEB_TAKVIM.meslekiCalisma)],
+    ["Uyum eğitimi (okul öncesi ve 1. sınıf)", `${fmtDate(MEB_TAKVIM.uyumEgitimi[0])} – ${fmtDate(MEB_TAKVIM.uyumEgitimi[1])}`],
+    ["1. dönem", `${fmtDate(MEB_TAKVIM.donem1[0])} – ${fmtDate(MEB_TAKVIM.donem1[1])}`],
+    ["1. dönem ara tatili", `${fmtDate(MEB_TAKVIM.araTatil1[0])} – ${fmtDate(MEB_TAKVIM.araTatil1[1])}`],
+    ["Yarıyıl tatili", `${fmtDate(MEB_TAKVIM.yariyil[0])} – ${fmtDate(MEB_TAKVIM.yariyil[1])}`],
+    ["2. dönem", `${fmtDate(MEB_TAKVIM.donem2[0])} – ${fmtDate(MEB_TAKVIM.donem2[1])}`],
+    ["2. dönem ara tatili", `${fmtDate(MEB_TAKVIM.araTatil2[0])} – ${fmtDate(MEB_TAKVIM.araTatil2[1])}`],
+  ];
+  const todayIso = toLocalISO(new Date());
+  const yaklasanTatiller = RESMI_TATILLER.filter(t => t.d >= todayIso).slice(0, 6);
   content.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">MEB ${MEB_TAKVIM.yil} Çalışma Takvimi <span style="font-size:12px;font-weight:400;color:var(--muted)">(${esc(MEB_TAKVIM.kaynak)})</span></h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 24px;font-size:13.5px">
+        ${takvimSatir.map(([k, v]) => `<div class="list-item" style="padding:6px 0"><span>${k}</span><strong style="white-space:nowrap">${v}</strong></div>`).join("")}
+      </div>
+      <p style="font-size:12.5px;color:var(--muted);margin:10px 0 4px"><strong>Yaklaşan resmî tatiller</strong> (2429 sayılı Kanun; dini bayramlar Diyanet 2027 listesi; arifeler öğleden sonra yarım gün):</p>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${yaklasanTatiller.map(t => `<span class="pill">${fmtDate(t.d)} · ${esc(t.ad)}</span>`).join("") || `<span style="color:var(--muted);font-size:12.5px">Bu takvim yılında kalan resmî tatil yok.</span>`}</div>
+      <p style="font-size:12px;color:var(--muted);margin:10px 0 0">Nöbet dönemi oluştururken tatil günleri bu takvimden otomatik dolar; disiplin ve itiraz sürelerindeki iş günü hesabı resmî tatilleri atlar.</p>
+    </div>
     ${total ? `
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:16px">
@@ -2300,7 +2432,7 @@ function kidemEsigiDoldu(t) {
 
 async function renderOgretmenler(profile, school, content, editingId = null) {
   const [{ data: teachers }, { data: areas }, { data: blockedAll }] = await Promise.all([
-    sb.from("teachers").select("*").eq("school_id", school.id).order("full_name"),
+    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).order("full_name"),
     sb.from("duty_areas").select("*").eq("school_id", school.id).order("sort_order"),
     sb.from("teacher_blocked_areas").select("*"),
   ]);
@@ -2345,6 +2477,7 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
     </div>
     <div class="card">
       <h3 style="margin-top:0">Öğretmen Havuzu (${(teachers || []).length})</h3>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 10px">Personel kayıtlarının asıl kaynağı <strong>Personel İşleri</strong>; buradaki form nöbet ayarları (kota, muafiyet, yasaklı alan, davet kodu) içindir. Memur ve hizmetliler bu listede görünmez.</p>
       <div class="table-wrap">
       <table class="data">
         <thead><tr><th>Ad</th><th>Rol</th><th>Kota</th><th>Muafiyet</th><th>Panel Hesabı</th><th></th></tr></thead>
@@ -2419,6 +2552,7 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
       phone: document.getElementById("t-phone").value.trim() || null,
       weekly_duty_quota: parseInt(document.getElementById("t-quota").value) || 2,
       is_idareci: document.getElementById("t-idareci").checked,
+      staff_type: document.getElementById("t-idareci").checked ? "yonetici" : (editTeacher?.staff_type && editTeacher.staff_type !== "yonetici" ? editTeacher.staff_type : "ogretmen"),
       gender: document.getElementById("t-gender").value || null,
       hire_date: document.getElementById("t-hire").value || null,
       seniority_waiver_requested: document.getElementById("t-seniority").checked,
@@ -2483,6 +2617,7 @@ async function renderDonem(profile, school, content, activePeriodId = null) {
       ${dateInputHtml("p-end", "")}
       <label>Tatil / idari izin günleri <span style="color:var(--muted);font-weight:400">(virgülle ayır, örn. 2026-10-29,2026-11-24)</span></label>
       <input id="p-holidays" placeholder="YYYY-AA-GG,YYYY-AA-GG">
+      <button class="secondary" type="button" onclick="nobetTatilDoldur()" style="width:100%;margin-top:6px">MEB ${MEB_TAKVIM.yil} takviminden tatilleri doldur <span style="color:var(--muted);font-weight:400">(resmî tatiller, ara tatiller, yarıyıl — boş bırakırsan kayıtta otomatik dolar)</span></button>
       <button class="primary" id="p-save">Dönem Oluştur</button>
       <div id="p-msg"></div>
     </div>
@@ -2506,7 +2641,8 @@ async function renderDonem(profile, school, content, activePeriodId = null) {
     const holidayRaw = document.getElementById("p-holidays").value.trim();
     const msg = document.getElementById("p-msg");
     if (!title || !starts_on || !ends_on) { msg.innerHTML = `<div class="msg err">Başlık, başlangıç ve bitiş gerekli.</div>`; return; }
-    const holiday_dates = holidayRaw ? holidayRaw.split(",").map(s => s.trim()).filter(Boolean) : [];
+    if (ends_on < starts_on) { msg.innerHTML = `<div class="msg err">Bitiş tarihi (${fmtDate(ends_on)}) başlangıçtan (${fmtDate(starts_on)}) önce olamaz — yılı kontrol et.</div>`; return; }
+    const holiday_dates = holidayRaw ? holidayRaw.split(",").map(s => s.trim()).filter(Boolean) : takvimTatilGunleri(starts_on, ends_on);
     const { data, error } = await sb.from("duty_periods").insert({ school_id: school.id, title, starts_on, ends_on, holiday_dates }).select().single();
     if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
     await renderDonem(profile, school, content, data.id);
@@ -2699,7 +2835,7 @@ function lessonDayIndex(rows) {
 
 async function suggestSubstitute(school, assignments, target) {
   const [{ data: teachers }, { data: lessonRows }] = await Promise.all([
-    sb.from("teachers").select("*").eq("school_id", school.id),
+    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]),
     sb.from("lesson_assignments").select("teacher_id, day_of_week").eq("school_id", school.id),
   ]);
   const { data: blocked } = await sb.from("teacher_blocked_areas").select("*").in("teacher_id", (teachers || []).map(t => t.id).length ? (teachers || []).map(t => t.id) : ["00000000-0000-0000-0000-000000000000"]);
@@ -2764,7 +2900,7 @@ async function generateSchedule(school, period) {
   await sb.from("duty_assignments").delete().eq("duty_period_id", period.id).eq("is_pinned", false);
 
   const [{ data: teachers }, { data: slots }, { data: areas }, { data: existing }, { data: lessonRows }] = await Promise.all([
-    sb.from("teachers").select("*").eq("school_id", school.id),
+    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]),
     sb.from("duty_time_slots").select("*").eq("school_id", school.id).order("sort_order"),
     sb.from("duty_areas").select("*").eq("school_id", school.id).order("sort_order"),
     sb.from("duty_assignments").select("*").eq("duty_period_id", period.id),
@@ -2801,6 +2937,7 @@ async function generateSchedule(school, period) {
     if (dow !== 0 && dow !== 6 && !holidaySet.has(iso)) { days.push(iso); dowByDate[iso] = dow; }
     d.setDate(d.getDate() + 1);
   }
+  if (!days.length) throw new Error(`Dönem aralığında nöbet tutulacak iş günü bulunamadı (${period.starts_on} → ${period.ends_on}). Bitiş tarihi başlangıçtan önce olabilir ya da bütün günler tatil olarak işaretlenmiş; dönemi silip tarihleri düzelterek yeniden oluştur.`);
 
   const countByTeacher = {};
   teachers.forEach(t => countByTeacher[t.id] = 0);
@@ -3181,11 +3318,11 @@ async function renderDersAtamalar(profile, school, content) {
     sb.from("class_subject_hours").select("*, classes(name), subjects(name), teachers(full_name)").eq("school_id", school.id),
     sb.from("classes").select("*").eq("school_id", school.id).order("sort_order"),
     sb.from("subjects").select("*").eq("school_id", school.id).order("sort_order"),
-    sb.from("teachers").select("*").eq("school_id", school.id).order("full_name"),
+    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).order("full_name"),
   ]);
 
   if (!classes?.length || !subjects?.length || !teachers?.length) {
-    content.innerHTML = `<p style="color:var(--muted)">Önce Ayarlar'dan en az bir sınıf ve ders ekle; öğretmen yoksa Nöbet Programı &gt; Öğretmenler'den ekle.</p>`;
+    content.innerHTML = `<p style="color:var(--muted)">Önce Ayarlar'dan en az bir sınıf ve ders ekle; öğretmen yoksa Personel İşleri'nden ekle.</p>`;
     return;
   }
 
@@ -3435,7 +3572,7 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
     sb.from("subjects").select("*").eq("school_id", school.id).order("sort_order"),
     sb.from("lesson_periods").select("*").eq("school_id", school.id).order("sort_order"),
     sb.from("class_subject_hours").select("*").eq("school_id", school.id),
-    sb.from("teachers").select("*").eq("school_id", school.id),
+    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]),
     sb.from("lesson_assignments").select("*").eq("school_id", school.id),
   ]);
 
@@ -4836,7 +4973,7 @@ async function renderDenetimModule(profile, school, state = { tab: "kayitlar" })
   const [criteria, { data: obsList }, { data: teachers }] = await Promise.all([
     denetimEnsureCriteria(school),
     sb.from("lesson_observations").select("*").eq("school_id", school.id).order("observed_on", { ascending: false }).order("created_at", { ascending: false }),
-    sb.from("teachers").select("id, full_name, branch, hire_date, is_idareci").eq("school_id", school.id).order("full_name"),
+    sb.from("teachers").select("id, full_name, branch, hire_date, is_idareci").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).order("full_name"),
   ]);
   const active = criteria.filter(c => c.is_active);
   const today = toLocalISO(new Date());
@@ -5329,7 +5466,7 @@ async function renderEkdersSheet(profile, school, content, sheetId) {
   document.getElementById("ek-fill").onclick = async () => {
     const msg = document.getElementById("ek-rmsg");
     const [{ data: teachers }, { data: profs }, { data: csh }, { data: duties }] = await Promise.all([
-      sb.from("teachers").select("id, full_name, branch, is_idareci").eq("school_id", school.id).order("full_name"),
+      sb.from("teachers").select("id, full_name, branch, is_idareci").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).order("full_name"),
       sb.from("profiles").select("id, full_name, role").eq("school_id", school.id).neq("role", "ogretmen"),
       sb.from("class_subject_hours").select("teacher_id, weekly_hours").eq("school_id", school.id),
       sb.from("duty_assignments").select("teacher_id").gte("duty_date", toLocalISO(new Date(Date.now() - 45 * 86400000))),
@@ -5614,7 +5751,7 @@ const DIS_STAGE_IDX = Object.fromEntries(DIS_STAGE_IDS.map((s, i) => [s, i]));
 function addBusinessDays(iso, n) {
   const d = new Date(iso + "T00:00:00");
   let left = n;
-  while (left > 0) { d.setDate(d.getDate() + 1); const w = d.getDay(); if (w !== 0 && w !== 6) left--; }
+  while (left > 0) { d.setDate(d.getDate() + 1); const w = d.getDay(); const iso = toLocalISO(d); if (w !== 0 && w !== 6 && !isResmiTatil(iso)) left--; }
   return toLocalISO(d);
 }
 function disCaseNo(c) { return `${c.case_year}/${String(c.case_seq).padStart(3, "0")}`; }
@@ -6197,7 +6334,7 @@ async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
 
     ${deadlines.length ? `
     <div class="card" style="margin-bottom:14px">
-      <h3 style="margin-top:0">Süre Takibi <span style="font-size:11.5px;color:var(--muted);font-weight:400">(iş günü = Cumartesi/Pazar hariç; resmî tatiller hesaba katılmaz, gerekirse elle düzelt)</span></h3>
+      <h3 style="margin-top:0">Süre Takibi <span style="font-size:11.5px;color:var(--muted);font-weight:400">(iş günü = Cumartesi/Pazar ve resmî tatiller hariç — 2429 sayılı Kanun'daki genel tatiller ve Diyanet 2027 bayram tarihleri; okula özgü idari izinleri elle gözet)</span></h3>
       ${deadlines.map(d => `<div class="list-item"><span>${esc(d.label)}<div style="font-size:11.5px;color:var(--muted)">Son gün: ${fmtDate(d.due)}</div></span><span class="pill ${dlState[d.state][0]}">${dlState[d.state][1]}</span></div>`).join("")}
     </div>` : ""}
 
@@ -6762,7 +6899,7 @@ async function renderLgsOgrenciler(profile, school, content, editingId = null) {
   const [{ data: students }, { data: classes }, { data: teachers }] = await Promise.all([
     sb.from("lgs_students").select("*").eq("school_id", school.id).order("full_name"),
     sb.from("classes").select("*").eq("school_id", school.id).order("sort_order"),
-    sb.from("teachers").select("*").eq("school_id", school.id).order("full_name"),
+    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).order("full_name"),
   ]);
   const classById = Object.fromEntries((classes || []).map(c => [c.id, c.name]));
   const teacherById = Object.fromEntries((teachers || []).map(t => [t.id, t.full_name]));
@@ -7595,7 +7732,7 @@ async function renderLgsOzet(profile, school, content) {
   }
   const [{ data: students }, { data: teachers }, { data: results }, { data: tasks }, { data: exams }] = await Promise.all([
     sb.from("lgs_students").select("*").eq("school_id", school.id),
-    sb.from("teachers").select("*").eq("school_id", school.id),
+    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]),
     sb.from("lgs_mock_exam_results").select("*").eq("school_id", school.id),
     sb.from("lgs_study_tasks").select("*").eq("school_id", school.id),
     sb.from("lgs_mock_exams").select("*").eq("school_id", school.id),
@@ -8179,8 +8316,9 @@ const KILAVUZ_SECTIONS = [
     <p>Akademik yıla göre sıralı (Eylül → Ağustos), ay bazlı gruplanmış bir idari görev listesi. İçerik boş başlar, kendi yıllık idari takviminle doldurulur.</p>
   ` },
   { id: "personel", title: "Personel İşleri", html: `
-    <p>🔒 <strong>Bu modülün verisi sadece bu tarayıcıda/cihazda saklanır, sunucuya hiç gönderilmez</strong> — maaş, terfi ve devam gibi hassas veri olduğu için bilinçli bir tasarım kararı. Başka bir bilgisayardan girince burayı boş görürsün, bu bir hata değildir.</p>
-    <p>Personel eklerken "Öğretmen listesinden doldur" ile Nöbet Programı'ndaki kayıttan adı/branşı kopyalayabilirsin — yine de veri bu cihazda kalır.</p>
+    <p><strong>Personel kayıtlarının asıl kaynağı burasıdır.</strong> "Personel" sekmesine eklediğin herkes (öğretmen, müdür yardımcısı, memur, hizmetli) sunucuda okul bazlı tutulur; Nöbet Programı, Ders Dağıtım, Ek Ders, Ders Denetimi, Planlama, Talep ve LGS aynı listeyi kullanır. Personel türü "Öğretmen" ya da "Yönetici" olanlar nöbet/ders listelerinde görünür; memur ve hizmetliler yalnızca personel, talep ve kurul üyeliği ekranlarında.</p>
+    <p>Daha önce bu tarayıcıda tutulan personel listesi ilk açılışta otomatik olarak sunucuya taşınır; aynı ada sahip kayıtlar çoğaltılmaz, birleştirilir. Nöbet kotası, muafiyetler, yasaklı alanlar ve öğretmen davet kodu Nöbet Programı → Öğretmenler'de; ders yükü Ders Dağıtım'da düzenlenir.</p>
+    <p>🔒 Maaş/terfi ve devam (rapor, izin) kayıtları hassas olduğu için yalnızca bu tarayıcıda saklanır; başka bilgisayardan girince o iki sekmeyi boş görürsün, personel listesi ise her yerde aynıdır.</p>
   ` },
   { id: "mevzuat", title: "Mevzuata Sor", html: `
     <p>Teftişe Hazırlık ve Aylık Yönetim Akışı'na <strong>senin girdiğin</strong> doğrulanmış maddeler arasında arama yapar. Yapay zekâ değildir, internetten cevap üretmez, hiçbir şey uydurmaz — sadece kendi girdiğin veriyi arar. Bir konuda sonuç çıkmıyorsa, önce ilgili maddeyi Teftişe Hazırlık'a eklemen gerekir.</p>
@@ -8311,6 +8449,9 @@ const SSS_ITEMS = [
   { cat: "Evrak Deposu", q: "Öğretmenlere verdiğim formlar (ders kesim, sınav kâğıdı teslim, proje, dönem sonu kontrol) nerede?", a: `Evrak Deposu'nda: "Ders Kesim Raporu", "Sınav Kâğıtları ve Cevap Anahtarı Teslim Tutanağı" (md.22/1-a), "Proje Ödevi Seçim ve Takip Formu" (md.22/2) ve "Dönem Sonu Öğretmen İş ve İşlemleri Kontrol Listesi". Tablo satırlarını "Sınıf | Ders | …" biçiminde dikey çubukla ayırarak gir; belge tabloyu kendisi çizer. "Maaş Değişiklik Bildirim Formu" ise aylık bildirim içindir; terfi satırları Personel İşleri'ndeki o ayın terfi kayıtlarından dolar.` },
   { cat: "Planlama İşleri", q: "Kurul ve komisyonları tek tek mi gireceğim?", a: `Hayır. "Ortaokul kurul/komisyon şablonunu yükle" düğmesi 25 kurul/komisyonu tek seferde ekler (mevcutlar korunur). Sonra her kurulun ayrıntısında beklenen üyelik yapısı (başkan, asil, yedek…) ve eksikler görünür; üyeleri Personel listesinden seçip rolünü aynı adla girersen sayaç dolar. ÖDDK yapısı yönetmelikten (md.57), diğerleri yaygın uygulamadır.` },
   { cat: "Sınav Kelebek", q: "Gözetmen ataması yapabiliyor muyum?", a: `Evet. Oturma planı oluştururken "Salon / derslik" ve "Gözetmen(ler)" alanlarını doldur; plan çıktısının başlığında salon ve gözetmen adı, altında gözetmen ve okul müdürü imza blokları yer alır. Birden fazla gözetmeni virgülle ayır.` },
+  { cat: "Personel İşleri", q: "Öğretmenleri nereye ekleyeceğim, Nöbet'e mi Personel'e mi?", a: `Personel İşleri'ne. Orası tüm personelin asıl kaynağı; Nöbet Programı → Öğretmenler sekmesi aynı listeyi gösterir ve yalnızca nöbet ayarlarını (kota, muafiyet, yasaklı alan, davet kodu) düzenler. Eskiden tarayıcıda tutulan personel listesi ilk açılışta sunucuya taşındı; hiçbir kayıt silinmedi, aynı adlar birleştirildi.` },
+  { cat: "Nöbet Programı", q: "Resmî tatilleri ve ara tatilleri her seferinde elle mi gireceğim?", a: `Hayır. Dönem oluştururken tatil alanını boş bırakırsan MEB ${MEB_TAKVIM.yil} çalışma takvimindeki ara tatiller, yarıyıl tatili ve 2429 sayılı Kanun'daki genel tatiller (dini bayramlar Diyanet listesinden) aralığa göre otomatik dolar; "MEB takviminden tatilleri doldur" düğmesiyle de görebilirsin. Okula özgü idari izin günlerini virgülle ekle. Aynı takvim Aylık Yönetim Akışı'nın en üstünde görünür; disiplin/itiraz sürelerindeki iş günü hesabı da resmî tatilleri atlar.` },
+  { cat: "Nöbet Programı", q: "'Çizelge Oluştur' dediğimde hiçbir şey olmuyor.", a: `En sık sebep dönemin bitiş tarihinin başlangıçtan önce girilmesi (örn. yıl yanlış). Artık dönem kaydında bu engellenir ve üretici iş günü bulamazsa açık uyarı verir. Diğer sebepler: zaman dilimi ya da alan tanımlı değil (Ayarlar), öğretmen yok (Personel İşleri) — bunlarda da ekranda mesaj görürsün.` },
   { cat: "Okul Panosu", q: "Pano linkini bilen herkes öğrenci adlarını görebilir mi?", a: `PIN tanımladıysan hayır. Okul Panosu'ndaki "Ekran PIN'i" kartından 4–8 rakamlı PIN belirle; koridor ekranında link açılınca PIN bir kez girilir ve cihazda kalır, başka bir cihazdan açan kişi PIN'siz yalnızca okul adını görür. 15 dakikada 10 hatalı deneme kilitler. Bu, MEB'in 29.06.2026 tarihli kişisel veri genelgesinin (md.5) gereğidir; ayın öğrencisi gibi ad ve fotoğraf içeren içerik yayınlıyorsan PIN'siz kullanma. Fotoğraf için veli onayını da önceden al (genelge md.8).` },
   { cat: "Öğretmen Araçları", q: "Sınav analizine puanları nasıl gireceğim?", a: `e-Okul'daki puan listesini seçip kopyala, "Puan listesi" kutusuna yapıştır; satırlar "512 Ali Veli<sekme>85" gibi gelir, panel numarayı, adı ve puanı ayırır. Soru bazlı analiz istiyorsan her satırı "Ad Soyad | 10 | 8 | 5 …" biçiminde gir ve "Soru tam puanları" alanına 10,10,10… yaz; boş bırakırsan tam puan sorulara eşit bölünür. Veriler yalnızca bu tarayıcıda saklanır.` },
   { cat: "Öğretmen Araçları", q: "Analizdeki başarı eşiği ve aralıklar nereden geliyor?", a: `MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği md.21/1: Türkçe dışındaki derslerde 0–49,99 başarısız, 50,00 ve üzeri başarılı; Türkçe'de 70,00 eşiği. md.53/1: dönem ağırlıklı puan ortalaması 70,00–84,99 teşekkür, 85,00 ve üzeri takdir. Eşik alanı elle değiştirilebilir (lise için kendi yönetmeliğine göre gir).` },
