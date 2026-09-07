@@ -3641,6 +3641,45 @@ async function renderDersAyarlar(profile, school, content) {
   });
 }
 
+/* Ders adı → branş anahtar kelimeleri: Atamalar'da seçilen ders için öğretmen önerisi. İlk eşleşen satır geçerlidir. */
+const DERS_BRANS_ANAHTAR = [
+  [/türkçe|okuma becerileri|yazarlık|yaşayan diller|masal ve destan|düşünme eğitimi/, ["türkçe", "türk dili"]],
+  [/matematik/, ["matematik"]],
+  [/fen bilimleri|çevre eğitimi|afet bilinci/, ["fen"]],
+  [/sosyal bilgiler|inkılap|hukuk ve adalet|şehrimiz|medya okuryazarlığı|türk sosyal hayatında|sosyal sorumluluk/, ["sosyal", "tarih", "coğrafya"]],
+  [/yabancı dil|ingilizce|almanca|fransızca/, ["ingilizce", "yabancı dil", "almanca", "fransızca"]],
+  [/din kültürü|kur an|peygamberimizin|temel din|medeniyetimize yön|ahlak ve vatandaşlık/, ["din kültürü", "din kült", "dkab", "imam hatip", "ilahiyat"]],
+  [/görsel sanatlar|dijital sanatlar|geleneksel sanatlar/, ["görsel", "resim"]],
+  [/müzik/, ["müzik"]],
+  [/beden eğitimi|spor ve fizik|halk oyunları|oyun ve oyun|temel yaşam/, ["beden"]],
+  [/teknoloji ve tasarım/, ["teknoloji ve tasarım", "teknoloji tasarım", "tasarım"]],
+  [/bilişim|robotik|yapay zeka/, ["bilişim", "bilgisayar"]],
+  [/rehberlik|kariyer/, ["rehber", "psikolojik"]],
+  [/özel eğitim/, ["özel eğitim"]],
+  [/hayat bilgisi|serbest etkinlik|trafik güvenliği|insan hakları/, ["sınıf öğretmen"]],
+];
+const dersMetin = s => (s || "").toLocaleLowerCase("tr-TR").replace(/[^a-zçğıöşü0-9]+/g, " ").trim();
+function dersBransUyumlu(subjectName, teacher) {
+  const sn = dersMetin(subjectName), br = dersMetin(`${teacher.branch || ""} ${teacher.title || ""}`);
+  if (!br) return false;
+  for (const [re, keys] of DERS_BRANS_ANAHTAR) if (re.test(sn)) return keys.some(k => br.includes(k));
+  return sn.includes(br) || br.includes(sn);
+}
+/* Öneri sırası: bu dersi okulda zaten veren öğretmen (en çok atama) → branşı uygun (en az yüklü) → diğerleri.
+ * Eklenecek saatle birlikte Ek Ders Kararı üst sınırını (aylık karşılığı + azami ek ders) aşacak aday atlanır; hepsi aşıyorsa ilk aday önerilir. */
+function dersOgretmenOnerisi(subject, teachers, assigns, loadOf, school = null, h = 0) {
+  const zatenCount = {};
+  (assigns || []).filter(a => subject && a.subject_id === subject.id).forEach(a => { zatenCount[a.teacher_id] = (zatenCount[a.teacher_id] || 0) + 1; });
+  const zaten = teachers.filter(t => zatenCount[t.id]).sort((a, b) => zatenCount[b.id] - zatenCount[a.id] || loadOf(a.id) - loadOf(b.id));
+  const brans = teachers.filter(t => !zatenCount[t.id] && subject && dersBransUyumlu(subject.name, t)).sort((a, b) => loadOf(a.id) - loadOf(b.id));
+  const diger = teachers.filter(t => !zaten.includes(t) && !brans.includes(t));
+  const adaylar = [...zaten, ...brans];
+  const sigar = t => { if (!school) return true; const n = dersOgretmenNorm(t, school); return loadOf(t.id) + h <= n.maas + n.azamiEk; };
+  const best = adaylar.find(sigar) || adaylar[0] || null;
+  return { zaten, brans, diger, best, bestNeden: !best ? null : `${zaten.includes(best) ? "bu dersi zaten veriyor" : "branşı uygun"}${sigar(best) ? "" : " (üst sınırı aşacak!)"}` };
+}
+let dersAtamaFlash = null;
+
 async function renderDersAtamalar(profile, school, content) {
   const [{ data: assigns }, { data: classes }, { data: subjects }, { data: teachers }] = await Promise.all([
     sb.from("class_subject_hours").select("*, classes(name), subjects(name), teachers(full_name)").eq("school_id", school.id),
@@ -3671,11 +3710,14 @@ async function renderDersAtamalar(profile, school, content) {
       <div class="grid">
         <div><label style="margin-top:0">Sınıf</label><select id="a-class">${classes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select></div>
         <div><label style="margin-top:0">Ders</label><select id="a-subject">${optgroup("Zorunlu", subjects.filter(s => kindOf(s) === "zorunlu"))}${optgroup("Seçmeli", subjects.filter(s => kindOf(s) === "secmeli"))}${optgroup("Serbest etkinlik", subjects.filter(s => kindOf(s) === "serbest"))}</select></div>
-        <div><label style="margin-top:0">Öğretmen</label><select id="a-teacher">${teachers.map(t => `<option value="${t.id}">${esc(t.full_name)} (${yukById[t.id]?.total || 0} saat)</option>`).join("")}</select><div id="a-teacher-hint" style="font-size:11.5px;color:var(--muted);margin-top:4px"></div></div>
+        <div><label style="margin-top:0">Öğretmen <span style="color:var(--muted);font-weight:400">(derse göre önerilir)</span></label><select id="a-teacher"></select><div id="a-teacher-hint" style="font-size:11.5px;color:var(--muted);margin-top:4px"></div></div>
         <div><label style="margin-top:0">Haftalık saat</label><input id="a-hours" type="number" min="1" value="2"><div id="a-hours-hint" style="font-size:11.5px;color:var(--muted);margin-top:4px"></div></div>
       </div>
-      <button class="primary" id="a-save">Ekle</button>
-      <div id="a-msg"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="primary" id="a-save" style="margin:0;flex:1">Ekle</button>
+        <button class="secondary" id="a-bulk" style="margin:0;flex:2" title="Seçili sınıfta henüz atanmamış zorunlu dersleri, sınıf düzeyindeki çizelge saatiyle ve branşı uygun öğretmenle tek seferde ekler; seçmeliler ve öğretmeni bulunamayanlar sana kalır">Bu sınıfın eksik zorunlu derslerini önerilen öğretmenlerle ekle</button>
+      </div>
+      <div id="a-msg">${dersAtamaFlash ? `<div class="msg ok">${dersAtamaFlash}</div>` : ""}</div>
     </div>
     ${dersKontrolOzetHtml(school, kontrol)}
     ${dersOgretmenYukuHtml(school, yuk, kontrol)}
@@ -3699,7 +3741,25 @@ async function renderDersAtamalar(profile, school, content) {
     }).join("")}
   `;
 
+  dersAtamaFlash = null;
+  const grades = dersGrades(school);
+  const loadOf = id => yukById[id]?.total || 0;
   const classSel = document.getElementById("a-class"), subjSel = document.getElementById("a-subject"), hoursInp = document.getElementById("a-hours"), hint = document.getElementById("a-hours-hint");
+  const teacherSel = document.getElementById("a-teacher"), teacherHint = document.getElementById("a-teacher-hint");
+  const teacherOpt = t => `<option value="${t.id}">${esc(t.full_name)}${t.branch ? ` — ${esc(t.branch)}` : ""} (${loadOf(t.id)} saat)</option>`;
+  let oneri = null;
+  function buildTeacherOptions() {
+    oneri = dersOgretmenOnerisi(subjectById[subjSel.value], teachers, assigns || [], loadOf, school, parseInt(hoursInp.value, 10) || 0);
+    teacherSel.innerHTML = [["Bu dersi zaten veriyor", oneri.zaten], ["Branşı uygun", oneri.brans], ["Diğer öğretmenler", oneri.diger]]
+      .filter(([, l]) => l.length).map(([label, l]) => `<optgroup label="${label}">${l.map(teacherOpt).join("")}</optgroup>`).join("");
+    if (oneri.best) teacherSel.value = oneri.best.id;
+  }
+  function refreshTeacherHint() {
+    const y = yukById[teacherSel.value];
+    if (!y) { teacherHint.textContent = ""; return; }
+    const secili = oneri?.best && oneri.best.id === y.t.id ? `Öneri: ${oneri.bestNeden}. ` : (oneri && !oneri.best ? "Branşı uygun öğretmen bulunamadı; listeden seç. " : "");
+    teacherHint.textContent = `${secili}${y.t.full_name}: ${y.total} saat atanmış — aylık karşılığı ${y.norm.maas}, ek ders ${y.ek} / en çok ${y.norm.azamiEk} (${y.norm.tip}).`;
+  }
   function refreshHint() {
     const cls = classes.find(c => c.id === classSel.value);
     const s = subjectById[subjSel.value];
@@ -3714,19 +3774,39 @@ async function renderDersAtamalar(profile, school, content) {
     }
     hoursInp.value = 2;
     if (grade == null) hint.textContent = "Sınıf adı rakamla başlamadığı için düzey okunamadı; saati elle gir.";
-    else if (kindOf(s) === "secmeli" && Object.keys(s?.hours_by_grade || {}).length) hint.textContent = `⚠️ Çizelgeye göre ${esc(s.name)} ${grade}. sınıfta okutulmuyor (okutulduğu sınıflar: ${Object.keys(s.hours_by_grade).join(", ")}).`;
-    else if (kindOf(s) === "zorunlu" && Object.keys(s?.hours_by_grade || {}).length) hint.textContent = `⚠️ Çizelgeye göre ${esc(s.name)} ${grade}. sınıfta okutulmuyor.`;
+    else if (kindOf(s) === "secmeli" && Object.keys(s?.hours_by_grade || {}).length) hint.textContent = `⚠️ Çizelgeye göre ${s.name} ${grade}. sınıfta okutulmuyor (okutulduğu sınıflar: ${Object.keys(s.hours_by_grade).join(", ")}).`;
+    else if (kindOf(s) === "zorunlu" && Object.keys(s?.hours_by_grade || {}).length) hint.textContent = `⚠️ Çizelgeye göre ${s.name} ${grade}. sınıfta okutulmuyor.`;
     else hint.textContent = ciz ? `Bu ders için ${grade}. sınıfta çizelge saati tanımlı değil; Ayarlar'dan girebilirsin.` : "Haftalık saati elle gir.";
   }
-  classSel.onchange = refreshHint; subjSel.onchange = refreshHint; refreshHint();
-  const teacherSel = document.getElementById("a-teacher"), teacherHint = document.getElementById("a-teacher-hint");
-  function refreshTeacherHint() {
-    const y = yukById[teacherSel.value];
-    if (!y) { teacherHint.textContent = ""; return; }
-    teacherHint.textContent = `${y.t.full_name}: ${y.total} saat atanmış — aylık karşılığı ${y.norm.maas}, ek ders ${y.ek} / en çok ${y.norm.azamiEk} (${y.norm.tip}).`;
-  }
-  teacherSel.onchange = refreshTeacherHint; refreshTeacherHint();
+  classSel.onchange = refreshHint;
+  subjSel.onchange = () => { refreshHint(); buildTeacherOptions(); refreshTeacherHint(); };
+  teacherSel.onchange = refreshTeacherHint;
+  refreshHint(); buildTeacherOptions(); refreshTeacherHint();
 
+  document.getElementById("a-bulk").onclick = async () => {
+    const msg = document.getElementById("a-msg");
+    const cls = classes.find(c => c.id === classSel.value);
+    const grade = dersGradeOf(cls?.name);
+    if (grade == null && grades.length) { msg.innerHTML = `<div class="msg err">Sınıf adı rakamla başlamalı (örn. 5-A) — düzey okunamadı.</div>`; return; }
+    const have = new Set((byClass[cls.id] || []).map(a => a.subject_id));
+    const load = Object.fromEntries(teachers.map(t => [t.id, loadOf(t.id)]));
+    const rows = [], added = [], skipped = [];
+    subjects.filter(s => kindOf(s) !== "secmeli" && !have.has(s.id)).forEach(s => {
+      const h = dersHoursFor(s, grade);
+      if (!h) return;
+      const o = dersOgretmenOnerisi(s, teachers, assigns || [], id => load[id] || 0, school, h);
+      if (!o.best) { skipped.push(`${s.name} (${h} saat)`); return; }
+      load[o.best.id] = (load[o.best.id] || 0) + h;
+      rows.push({ school_id: school.id, class_id: cls.id, subject_id: s.id, teacher_id: o.best.id, weekly_hours: h });
+      added.push(`${s.name} → ${o.best.full_name} (${h} saat)`);
+    });
+    if (!rows.length) { msg.innerHTML = `<div class="msg err">${cls.name} için eklenecek zorunlu ders kalmadı${skipped.length ? `; öğretmeni bulunamayanlar: ${esc(skipped.join(", "))}` : ""}.</div>`; return; }
+    if (!confirm(`${cls.name} için ${rows.length} ders eklenecek:\n\n${added.join("\n")}${skipped.length ? `\n\nAtlanacak (branşı uygun öğretmen yok, elle ekle): ${skipped.join(", ")}` : ""}\n\nDevam edilsin mi?`)) return;
+    const { error } = await sb.from("class_subject_hours").insert(rows);
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    dersAtamaFlash = `${esc(cls.name)}: ${rows.length} ders eklendi (${esc(added.join("; "))}).${skipped.length ? ` Elle eklenecekler: ${esc(skipped.join(", "))}.` : ""} Öğretmenleri satırdan silip yeniden ekleyerek değiştirebilirsin.`;
+    await renderDersModule(profile, school, "atamalar");
+  };
   document.getElementById("a-save").onclick = async () => {
     const class_id = classSel.value;
     const subject_id = subjSel.value;
