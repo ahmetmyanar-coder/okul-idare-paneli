@@ -3176,27 +3176,199 @@ const DERS_MAX_PER_DAY = 2;
 
 const OKUL_TURU_LABELS = { okul_oncesi: "Okul Öncesi / Anaokulu", ilkokul: "İlkokul", ortaokul: "Ortaokul", lise: "Lise" };
 
-const DEFAULT_SUBJECTS_BY_LEVEL = {
-  okul_oncesi: [
-    ["Türkçe Dil Etkinliği", false], ["Matematik Etkinliği", false], ["Fen ve Doğa Etkinliği", false],
-    ["Sanat Etkinliği", false], ["Müzik Etkinliği", false], ["Oyun ve Hareket Etkinliği", false], ["İngilizce", false],
-  ],
-  ilkokul: [
-    ["Türkçe", true], ["Matematik", true], ["Hayat Bilgisi", false], ["Fen Bilimleri", false],
-    ["Sosyal Bilgiler", false], ["İngilizce", false], ["Din Kültürü ve Ahlak Bilgisi", false],
-    ["Beden Eğitimi ve Oyun", false], ["Görsel Sanatlar", false], ["Müzik", false],
-  ],
-  ortaokul: [
-    ["Türkçe", true], ["Matematik", true], ["Fen Bilimleri", true], ["Sosyal Bilgiler", false],
-    ["İngilizce", false], ["Din Kültürü ve Ahlak Bilgisi", false], ["Beden Eğitimi ve Spor", false],
-    ["Görsel Sanatlar", false], ["Müzik", false], ["Teknoloji ve Tasarım", false], ["Bilişim Teknolojileri ve Yazılım", false],
-  ],
-  lise: [
-    ["Türk Dili ve Edebiyatı", true], ["Matematik", true], ["Fizik", true], ["Kimya", true], ["Biyoloji", true],
-    ["Tarih", false], ["Coğrafya", false], ["Felsefe", false], ["Yabancı Dil (İngilizce)", false],
-    ["Din Kültürü ve Ahlak Bilgisi", false], ["Beden Eğitimi ve Spor", false], ["Görsel Sanatlar / Müzik", false],
-  ],
+/**
+ * Haftalık ders çizelgesi — dayanak: Talim ve Terbiye Kurulu Başkanlığının 23.05.2024 tarihli ve 21 sayılı Kararı ile kabul
+ * edilen "İlköğretim Kurumları (İlkokul ve Ortaokul) Haftalık Ders Çizelgesi". Zorunlu ders saatleri sınıf düzeyine göre
+ * sabittir; ortaokulda seçmeli dersler 2'şer saat olup her sınıfta 6 saatlik seçmeli dilimi vardır (zorunlu 29 + seçmeli 6 = 35).
+ * Çizelge açıklaması: öğrencilerin "İnsan, Toplum ve Bilim", "Din, Ahlak ve Değer" ile "Kültür, Sanat ve Spor" seçmeli ders
+ * gruplarının her birinden her yıl en az birer ders seçmesi zorunludur; parantez içindeki sayı dersin kaç kez alınabileceğidir.
+ * İlkokul 1. sınıfta serbest etkinliklerin 2 saati, 2 ve 3. sınıflarda 1 saati masal ve geleneksel oyun saati olarak kullanılır.
+ * Lise ve okul öncesi için doğrulanmış bir çizelge bu sürümde yüklü değildir; o kademelerde saatler elle girilir.
+ * Adlandırma notu: çizelgede "Müzik (4)" ve "Yabancı Dil (4)" olarak geçen seçmeli dersler, aynı adlı zorunlu derslerle
+ * karışmasın diye "Seçmeli Müzik" ve "Seçmeli Yabancı Dil" adıyla eklenir.
+ */
+const HDC_DAYANAK = "Talim ve Terbiye Kurulu Başkanlığının 23.05.2024 tarihli ve 21 sayılı Kararı — İlköğretim Kurumları (İlkokul ve Ortaokul) Haftalık Ders Çizelgesi";
+const HDC_GROUPS = { itb: "İnsan, Toplum ve Bilim", dad: "Din, Ahlak ve Değer", kss: "Kültür, Sanat ve Spor" };
+const DERS_KIND_LABELS = { zorunlu: "Zorunlu", secmeli: "Seçmeli", serbest: "Serbest etkinlik" };
+const HAFTALIK_DERS_CIZELGESI = {
+  ortaokul: {
+    grades: [5, 6, 7, 8],
+    toplam: { 5: 35, 6: 35, 7: 35, 8: 35 },
+    zorunluToplam: { 5: 29, 6: 29, 7: 29, 8: 29 },
+    secmeliSaat: { 5: 6, 6: 6, 7: 6, 8: 6 },
+    zorunlu: [
+      ["Türkçe", { 5: 6, 6: 6, 7: 5, 8: 5 }],
+      ["Matematik", { 5: 5, 6: 5, 7: 5, 8: 5 }],
+      ["Fen Bilimleri", { 5: 4, 6: 4, 7: 4, 8: 4 }],
+      ["Sosyal Bilgiler", { 5: 3, 6: 3, 7: 3 }],
+      ["T.C. İnkılap Tarihi ve Atatürkçülük", { 8: 2 }],
+      ["Yabancı Dil", { 5: 3, 6: 3, 7: 4, 8: 4 }],
+      ["Din Kültürü ve Ahlak Bilgisi", { 5: 2, 6: 2, 7: 2, 8: 2 }],
+      ["Görsel Sanatlar", { 5: 1, 6: 1, 7: 1, 8: 1 }],
+      ["Müzik", { 5: 1, 6: 1, 7: 1, 8: 1 }],
+      ["Beden Eğitimi ve Spor", { 5: 2, 6: 2, 7: 2, 8: 2 }],
+      ["Teknoloji ve Tasarım", { 7: 2, 8: 2 }],
+      ["Bilişim Teknolojileri ve Yazılım", { 5: 2, 6: 2 }],
+      ["Rehberlik ve Kariyer Planlama", { 8: 1 }],
+    ],
+    serbest: [],
+    /* [ad, grup, kaç kez alınabilir, okutulduğu sınıflar] — her biri 2 saat */
+    secmeli: [
+      ["Matematik ve Bilim Uygulamaları", "itb", 2, [6, 7]],
+      ["Okuma Becerileri", "itb", 4, [5, 6, 7, 8]],
+      ["Yazarlık ve Yazma Becerileri", "itb", 4, [5, 6, 7, 8]],
+      ["Yaşayan Diller ve Lehçeler", "itb", 4, [5, 6, 7, 8]],
+      ["Seçmeli Yabancı Dil", "itb", 4, [5, 6, 7, 8]],
+      ["Çevre Eğitimi ve İklim Değişikliği", "itb", 1, [6, 7, 8]],
+      ["Şehrimiz …", "itb", 1, [5, 6, 7, 8]],
+      ["Hukuk ve Adalet", "itb", 1, [6, 7]],
+      ["Düşünme Eğitimi", "itb", 4, [5, 6, 7, 8]],
+      ["Robotik Kodlama", "itb", 2, [5, 6]],
+      ["Yapay Zeka Uygulamaları", "itb", 2, [7, 8]],
+      ["Proje Tasarımı ve Uygulamaları", "itb", 3, [5, 6, 7]],
+      ["Okul Temelli Sosyal Sorumluluk Çalışmaları", "itb", 3, [6, 7, 8]],
+      ["Medya Okuryazarlığı", "itb", 1, [7, 8]],
+      ["Afet Bilinci", "itb", 2, [5, 6, 7]],
+      ["Temel Yaşam Becerileri", "itb", 2, [5, 6, 7, 8]],
+      ["Türk Sosyal Hayatında Aile", "itb", 1, [5, 6, 7, 8]],
+      ["Kur'an-ı Kerim", "dad", 4, [5, 6, 7, 8]],
+      ["Peygamberimizin Hayatı", "dad", 4, [5, 6, 7, 8]],
+      ["Temel Dinî Bilgiler", "dad", 2, [5, 6, 7, 8]],
+      ["Kültür ve Medeniyetimize Yön Verenler", "dad", 2, [5, 6, 7, 8]],
+      ["Ahlak ve Vatandaşlık Eğitimi", "dad", 2, [5, 6, 7, 8]],
+      ["Görgü Kuralları ve Nezaket", "kss", 2, [5, 6, 7, 8]],
+      ["Seçmeli Müzik", "kss", 4, [5, 6, 7, 8]],
+      ["Spor ve Fizikî Etkinlikler", "kss", 4, [5, 6, 7, 8]],
+      ["Oyun ve Oyun Etkinlikleri", "kss", 2, [5, 6, 7]],
+      ["Dijital Sanatlar", "kss", 2, [6, 7]],
+      ["Masal ve Destanlarımız", "kss", 2, [5, 6, 7, 8]],
+      ["Geleneksel Sanatlar", "kss", 2, [6, 7]],
+      ["Halk Oyunları", "kss", 4, [5, 6, 7, 8]],
+    ],
+  },
+  ilkokul: {
+    grades: [1, 2, 3, 4],
+    toplam: { 1: 30, 2: 30, 3: 30, 4: 30 },
+    zorunluToplam: { 1: 26, 2: 28, 3: 28, 4: 30 },
+    serbestSaat: { 1: 4, 2: 2, 3: 2, 4: 0 },
+    zorunlu: [
+      ["Türkçe", { 1: 10, 2: 10, 3: 8, 4: 8 }],
+      ["Matematik", { 1: 5, 2: 5, 3: 5, 4: 5 }],
+      ["Hayat Bilgisi", { 1: 4, 2: 4, 3: 3 }],
+      ["Fen Bilimleri", { 3: 3, 4: 3 }],
+      ["Sosyal Bilgiler", { 4: 3 }],
+      ["Yabancı Dil", { 2: 2, 3: 2, 4: 2 }],
+      ["Din Kültürü ve Ahlak Bilgisi", { 4: 2 }],
+      ["Görsel Sanatlar", { 1: 1, 2: 1, 3: 1, 4: 1 }],
+      ["Müzik", { 1: 1, 2: 1, 3: 1, 4: 1 }],
+      ["Beden Eğitimi ve Oyun", { 1: 5, 2: 5, 3: 5, 4: 2 }],
+      ["Trafik Güvenliği", { 4: 1 }],
+      ["İnsan Hakları, Vatandaşlık ve Demokrasi", { 4: 2 }],
+    ],
+    serbest: [["Serbest Etkinlikler", { 1: 4, 2: 2, 3: 2 }]],
+    secmeli: [],
+  },
 };
+/* Çizelgesi yüklü olmayan kademeler için yalnızca ad önerisi (saatler elle girilir). */
+const DEFAULT_SUBJECT_NAMES = {
+  okul_oncesi: ["Türkçe Dil Etkinliği", "Matematik Etkinliği", "Fen ve Doğa Etkinliği", "Sanat Etkinliği", "Müzik Etkinliği", "Oyun ve Hareket Etkinliği", "İngilizce"],
+  lise: ["Türk Dili ve Edebiyatı", "Matematik", "Fizik", "Kimya", "Biyoloji", "Tarih", "Coğrafya", "Felsefe", "Yabancı Dil (İngilizce)", "Din Kültürü ve Ahlak Bilgisi", "Beden Eğitimi ve Spor", "Görsel Sanatlar", "Müzik"],
+};
+function dersCizelge(school) { return HAFTALIK_DERS_CIZELGESI[school?.okul_turu] || null; }
+function dersGrades(school) { const c = dersCizelge(school); if (c) return c.grades; return school?.okul_turu === "lise" ? [9, 10, 11, 12] : []; }
+/* "5-A", "5/A", "5A", "8. Sınıf" → 5, 8; rakamla başlamayan ad → null */
+function dersGradeOf(className) { const m = String(className || "").trim().match(/^(\d{1,2})/); return m ? parseInt(m[1], 10) : null; }
+function dersHoursFor(subject, grade) {
+  const v = (subject?.hours_by_grade || {})[grade == null ? "0" : String(grade)];
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+/* Ad eşleme: küçük harf + noktalama temizliği; Yabancı Dil = İngilizce/Almanca/Fransızca */
+function dersNorm(s) {
+  const n = (s || "").toLocaleLowerCase("tr-TR").replace(/[^a-zçğıöşü0-9]+/g, " ").trim();
+  if (!n.includes("seçmeli") && /ingilizce|almanca|fransızca|yabancı dil/.test(n)) return "yabancı dil";
+  return n;
+}
+function dersNameMatch(a, b) { return dersNorm(a) === dersNorm(b); }
+function dersSecmeliAdi(entry, school) { return entry[0].replace("…", (school?.il || "").trim() || "…"); }
+
+/**
+ * Sınıf bazında çizelge kontrolü: zorunlu derslerin varlığı ve saati, seçmeli toplamı (6) ve üç gruptan birer ders,
+ * serbest etkinlik saati (ilkokul) ve haftalık toplam (35 / 30). Çizelgesi olmayan kademede yalnızca toplamı döndürür.
+ */
+function dersSinifKontrol(school, classes, subjects, hours) {
+  const ciz = dersCizelge(school);
+  const subjectById = Object.fromEntries((subjects || []).map(s => [s.id, s]));
+  return (classes || []).map(c => {
+    const grade = dersGradeOf(c.name);
+    const rows = (hours || []).filter(h => h.class_id === c.id).map(h => ({ ...h, subject: subjectById[h.subject_id] })).filter(h => h.subject);
+    const total = rows.reduce((s, h) => s + h.weekly_hours, 0);
+    const r = { class: c, grade, total, target: null, issues: [], infos: [] };
+    if (!ciz) return r;
+    if (grade == null || !ciz.grades.includes(grade)) {
+      r.infos.push(`Sınıf adı ${ciz.grades[0]}–${ciz.grades[ciz.grades.length - 1]} arası bir rakamla başlamadığı için çizelge kontrolü yapılamadı (örn. "${ciz.grades[0]}-A").`);
+      return r;
+    }
+    r.target = ciz.toplam[grade];
+    if (!rows.length) return r;
+    const kindOf = s => s.kind || "zorunlu";
+    const zorunluRows = rows.filter(h => kindOf(h.subject) === "zorunlu");
+    const secmeliRows = rows.filter(h => kindOf(h.subject) === "secmeli");
+    const serbestRows = rows.filter(h => kindOf(h.subject) === "serbest");
+    ciz.zorunlu.forEach(([name, hb]) => {
+      const need = hb[grade];
+      const got = zorunluRows.filter(h => dersNameMatch(h.subject.name, name)).reduce((s, h) => s + h.weekly_hours, 0);
+      if (!need) { if (got) r.issues.push(`${name} çizelgeye göre ${grade}. sınıfta okutulmuyor (${got} saat atanmış)`); return; }
+      if (!got) r.issues.push(`${name} atanmadı — çizelgede ${need} saat`);
+      else if (got !== need) r.issues.push(`${name}: ${got} saat atandı, çizelgede ${need} saat`);
+    });
+    zorunluRows.forEach(h => {
+      if (!ciz.zorunlu.some(([name]) => dersNameMatch(h.subject.name, name))) r.infos.push(`${h.subject.name} çizelgenin zorunlu listesinde yok; okula özgü ders olarak toplama katıldı.`);
+    });
+    if (ciz.secmeliSaat) {
+      const need = ciz.secmeliSaat[grade];
+      const got = secmeliRows.reduce((s, h) => s + h.weekly_hours, 0);
+      if (got !== need) r.issues.push(`Seçmeli toplamı ${got} saat; çizelgede ${need} saat (${need / 2} ders × 2 saat)`);
+      const groupsHave = new Set(secmeliRows.map(h => h.subject.group_label).filter(Boolean));
+      const missingGroups = Object.values(HDC_GROUPS).filter(g => !groupsHave.has(g));
+      if (secmeliRows.length && missingGroups.length) r.issues.push(`Seçmeli grubu eksik: ${missingGroups.join("; ")} — çizelge açıklaması: üç gruptan her yıl en az birer ders seçilmesi zorunludur`);
+      secmeliRows.forEach(h => {
+        if (Object.keys(h.subject.hours_by_grade || {}).length && !dersHoursFor(h.subject, grade)) r.issues.push(`${h.subject.name} çizelgeye göre ${grade}. sınıfta okutulmuyor`);
+      });
+    }
+    if (ciz.serbestSaat) {
+      const need = ciz.serbestSaat[grade] || 0;
+      const got = serbestRows.reduce((s, h) => s + h.weekly_hours, 0);
+      if (got !== need) r.issues.push(`Serbest etkinlik ${got} saat; çizelgede ${need} saat`);
+    }
+    if (total !== r.target) r.issues.push(`Haftalık toplam ${total} saat; çizelgede ${r.target} saat`);
+    return r;
+  });
+}
+function dersKontrolListHtml(k) {
+  if (!k.target) return k.infos.length ? `<p style="font-size:12px;color:var(--muted);margin:8px 0 0">${k.infos.map(esc).join("<br>")}</p>` : "";
+  if (!k.total) return `<p style="font-size:12px;color:var(--muted);margin:8px 0 0">Henüz atama yok — çizelgeye göre bu sınıfta haftada ${k.target} saat ders olmalı.</p>`;
+  if (!k.issues.length) return `<div class="msg ok" style="margin-top:8px">Çizelgeye uygun: ${k.total} saat.${k.infos.length ? " " + k.infos.map(esc).join(" ") : ""}</div>`;
+  return `<div style="border:1px solid var(--warn);border-radius:8px;padding:8px 12px;margin-top:8px;font-size:12.5px">
+    <strong>⚠️ Çizelgeyle uyuşmayan ${k.issues.length} nokta</strong>
+    <ul style="margin:4px 0 0;padding-left:18px">${k.issues.map(i => `<li>${esc(i)}</li>`).join("")}</ul>
+    ${k.infos.length ? `<div style="color:var(--muted);margin-top:4px">${k.infos.map(esc).join("<br>")}</div>` : ""}
+  </div>`;
+}
+function dersKontrolOzetHtml(school, kontrol) {
+  const ciz = dersCizelge(school);
+  if (!ciz) return "";
+  const rows = kontrol.map(k => {
+    const durum = !k.target ? `<span class="pill">kontrol dışı</span>` : !k.total ? `<span class="pill">atama yok</span>` : k.issues.length ? `<span class="pill warn">${k.issues.length} uyarı</span>` : `<span class="pill good">uygun</span>`;
+    return `<tr><td>${esc(k.class.name)}</td><td>${k.grade != null ? `${k.grade}. sınıf` : "—"}</td><td style="text-align:center">${k.total}${k.target ? ` / ${k.target}` : ""}</td><td>${durum}</td></tr>`;
+  }).join("");
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Çizelge Uyum Özeti</h3>
+      <div class="table-wrap"><table class="data"><thead><tr><th>Sınıf</th><th>Düzey</th><th style="text-align:center">Saat / çizelge</th><th>Durum</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0">Dayanak: ${esc(HDC_DAYANAK)}. ${ciz.secmeliSaat ? "Ortaokulda her sınıf: zorunlu 29 + seçmeli 6 = 35 saat; seçmeliler üç gruptan (İnsan-Toplum-Bilim, Din-Ahlak-Değer, Kültür-Sanat-Spor) en az birer ders olacak şekilde 2'şer saattir." : "İlkokulda haftalık toplam 30 saattir; 1–3. sınıflarda serbest etkinlik saati vardır."}</p>
+    </div>`;
+}
 
 function dersHeader(school, activeTab) {
   const tabs = [
@@ -3238,30 +3410,66 @@ async function renderDersAyarlar(profile, school, content) {
     sb.from("lesson_periods").select("*").eq("school_id", school.id).order("sort_order"),
   ]);
 
-  const levelDefaults = DEFAULT_SUBJECTS_BY_LEVEL[school.okul_turu] || [];
-  const existingNames = new Set((subjects || []).map(s => s.name));
-  const missingDefaults = levelDefaults.filter(([name]) => !existingNames.has(name));
+  const ciz = dersCizelge(school);
+  const grades = dersGrades(school);
+  const subs = subjects || [];
+  const has = name => subs.some(s => dersNameMatch(s.name, name));
+  const missingZorunlu = ciz ? [...ciz.zorunlu.map(z => [z[0], z[1], "zorunlu"]), ...ciz.serbest.map(z => [z[0], z[1], "serbest"])].filter(([name]) => !has(name)) : [];
+  const missingSecmeli = ciz ? ciz.secmeli.filter(x => !has(dersSecmeliAdi(x, school))) : [];
+  const nameDefaults = !ciz ? (DEFAULT_SUBJECT_NAMES[school.okul_turu] || []).filter(n => !has(n)) : [];
+  const toHours = hb => Object.fromEntries(Object.entries(hb).map(([g, h]) => [String(g), h]));
+  /* Daha önce saatsiz eklenmiş dersler (eski sürüm) çizelgede varsa saatleri tek tıkla işlenir. */
+  const fillable = ciz ? subs.filter(s => !Object.keys(s.hours_by_grade || {}).length && (s.kind || "zorunlu") !== "secmeli").map(s => {
+    const z = [...ciz.zorunlu, ...ciz.serbest].find(([n]) => dersNameMatch(s.name, n));
+    return z ? { s, hb: toHours(z[1]) } : null;
+  }).filter(Boolean) : [];
+
+  const hourCell = (s, g) => `<td style="text-align:center"><input type="number" min="0" max="12" data-hour="${s.id}" data-grade="${g}" value="${dersHoursFor(s, g) ?? ""}" style="width:56px;margin:0;padding:6px 4px;text-align:center"></td>`;
+  const kindCell = s => `<span class="pill ${(s.kind || "zorunlu") === "zorunlu" ? "good" : ""}">${DERS_KIND_LABELS[s.kind] || "Zorunlu"}</span>${s.group_label ? `<div style="font-size:11px;color:var(--muted)">${esc(s.group_label)}</div>` : ""}`;
 
   content.innerHTML = `
-    <div class="grid">
-      <div class="card">
-        <h3 style="margin-top:0">Dersler</h3>
-        ${missingDefaults.length ? `
-          <p style="color:var(--muted);font-size:12.5px">${esc(OKUL_TURU_LABELS[school.okul_turu] || "")} için önerilen ${missingDefaults.length} ders var, tek tıkla ekleyebilirsin (istediğini sonra silebilir/değiştirebilirsin).</p>
-          <button class="secondary" id="seed-subjects" style="margin-bottom:14px;width:100%">${esc(OKUL_TURU_LABELS[school.okul_turu] || "Önerilen")} ders listesini ekle</button>
-        ` : ""}
-        <div id="subject-list">
-          ${(subjects || []).map(s => `<div class="list-item"><span>${esc(s.name)}${s.is_heavy ? ' <span class="pill warn">ağır</span>' : ""}</span><div class="row-actions"><button data-del-subject="${s.id}">Sil</button></div></div>`).join("") || `<p style="color:var(--muted);font-size:13px">Henüz eklenmedi.</p>`}
-        </div>
-        <label>Yeni ders</label>
-        <input id="new-subject" placeholder="örn. Matematik">
-        <div class="check-row"><input type="checkbox" id="new-subject-heavy"><label for="new-subject-heavy">Ağır ders (sabah saatine öncelik)</label></div>
-        <button class="secondary" id="add-subject" style="margin-top:10px;width:100%">Ekle</button>
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Dersler ve Haftalık Saatler</h3>
+      <p style="color:var(--muted);font-size:12.5px;margin:0 0 10px">${ciz
+        ? `Dayanak: ${esc(HDC_DAYANAK)}. Zorunlu derslerin saatleri sınıf düzeyine göre çizelgeden gelir ve Atamalar'da otomatik dolar.${ciz.secmeliSaat ? " Seçmeli dersler çizelgede 2'şer saattir; her sınıfta 6 saatlik seçmeli dilimi vardır (zorunlu 29 + seçmeli 6 = 35)." : " Haftalık toplam her sınıfta 30 saattir."}`
+        : `Bu kademe için doğrulanmış bir haftalık ders çizelgesi yüklü değil; her dersin haftalık saatini sınıf düzeyine göre elle gir.`}</p>
+      ${ciz && missingZorunlu.length ? `<button class="secondary" id="seed-subjects" style="margin-bottom:10px;width:100%">Çizelgedeki zorunlu dersleri saatleriyle ekle <span style="color:var(--muted);font-weight:400">(${missingZorunlu.length} ders eksik)</span></button>` : ""}
+      ${fillable.length ? `<button class="secondary" id="fill-hours" style="margin-bottom:10px;width:100%">Mevcut derslere çizelge saatlerini işle <span style="color:var(--muted);font-weight:400">(${fillable.length} ders: ${fillable.map(f => esc(f.s.name)).join(", ")})</span></button>` : ""}
+      ${!ciz && nameDefaults.length ? `<button class="secondary" id="seed-subjects" style="margin-bottom:10px;width:100%">${esc(OKUL_TURU_LABELS[school.okul_turu] || "Önerilen")} ders listesini ekle <span style="color:var(--muted);font-weight:400">(${nameDefaults.length} ders — saatleri sonra gir)</span></button>` : ""}
+      ${ciz && ciz.secmeli.length ? `
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+          <div style="flex:1;min-width:260px"><label style="margin-top:0">Çizelgeden seçmeli ders ekle <span style="color:var(--muted);font-weight:400">(grup — okutulduğu sınıflar — kaç kez alınabilir)</span></label>
+            <select id="seed-secmeli" style="margin:0">${Object.entries(HDC_GROUPS).map(([gk, gl]) => `<optgroup label="${esc(gl)}">${missingSecmeli.filter(x => x[1] === gk).map(x => `<option value="${esc(x[0])}">${esc(dersSecmeliAdi(x, school))} — ${x[3].join(", ")}. sınıf (${x[2]} kez)</option>`).join("")}</optgroup>`).join("")}</select></div>
+          <button class="secondary" id="seed-secmeli-btn" style="margin:0;width:auto">Seçmeliyi ekle</button>
+        </div>` : ""}
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Ders</th><th>Tür</th>${grades.length ? grades.map(g => `<th style="text-align:center;white-space:nowrap">${g}. sınıf</th>`).join("") : `<th style="text-align:center">Haftalık saat</th>`}<th></th></tr></thead>
+          <tbody>
+            ${subs.map(s => `<tr><td>${esc(s.name)}</td><td>${kindCell(s)}</td>${grades.length ? grades.map(g => hourCell(s, g)).join("") : hourCell(s, 0)}<td class="row-actions"><button data-del-subject="${s.id}">Sil</button></td></tr>`).join("") || `<tr><td colspan="${grades.length + 3}" style="color:var(--muted)">Henüz ders eklenmedi.</td></tr>`}
+          </tbody>
+        </table>
       </div>
+      <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0">Saat kutusunu değiştirince kaydedilir; o sınıfta okutulmayan ders için kutuyu boş bırak. Sınıf adları rakamla başlamalı (5-A, 6/B) — sınıf düzeyi bu rakamdan okunur.</p>
+      <div id="subject-msg"></div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Yeni Ders</h3>
+      <div class="grid">
+        <div><label style="margin-top:0">Ders adı</label><input id="new-subject" placeholder="örn. Seçmeli Halk Oyunları"></div>
+        <div><label style="margin-top:0">Tür</label><select id="new-subject-kind"><option value="zorunlu">Zorunlu</option><option value="secmeli">Seçmeli</option><option value="serbest">Serbest etkinlik</option></select></div>
+      </div>
+      <div id="new-subject-group-wrap" class="hidden"><label>Seçmeli grubu</label><select id="new-subject-group">${Object.values(HDC_GROUPS).map(g => `<option>${esc(g)}</option>`).join("")}<option value="">Grupsuz / diğer</option></select></div>
+      ${grades.length
+        ? `<label>Haftalık saat <span style="color:var(--muted);font-weight:400">(sınıf düzeyine göre; okutulmayan sınıfı boş bırak)</span></label><div style="display:flex;gap:10px;flex-wrap:wrap">${grades.map(g => `<div style="text-align:center"><div style="font-size:11px;color:var(--muted)">${g}. sınıf</div><input type="number" min="0" max="12" data-new-hour="${g}" style="width:70px;text-align:center;margin:0"></div>`).join("")}</div>`
+        : `<label>Haftalık saat</label><input id="new-subject-hours" type="number" min="1" value="2">`}
+      <button class="secondary" id="add-subject" style="margin-top:10px;width:100%">Ekle</button>
+    </div>
+    <div class="grid">
       <div class="card">
         <h3 style="margin-top:0">Sınıflar</h3>
         <div id="class-list">
-          ${(classes || []).map(c => `<div class="list-item"><span>${esc(c.name)}</span><div class="row-actions"><button data-del-class="${c.id}">Sil</button></div></div>`).join("") || `<p style="color:var(--muted);font-size:13px">Henüz eklenmedi.</p>`}
+          ${(classes || []).map(c => { const g = dersGradeOf(c.name); return `<div class="list-item"><span>${esc(c.name)} ${g != null ? `<span class="pill">${g}. sınıf</span>` : `<span class="pill warn" title="Sınıf adı rakamla başlamıyor; çizelge kontrolü yapılamaz">düzey yok</span>`}</span><div class="row-actions"><button data-del-class="${c.id}">Sil</button></div></div>`; }).join("") || `<p style="color:var(--muted);font-size:13px">Henüz eklenmedi.</p>`}
         </div>
         <label>Yeni sınıf</label>
         <input id="new-class" placeholder="örn. 5-A">
@@ -3279,16 +3487,62 @@ async function renderDersAyarlar(profile, school, content) {
     </div>
   `;
 
+  const msg = document.getElementById("subject-msg");
+  const kindSel = document.getElementById("new-subject-kind");
+  kindSel.onchange = () => document.getElementById("new-subject-group-wrap").classList.toggle("hidden", kindSel.value !== "secmeli");
+
+  content.querySelectorAll("[data-hour]").forEach(inp => inp.onchange = async () => {
+    const s = subs.find(x => x.id === inp.dataset.hour);
+    if (!s) return;
+    const hb = { ...(s.hours_by_grade || {}) };
+    const v = parseInt(inp.value, 10);
+    if (Number.isFinite(v) && v > 0) hb[inp.dataset.grade] = v; else delete hb[inp.dataset.grade];
+    const { error } = await sb.from("subjects").update({ hours_by_grade: hb }).eq("id", s.id);
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    s.hours_by_grade = hb;
+    msg.innerHTML = `<div class="msg ok">${esc(s.name)} kaydedildi.</div>`;
+  });
+
   document.getElementById("add-subject").onclick = async () => {
     const name = document.getElementById("new-subject").value.trim();
     if (!name) return;
-    const is_heavy = document.getElementById("new-subject-heavy").checked;
-    await sb.from("subjects").insert({ school_id: school.id, name, is_heavy, sort_order: (subjects || []).length });
+    if (has(name)) { msg.innerHTML = `<div class="msg err">"${esc(name)}" zaten listede.</div>`; return; }
+    const kind = kindSel.value;
+    const group_label = kind === "secmeli" ? (document.getElementById("new-subject-group").value || null) : null;
+    const hours_by_grade = {};
+    if (grades.length) content.querySelectorAll("[data-new-hour]").forEach(i => { const v = parseInt(i.value, 10); if (Number.isFinite(v) && v > 0) hours_by_grade[i.dataset.newHour] = v; });
+    else { const v = parseInt(document.getElementById("new-subject-hours").value, 10); if (Number.isFinite(v) && v > 0) hours_by_grade["0"] = v; }
+    const { error } = await sb.from("subjects").insert({ school_id: school.id, name, kind, group_label, hours_by_grade, sort_order: subs.length });
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
     await renderDersModule(profile, school, "ayarlar");
   };
   const seedBtn = document.getElementById("seed-subjects");
   if (seedBtn) seedBtn.onclick = async () => {
-    await sb.from("subjects").insert(missingDefaults.map(([name, is_heavy], idx) => ({ school_id: school.id, name, is_heavy, sort_order: (subjects || []).length + idx })));
+    const rows = ciz
+      ? missingZorunlu.map(([name, hb, kind], idx) => ({ school_id: school.id, name, kind, hours_by_grade: toHours(hb), basis: HDC_DAYANAK, sort_order: subs.length + idx }))
+      : nameDefaults.map((name, idx) => ({ school_id: school.id, name, kind: "zorunlu", hours_by_grade: {}, sort_order: subs.length + idx }));
+    const { error } = await sb.from("subjects").insert(rows);
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    await renderDersModule(profile, school, "ayarlar");
+  };
+  const fillBtn = document.getElementById("fill-hours");
+  if (fillBtn) fillBtn.onclick = async () => {
+    for (const f of fillable) {
+      const { error } = await sb.from("subjects").update({ hours_by_grade: f.hb, basis: HDC_DAYANAK }).eq("id", f.s.id);
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    }
+    await renderDersModule(profile, school, "ayarlar");
+  };
+  const secBtn = document.getElementById("seed-secmeli-btn");
+  if (secBtn) secBtn.onclick = async () => {
+    const key = document.getElementById("seed-secmeli").value;
+    const x = ciz.secmeli.find(e => e[0] === key);
+    if (!x) { msg.innerHTML = `<div class="msg err">Eklenecek seçmeli kalmadı.</div>`; return; }
+    const { error } = await sb.from("subjects").insert({
+      school_id: school.id, name: dersSecmeliAdi(x, school), kind: "secmeli", group_label: HDC_GROUPS[x[1]],
+      hours_by_grade: Object.fromEntries(x[3].map(g => [String(g), 2])), basis: `${HDC_DAYANAK} (seçmeli; ${x[2]} kez alınabilir)`, sort_order: subs.length,
+    });
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
     await renderDersModule(profile, school, "ayarlar");
   };
   document.getElementById("add-class").onclick = async () => {
@@ -3304,7 +3558,8 @@ async function renderDersAyarlar(profile, school, content) {
     await renderDersModule(profile, school, "ayarlar");
   };
   content.querySelectorAll("[data-del-subject]").forEach(b => b.onclick = async () => {
-    await sb.from("subjects").delete().eq("id", b.dataset.delSubject);
+    const { error } = await sb.from("subjects").delete().eq("id", b.dataset.delSubject);
+    if (error) { msg.innerHTML = `<div class="msg err">${error.code === "23503" ? "Bu dersin ataması var; önce Atamalar'dan sil." : esc(error.message)}</div>`; return; }
     await renderDersModule(profile, school, "ayarlar");
   });
   content.querySelectorAll("[data-del-class]").forEach(b => b.onclick = async () => {
@@ -3330,50 +3585,86 @@ async function renderDersAtamalar(profile, school, content) {
     return;
   }
 
+  const ciz = dersCizelge(school);
+  const subjectById = Object.fromEntries(subjects.map(s => [s.id, s]));
   const byClass = {};
   (assigns || []).forEach(a => { (byClass[a.class_id] ??= []).push(a); });
+  const kontrol = dersSinifKontrol(school, classes, subjects, assigns || []);
+  const kontrolById = Object.fromEntries(kontrol.map(k => [k.class.id, k]));
+  const kindOf = s => s?.kind || "zorunlu";
+  const optgroup = (label, list) => list.length ? `<optgroup label="${label}">${list.map(s => `<option value="${s.id}">${esc(s.name)}${s.group_label ? ` — ${esc(s.group_label)}` : ""}</option>`).join("")}</optgroup>` : "";
 
   content.innerHTML = `
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">Yeni Atama</h3>
-      <label>Sınıf</label>
-      <select id="a-class">${classes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select>
-      <label>Ders</label>
-      <select id="a-subject">${subjects.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select>
-      <label>Öğretmen</label>
-      <select id="a-teacher">${teachers.map(t => `<option value="${t.id}">${esc(t.full_name)}</option>`).join("")}</select>
-      <label>Haftalık saat</label>
-      <input id="a-hours" type="number" min="1" value="2">
+      <div class="grid">
+        <div><label style="margin-top:0">Sınıf</label><select id="a-class">${classes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select></div>
+        <div><label style="margin-top:0">Ders</label><select id="a-subject">${optgroup("Zorunlu", subjects.filter(s => kindOf(s) === "zorunlu"))}${optgroup("Seçmeli", subjects.filter(s => kindOf(s) === "secmeli"))}${optgroup("Serbest etkinlik", subjects.filter(s => kindOf(s) === "serbest"))}</select></div>
+        <div><label style="margin-top:0">Öğretmen</label><select id="a-teacher">${teachers.map(t => `<option value="${t.id}">${esc(t.full_name)}</option>`).join("")}</select></div>
+        <div><label style="margin-top:0">Haftalık saat</label><input id="a-hours" type="number" min="1" value="2"><div id="a-hours-hint" style="font-size:11.5px;color:var(--muted);margin-top:4px"></div></div>
+      </div>
       <button class="primary" id="a-save">Ekle</button>
       <div id="a-msg"></div>
     </div>
-    ${classes.map(c => `
-      <div class="card" style="margin-bottom:16px">
-        <h3 style="margin-top:0">${esc(c.name)} <span style="color:var(--muted);font-weight:400;font-size:12.5px">(${(byClass[c.id] || []).reduce((s, a) => s + a.weekly_hours, 0)} saat/hafta)</span></h3>
+    ${dersKontrolOzetHtml(school, kontrol)}
+    ${classes.map(c => {
+      const k = kontrolById[c.id];
+      return `
+      <div class="card" style="margin-bottom:16px${k.issues.length ? ";border-color:var(--warn)" : ""}">
+        <h3 style="margin-top:0">${esc(c.name)} <span style="color:var(--muted);font-weight:400;font-size:12.5px">(${k.total} saat/hafta${k.target ? ` · çizelge ${k.target}` : ""})</span></h3>
         ${(byClass[c.id] || []).length ? `
           <div class="table-wrap">
           <table class="data">
-            <thead><tr><th>Ders</th><th>Öğretmen</th><th>Saat</th><th></th></tr></thead>
+            <thead><tr><th>Ders</th><th>Tür</th><th>Öğretmen</th><th style="text-align:center">Saat</th><th style="text-align:center">Çizelge</th><th></th></tr></thead>
             <tbody>
-              ${byClass[c.id].map(a => `<tr><td>${esc(a.subjects?.name)}</td><td>${esc(a.teachers?.full_name)}</td><td>${a.weekly_hours}</td><td class="row-actions"><button data-del-assign="${a.id}">Sil</button></td></tr>`).join("")}
+              ${byClass[c.id].map(a => { const s = subjectById[a.subject_id]; const ch = dersHoursFor(s, k.grade); const diff = ch != null && ch !== a.weekly_hours; return `<tr><td>${esc(a.subjects?.name)}</td><td><span class="pill ${kindOf(s) === "zorunlu" ? "good" : ""}">${DERS_KIND_LABELS[kindOf(s)]}</span></td><td>${esc(a.teachers?.full_name)}</td><td style="text-align:center"><input type="number" min="1" max="12" data-edit-hours="${a.id}" value="${a.weekly_hours}" style="width:56px;margin:0;padding:6px 4px;text-align:center${diff ? ";border-color:var(--warn)" : ""}"></td><td style="text-align:center;color:var(--muted)">${ch ?? "—"}</td><td class="row-actions"><button data-del-assign="${a.id}">Sil</button></td></tr>`; }).join("")}
             </tbody>
           </table>
           </div>
-        ` : `<p style="color:var(--muted);font-size:13px">Bu sınıf için henüz atama yok.</p>`}
-      </div>
-    `).join("")}
+        ` : ""}
+        ${dersKontrolListHtml(k)}
+      </div>`;
+    }).join("")}
   `;
 
+  const classSel = document.getElementById("a-class"), subjSel = document.getElementById("a-subject"), hoursInp = document.getElementById("a-hours"), hint = document.getElementById("a-hours-hint");
+  function refreshHint() {
+    const cls = classes.find(c => c.id === classSel.value);
+    const s = subjectById[subjSel.value];
+    const grade = dersGradeOf(cls?.name);
+    const h = dersHoursFor(s, grade);
+    if (h) {
+      hoursInp.value = h;
+      hint.textContent = kindOf(s) === "secmeli"
+        ? `Çizelge: seçmeli ders, ${grade}. sınıfta 2 saat — okulun uygulamasına göre değiştirebilirsin.`
+        : `Çizelge: ${grade}. sınıfta ${h} saat${s.basis ? "" : " (Ayarlar'da girilen değer)"}.`;
+      return;
+    }
+    hoursInp.value = 2;
+    if (grade == null) hint.textContent = "Sınıf adı rakamla başlamadığı için düzey okunamadı; saati elle gir.";
+    else if (kindOf(s) === "secmeli" && Object.keys(s?.hours_by_grade || {}).length) hint.textContent = `⚠️ Çizelgeye göre ${esc(s.name)} ${grade}. sınıfta okutulmuyor (okutulduğu sınıflar: ${Object.keys(s.hours_by_grade).join(", ")}).`;
+    else if (kindOf(s) === "zorunlu" && Object.keys(s?.hours_by_grade || {}).length) hint.textContent = `⚠️ Çizelgeye göre ${esc(s.name)} ${grade}. sınıfta okutulmuyor.`;
+    else hint.textContent = ciz ? `Bu ders için ${grade}. sınıfta çizelge saati tanımlı değil; Ayarlar'dan girebilirsin.` : "Haftalık saati elle gir.";
+  }
+  classSel.onchange = refreshHint; subjSel.onchange = refreshHint; refreshHint();
+
   document.getElementById("a-save").onclick = async () => {
-    const class_id = document.getElementById("a-class").value;
-    const subject_id = document.getElementById("a-subject").value;
+    const class_id = classSel.value;
+    const subject_id = subjSel.value;
     const teacher_id = document.getElementById("a-teacher").value;
-    const weekly_hours = parseInt(document.getElementById("a-hours").value) || 1;
+    const weekly_hours = parseInt(hoursInp.value, 10) || 1;
     const msg = document.getElementById("a-msg");
     const { error } = await sb.from("class_subject_hours").insert({ school_id: school.id, class_id, subject_id, teacher_id, weekly_hours });
-    if (error) { msg.innerHTML = `<div class="msg err">${error.code === "23505" ? "Bu sınıf/ders/öğretmen kombinasyonu zaten eklenmiş — düzenlemek için önce sil." : error.message}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${error.code === "23505" ? "Bu sınıf/ders/öğretmen kombinasyonu zaten eklenmiş — saatini tablodaki kutudan değiştir." : esc(error.message)}</div>`; return; }
     await renderDersModule(profile, school, "atamalar");
   };
+  content.querySelectorAll("[data-edit-hours]").forEach(inp => inp.onchange = async () => {
+    const v = parseInt(inp.value, 10);
+    if (!Number.isFinite(v) || v < 1) return;
+    const { error } = await sb.from("class_subject_hours").update({ weekly_hours: v }).eq("id", inp.dataset.editHours);
+    if (error) { document.getElementById("a-msg").innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    await renderDersModule(profile, school, "atamalar");
+  });
   content.querySelectorAll("[data-del-assign]").forEach(b => b.onclick = async () => {
     await sb.from("class_subject_hours").delete().eq("id", b.dataset.delAssign);
     await renderDersModule(profile, school, "atamalar");
@@ -3386,7 +3677,7 @@ async function renderDersAtamalar(profile, school, content) {
  *   en iyi uygun hücreye greedy yerleştirme (kısıt-yoğunluğu sıralı sezgisel).
  * Faz 2 — simulated annealing: sabitlenmemiş atamalar üzerinde move/swap komşuluklarıyla
  *   yerel arama, toplam ceza (öğretmen boşlukları + aynı gün ders tekrarı + sınıf günlük
- *   yük dengesizliği + ağır ders/sabah tercihi) minimize edilene kadar iyileştirme.
+ *   yük dengesizliği) minimize edilene kadar iyileştirme.
  * Sert kısıtlar (öğretmen/sınıf çakışması, günlük tekrar sınırı) her iki fazda da asla ihlal edilmez.
  */
 function generateLessonSchedule(school, { classes, subjects, periods, hours, existing, teachers }) {
@@ -3438,9 +3729,7 @@ function generateLessonSchedule(school, { classes, subjects, periods, hours, exi
 
   function candidateScore(class_id, teacher_id, subject_id, day, period_id) {
     let score = 0;
-    const subj = subjectById[subject_id];
     const pIdx = periodSortByIdx[period_id];
-    if (subj?.is_heavy) score += pIdx * 3;
     score += (classDaySubjectCount[`${class_id}|${day}|${subject_id}`] || 0) * 8;
     score += (classDayCount[`${class_id}|${day}`] || 0) * 2;
     const existingPeriods = teacherDayPeriods[`${teacher_id}|${day}`];
@@ -3479,7 +3768,6 @@ function generateLessonSchedule(school, { classes, subjects, periods, hours, exi
       perClassDaySubject[csKey] = (perClassDaySubject[csKey] || 0) + 1;
       const cdKey = `${a.class_id}|${a.day_of_week}`;
       perClassDay[cdKey] = (perClassDay[cdKey] || 0) + 1;
-      if (subjectById[a.subject_id]?.is_heavy) penalty += pIdx * 3;
     });
     Object.values(perTeacherDay).forEach(arr => {
       arr.sort((a, b) => a - b);
@@ -3589,6 +3877,18 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
   const subjectById = Object.fromEntries((subjects || []).map(s => [s.id, s]));
   const classById = Object.fromEntries(classes.map(c => [c.id, c]));
   const totalNeeded = hours.reduce((s, h) => s + h.weekly_hours, 0);
+  const ciz = dersCizelge(school);
+  const kontrol = dersSinifKontrol(school, classes, subjects || [], hours);
+  const kontrolById = Object.fromEntries(kontrol.map(k => [k.class.id, k]));
+  const uyariSiniflar = kontrol.filter(k => k.issues.length);
+  const cizelgeHtml = ciz ? `
+    <div class="card" style="margin-bottom:16px${uyariSiniflar.length ? ";border-color:var(--warn)" : ""}">
+      <h3 style="margin-top:0">${uyariSiniflar.length ? "⚠️ Çizelge kontrolü" : "✅ Çizelge kontrolü"}</h3>
+      <p style="margin:0;font-size:13px">${uyariSiniflar.length
+        ? `${uyariSiniflar.length} sınıfın haftalık saatleri çizelgeyle uyuşmuyor: ${uyariSiniflar.map(k => `<strong>${esc(k.class.name)}</strong> (${k.total}/${k.target} saat, ${k.issues.length} uyarı)`).join(", ")}. Ayrıntı ve düzeltme Atamalar sekmesinde; program yine de oluşturulabilir.`
+        : "Atanan haftalık saatler her sınıfta çizelgeye uygun."}</p>
+      <p style="margin:6px 0 0;font-size:11.5px;color:var(--muted)">Dayanak: ${esc(HDC_DAYANAK)}.</p>
+    </div>` : "";
 
   const warningHtml = genResult && genResult.unplaced.length ? `
     <div class="card" style="margin-bottom:16px;border-color:var(--warn)">
@@ -3638,17 +3938,22 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
 
   content.innerHTML = `
     ${warningHtml}
+    ${cizelgeHtml}
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <div>
           <h3 style="margin:0">Haftalık Ders Programı</h3>
           <p style="color:var(--muted);font-size:12.5px;margin:4px 0 0">${totalNeeded} saat/hafta talep · ${(existing || []).length} saat yerleştirilmiş${genResult ? ` · optimizasyon skoru: ${genResult.score} (düşük daha iyi)` : ""}</p>
         </div>
-        <button class="primary" id="gen-ders-btn" style="margin:0;width:auto;padding:10px 18px">${existing?.length ? "Yeniden Oluştur" : "Program Oluştur"}</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${existing?.length ? `<button class="secondary" id="print-ders-btn" style="margin:0;width:auto;padding:10px 18px">Yazdır / Word</button>` : ""}
+          <button class="primary" id="gen-ders-btn" style="margin:0;width:auto;padding:10px 18px">${existing?.length ? "Yeniden Oluştur" : "Program Oluştur"}</button>
+        </div>
       </div>
-      <p style="color:var(--muted);font-size:11.5px;margin:6px 0 0">Yeniden oluşturma, sabitlenmiş dersleri korur. Optimizasyon: yapılandırma + simulated annealing yerel arama.</p>
+      <p style="color:var(--muted);font-size:11.5px;margin:6px 0 0">Yeniden oluşturma, sabitlenmiş dersleri korur. Optimizasyon: yapılandırma + simulated annealing yerel arama.${ciz ? ` Haftalık saatler ${esc(HDC_DAYANAK)} esas alınarak Atamalar'da belirlenir; program o saatleri dağıtır.` : ""}</p>
       <div id="gen-ders-msg"></div>
     </div>
+    <div id="ders-print" style="margin-bottom:16px"></div>
     ${existing?.length ? `
       <div class="subtabs" style="margin-bottom:16px">
         <div class="subtab ${viewMode === "sinif" ? "active" : ""}" data-view="sinif">Sınıf Bazlı</div>
@@ -3666,6 +3971,29 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
     await sb.from("lesson_assignments").update({ is_pinned: !current?.is_pinned }).eq("id", id);
     await renderDersProgram(profile, school, content, viewMode, genResult);
   });
+
+  const printBtn = document.getElementById("print-ders-btn");
+  if (printBtn) printBtn.onclick = () => {
+    const isOgr = viewMode === "ogretmen";
+    const entities = isOgr ? (teachers || []) : classes;
+    const cellMap = isOgr ? byTeacherCell : byClassCell;
+    const cell = "border:1px solid #000;padding:4px";
+    const body = entities.map(e => `
+      <h3 style="margin:16px 0 6px;font-size:12pt">${esc(isOgr ? e.full_name : e.name)}${!isOgr && kontrolById[e.id]?.target ? ` <span style="font-weight:normal;font-size:9.5pt">— haftada ${kontrolById[e.id].total} saat (çizelge ${kontrolById[e.id].target})</span>` : ""}</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:9.5pt;page-break-inside:avoid">
+        <thead><tr><th style="${cell}"></th>${DERS_DAYS.map(d => `<th style="${cell}">${DAY_NAMES_DERS[d]}</th>`).join("")}</tr></thead>
+        <tbody>${periods.map(p => `<tr><td style="${cell};white-space:nowrap"><strong>${esc(p.label)}</strong></td>${DERS_DAYS.map(d => {
+          const a = (cellMap[e.id] || {})[`${d}|${p.id}`];
+          return `<td style="${cell};text-align:center">${a ? `${esc(subjectById[a.subject_id]?.name || "?")}<br><span style="font-size:8.5pt;color:#444">${esc(isOgr ? (classById[a.class_id]?.name || "?") : (teacherById[a.teacher_id]?.full_name || "?"))}</span>` : ""}</td>`;
+        }).join("")}</tr>`).join("")}</tbody>
+      </table>`).join("");
+    const foot = `
+      <p style="font-size:9pt;margin-top:14px">${ciz ? `Haftalık ders saatleri, ${esc(HDC_DAYANAK)} esas alınarak belirlenmiştir.` : "Haftalık ders saatleri okul yönetimince belirlenmiştir."}</p>
+      <table style="width:100%;margin-top:26px"><tr><td style="text-align:center"><strong>${officialSignatureName(school.mudur_adi)}</strong><br>Okul Müdürü</td></tr></table>`;
+    const wrap = document.getElementById("ders-print");
+    disShowPreview(wrap, docWrapper(school, body + foot, { konu: `${MEB_TAKVIM.yil} Eğitim ve Öğretim Yılı Haftalık Ders Programı (${isOgr ? "Öğretmen Bazlı" : "Sınıf Bazlı"})`, tarih: toLocalISO(new Date()) }), `ders-programi-${isOgr ? "ogretmen" : "sinif"}`);
+    wrap.scrollIntoView({ behavior: "smooth" });
+  };
 
   document.getElementById("gen-ders-btn").onclick = async () => {
     const btn = document.getElementById("gen-ders-btn");
@@ -4226,14 +4554,34 @@ async function renderTalep(school, content, filterStatus = "hepsi") {
  * öğretmenler kurulunda gizli oyla seçilen 3 öğretmen; OAB'den 1 veli; 3 yedek üye).
  * roles: { role: üye rolü (member.role ile eşleşir), who: kim, n: kaç kişi }
  */
+/**
+ * Kurul/komisyon yapıları. `basis` verilen kalemler birincil kaynaktan doğrulanmıştır (madde numaraları metinden alınmıştır);
+ * `basis` olmayanlar yaygın okul uygulamasıdır ve sistem bunlar için başkanlık uyarısı üretmez.
+ * chair: mudur | mudur_yrd | mudur_veya_yrd | secim (üyeler kendi aralarından seçer) | gorevlendirme (harcama yetkilisi/müdürün belirleyeceği kişi)
+ */
 const PLANLAMA_SEED_ORTAOKUL = [
-  { name: "Öğretmenler Kurulu", type: "Kurul", roles: [{ role: "Başkan", who: "Okul müdürü", n: 1 }, { role: "Yazman", who: "Öğretmenler kurulunca seçilen 2 asil + 2 yedek", n: 2 }] },
-  { name: "Zümre Başkanları Kurulu", type: "Kurul", roles: [{ role: "Okul zümre başkanı", who: "Zümre başkanları arasından", n: 1 }, { role: "Zümre başkanı", who: "Türkçe, Matematik, Fen Bilimleri, Sosyal Bilgiler, İngilizce, Din Kültürü, Görsel Sanatlar, Beden Eğitimi, Teknoloji ve Tasarım, Müzik, Bilişim Teknolojileri, Özel Eğitim", n: 12 }] },
-  { name: "Öğrenci Davranışlarını Değerlendirme Kurulu", type: "Kurul", basis: "İlköğretim Yönetmeliği md.57", roles: [{ role: "Başkan", who: "Müdürün görevlendireceği müdür yardımcısı", n: 1 }, { role: "Asil üye", who: "İlk öğretmenler kurulunda gizli oyla seçilen 3 öğretmen + OAB'nin kendi üyeleri arasından seçtiği 1 veli", n: 4 }, { role: "Yedek üye", who: "Aynı usulle seçilen 3 yedek", n: 3 }] },
-  { name: "Rehberlik ve Psikolojik Danışma Hizmetleri Okul Yürütme Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Okul müdürü", n: 1 }, { role: "Başkan yardımcısı", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Rehber öğretmen(ler), her sınıf düzeyinden bir şube rehber öğretmeni, OAB başkanı", n: 6 }] },
+  { name: "Öğretmenler Kurulu", type: "Kurul", basis: "MEB Eğitim Kurulları ve Zümreleri Yönergesi md.9", chair: "mudur",
+    rule: "Kurul, eğitim kurumu müdürünün başkanlığında toplanır; müdürün bulunmadığı durumlarda müdürlüğe vekâlet eden başkanlık eder (md.9/1-2). Üyeler: müdür başyardımcısı, müdür yardımcıları, öğretmenler, uzman ve eğitici personel (md.9/1).",
+    roles: [{ role: "Başkan", who: "Okul müdürü", n: 1 }, { role: "Yazman", who: "Kurulca belirlenen öğretmenler (yaygın uygulama)", n: 2 }] },
+  { name: "Sınıf/Şube Öğretmenler Kurulu", type: "Kurul", basis: "MEB Eğitim Kurulları ve Zümreleri Yönergesi md.10", chair: "mudur_veya_yrd",
+    rule: "Kurulun başkanı, eğitim kurumu müdürü veya görevlendireceği müdür yardımcısıdır (md.10/4).",
+    roles: [{ role: "Başkan", who: "Okul müdürü veya görevlendireceği müdür yardımcısı", n: 1 }, { role: "Üye", who: "Aynı sınıf/şubede derse giren öğretmenler ve rehberlik öğretmeni", n: 3 }] },
+  { name: "Zümre Başkanları Kurulu", type: "Kurul", basis: "MEB Eğitim Kurulları ve Zümreleri Yönergesi md.13 (zümre başkanı seçimi md.12)", chair: "secim",
+    rule: "Kurul, sınıf/alan zümre başkanlarından oluşur ve ilk toplantısında o eğitim öğretim yılı için kendi aralarından birini başkan seçer; zorunlu bir durum olmadıkça yıl içinde değiştirilemez (md.13/1). Zümre başkanları haziran ayında, eylülden itibaren 2 yıl için seçilir; istekli yoksa sırasıyla alanında doktora, başöğretmen, alanında yüksek lisans, uzman öğretmen, daha önce zümre başkanlığı yapmış ve kıdemli öğretmenler arasından belirlenir; seçilen başkan MEBBİS'e işlenir (md.12/1).",
+    roles: [{ role: "Başkan", who: "Zümre başkanlarının kendi aralarından seçtiği başkan", n: 1 }, { role: "Zümre başkanı", who: "Türkçe, Matematik, Fen Bilimleri, Sosyal Bilgiler, İngilizce, Din Kültürü, Görsel Sanatlar, Beden Eğitimi, Teknoloji ve Tasarım, Müzik, Bilişim Teknolojileri, Özel Eğitim", n: 12 }] },
+  { name: "Öğrenci Davranışlarını Değerlendirme Kurulu", type: "Kurul", basis: "MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği md.57", chair: "mudur_yrd",
+    rule: "Müdürün görevlendireceği müdür yardımcısının başkanlığında; her ders yılının ilk öğretmenler kurulu toplantısında gizli oyla seçilen üç öğretmen ve okul-aile birliğinin kendi üyeleri arasından seçeceği bir veliden oluşur (md.57/2). Yeterli öğretmen yoksa ders ücreti karşılığı görev yapanlar da üye seçilebilir (md.57/3).",
+    roles: [{ role: "Başkan", who: "Müdürün görevlendireceği müdür yardımcısı", n: 1 }, { role: "Asil üye", who: "İlk öğretmenler kurulunda gizli oyla seçilen 3 öğretmen + OAB'nin kendi üyeleri arasından seçtiği 1 veli", n: 4 }, { role: "Yedek üye", who: "Aynı usulle seçilen yedekler", n: 3 }] },
+  { name: "Rehberlik ve Psikolojik Danışma Hizmetleri Okul Yürütme Komisyonu", type: "Komisyon", basis: "MEB Rehberlik ve Psikolojik Danışma Hizmetleri Yönetmeliği md.16", chair: "mudur",
+    rule: "Komisyon eğitim kurumu müdürünün başkanlığında; müdür yardımcıları, rehber öğretmen/psikolojik danışmanlar, her sınıf düzeyinden en az birer sınıf rehber öğretmeni, öğrenci davranışlarını değerlendirme kurulundan bir temsilci ve okul-aile birliğinden bir temsilciden oluşur (md.16/2). Müdür, müdür yardımcıları ve rehber öğretmen sürekli üyedir; diğer üyeler her ders yılı başında öğretmenler kurulunda belirlenir (md.16/5). Yılda en az üç kez toplanır (md.16/6).",
+    roles: [{ role: "Başkan", who: "Okul müdürü", n: 1 }, { role: "Üye", who: "Müdür yardımcıları, rehber öğretmen(ler), her sınıf düzeyinden en az 1 sınıf rehber öğretmeni, ÖDDK temsilcisi", n: 5 }, { role: "Veli temsilcisi", who: "Okul-aile birliğinden 1 temsilci", n: 1 }] },
   { name: "Okul Psikososyal Koruma, Önleme ve Krize Müdahale Ekibi", type: "Komisyon", roles: [{ role: "Başkan", who: "Okul müdürü", n: 1 }, { role: "Başkan yardımcısı", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Rehber öğretmen(ler) ve şube rehber öğretmenleri", n: 5 }] },
-  { name: "BEP Geliştirme Birimi", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Kaynaştırma öğrencisinin derslerine giren öğretmenler, rehber öğretmen, veli, öğrenci", n: 4 }] },
-  { name: "Sosyal Etkinlikler Kurulu", type: "Kurul", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Danışman öğretmenler ve OAB temsilcisi", n: 4 }] },
+  { name: "BEP Geliştirme Birimi", type: "Komisyon", basis: "MEB Özel Eğitim Hizmetleri Yönetmeliği md.47", chair: "mudur_veya_yrd",
+    rule: "Birim, okul müdürü veya görevlendireceği bir müdür yardımcısının başkanlığında; rehberlik öğretmeni, öğrencinin sınıf öğretmeni, dersini okutan alan öğretmenleri, velisi ve öğrenciden oluşur (md.47/2).",
+    roles: [{ role: "Başkan", who: "Okul müdürü veya görevlendireceği müdür yardımcısı", n: 1 }, { role: "Üye", who: "Rehberlik öğretmeni, sınıf öğretmeni, dersini okutan alan öğretmenleri, veli, öğrenci", n: 4 }] },
+  { name: "Sosyal Etkinlikler Kurulu", type: "Kurul", basis: "MEB Eğitim Kurumları Sosyal Etkinlikler Yönetmeliği md.6", chair: "mudur_veya_yrd",
+    rule: "Kurul, eğitim kurumu müdürünün veya görevlendireceği bir müdür yardımcısının başkanlığında; danışman öğretmenler arasından müdürün belirlediği üç öğretmen, kulüp temsilcilerinin kendi aralarından seçeceği iki öğrenci ve okul-aile birliğince belirlenen bir veliden oluşur (md.6/1).",
+    roles: [{ role: "Başkan", who: "Okul müdürü veya görevlendireceği müdür yardımcısı", n: 1 }, { role: "Üye", who: "Danışman öğretmenler arasından müdürün belirlediği 3 öğretmen", n: 3 }, { role: "Öğrenci temsilcisi", who: "Kulüp temsilcilerinin seçtiği 2 öğrenci", n: 2 }, { role: "Veli temsilcisi", who: "OAB'ce belirlenen 1 veli", n: 1 }] },
   { name: "Tören Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Beden eğitimi, müzik, Türkçe ve sosyal bilgiler öğretmenleri", n: 4 }] },
   { name: "Eser İnceleme Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Türkçe, görsel sanatlar ve teknoloji-tasarım öğretmenleri", n: 3 }] },
   { name: "Web Yayın Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Bilişim/ilgili öğretmenler", n: 2 }] },
@@ -4241,18 +4589,34 @@ const PLANLAMA_SEED_ORTAOKUL = [
   { name: "Okul Sağlığı Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Rehber öğretmen, öğretmenler, OAB temsilcisi", n: 4 }] },
   { name: "Güvenli Okul Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Rehber öğretmen, öğretmenler, OAB temsilcisi", n: 5 }] },
   { name: "Projeler Komisyonu (TÜBİTAK, eTwinning, Erasmus+)", type: "Komisyon", roles: [{ role: "Başkan", who: "Okul müdürü", n: 1 }, { role: "Başkan yardımcısı", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Gönüllü öğretmenler", n: 4 }] },
-  { name: "Okul-Aile Birliği Denetleme Kurulu", type: "Kurul", roles: [{ role: "Asil üye", who: "Genel kurulca seçilen veli ve öğretmenler", n: 3 }, { role: "Yedek üye", who: "Genel kurulca seçilen", n: 3 }] },
-  { name: "Kantin Denetim Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Asil üye", who: "Öğretmenler", n: 2 }] },
+  { name: "Okul-Aile Birliği Denetleme Kurulu", type: "Kurul", basis: "MEB Okul-Aile Birliği Yönetmeliği md.14", chair: "secim",
+    rule: "Denetleme kurulu, genel kurulca seçilen bir veli ile öğretmenler kurulunca seçilen iki öğretmen olmak üzere üç asıl ve üç yedek üyeden oluşur; asıl üyeler genel kuruldan sonraki ilk hafta içinde toplanarak aralarından bir başkan seçer (md.14/1).",
+    roles: [{ role: "Asil üye", who: "Genel kurulca seçilen 1 veli + öğretmenler kurulunca seçilen 2 öğretmen", n: 3 }, { role: "Yedek üye", who: "Aynı usulle seçilen 3 yedek", n: 3 }] },
+  { name: "Kantin Denetim Komisyonu", type: "Komisyon", basis: "MEB Eğitim Kurumlarındaki Gıda İşletmelerinin Kontrol ve Denetimi Uygulama Kılavuzu", chair: "mudur_veya_yrd",
+    rule: "Denetim, okul müdürü/müdür yardımcısı başkanlığında; elli ve daha fazla çalışanı olan okullarda İSG kurulundan, elliden az çalışanı olanlarda İSG ekibi veya risk değerlendirme ekibinden 2 üye ve okul-aile birliği yönetiminden 1 velinin katılımıyla oluşturulan komisyonca yapılır. Komisyon her ay denetim yapar ve denetim formunu okul müdürüne teslim eder.",
+    roles: [{ role: "Başkan", who: "Okul müdürü veya müdür yardımcısı", n: 1 }, { role: "Üye", who: "İSG kurulu/ekibinden 2 üye", n: 2 }, { role: "Veli temsilcisi", who: "OAB yönetiminden 1 veli", n: 1 }] },
   { name: "Okul Servis Araçları Denetim Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Asil üye", who: "Öğretmenler", n: 2 }] },
   { name: "Satın Alma Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Asil üye", who: "Öğretmenler", n: 2 }, { role: "Yedek üye", who: "Öğretmen", n: 1 }] },
   { name: "Muayene ve Kabul Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Asil üye", who: "Öğretmenler", n: 2 }] },
-  { name: "Taşınır Mal Sayım Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Asil üye", who: "Öğretmenler", n: 2 }] },
-  { name: "Değer Tespit ve Hurdaya Ayırma Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Asil üye", who: "Öğretmenler", n: 2 }] },
+  { name: "Taşınır Mal Sayım Komisyonu", type: "Komisyon", basis: "Taşınır Mal Yönetmeliği md.32", chair: "gorevlendirme",
+    rule: "Sayım, harcama yetkilisinin kendisinin veya görevlendireceği bir kişinin başkanlığında, taşınır kayıt yetkilisinin de katılımıyla en az üç kişiden oluşan sayım kurulunca yapılır (md.32/2); sayım yıl sonlarında ve harcama yetkilisinin gerekli gördüğü zamanlarda yapılır (md.32/1).",
+    roles: [{ role: "Başkan", who: "Harcama yetkilisi (okul müdürü) veya görevlendireceği kişi", n: 1 }, { role: "Üye", who: "Taşınır kayıt yetkilisi ve en az bir üye daha", n: 2 }] },
+  { name: "Değer Tespit ve Hurdaya Ayırma Komisyonu", type: "Komisyon", basis: "Taşınır Mal Yönetmeliği md.13/3 ve md.28/1", chair: "gorevlendirme",
+    rule: "Değer tespit komisyonu, harcama yetkilisinin onayı ile taşınır kayıt yetkilisinin ve işin uzmanının da katıldığı en az üç kişiden oluşur (md.13/3). Hurdaya ayırma değerlendirmesi, biri işin uzmanı olmak kaydıyla harcama yetkilisinin belirleyeceği en az üç kişilik komisyonca yapılır (md.28/1).",
+    roles: [{ role: "Başkan", who: "Harcama yetkilisinin belirleyeceği kişi", n: 1 }, { role: "Üye", who: "Taşınır kayıt yetkilisi ve işin uzmanı", n: 2 }] },
   { name: "İş Sağlığı ve Güvenliği Ekibi", type: "Komisyon", roles: [{ role: "Başkan", who: "Okul müdürü", n: 1 }, { role: "Üye", who: "Müdür yardımcısı, çalışan temsilcisi, öğretmenler", n: 4 }] },
   { name: "Okul Stratejik Plan Ekibi", type: "Komisyon", roles: [{ role: "Başkan", who: "Okul müdürü", n: 1 }, { role: "Üye", who: "Müdür yardımcısı, öğretmenler, OAB temsilcisi", n: 4 }] },
   { name: "Değerler Eğitimi Komisyonu", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Din kültürü, Türkçe, sosyal bilgiler öğretmenleri ve rehber öğretmen", n: 4 }] },
   { name: "Sıfır Atık ve Çevre Ekibi", type: "Komisyon", roles: [{ role: "Başkan", who: "Müdür yardımcısı", n: 1 }, { role: "Üye", who: "Fen bilimleri öğretmeni ve gönüllü öğretmenler", n: 3 }] },
 ];
+const PLANLAMA_BASKAN = {
+  mudur: { beklenen: "okul müdürü", uygun: ["mudur"], vekil: ["mudur_yrd"] },
+  mudur_yrd: { beklenen: "müdürün görevlendireceği müdür yardımcısı", uygun: ["mudur_yrd"], vekil: ["mudur"] },
+  mudur_veya_yrd: { beklenen: "okul müdürü veya görevlendireceği müdür yardımcısı", uygun: ["mudur", "mudur_yrd"], vekil: [] },
+  secim: { beklenen: "üyelerin kendi aralarından seçeceği üye" },
+  gorevlendirme: { beklenen: "harcama yetkilisi (okul müdürü) veya görevlendireceği kişi" },
+};
+const PLANLAMA_KISI_LABELS = { mudur: "okul müdürü", mudur_yrd: "müdür yardımcısı", ogretmen: "öğretmen", diger: "öğretmen dışı personel", bilinmiyor: "personel listesinde olmayan kişi" };
 const planlamaNorm = s => (s || "").toLocaleLowerCase("tr-TR").replace(/[^a-zçğıöşü0-9]+/g, " ").trim();
 function planlamaExpectedRolesHtml(committee, members) {
   const tpl = PLANLAMA_SEED_ORTAOKUL.find(s => planlamaNorm(s.name) === planlamaNorm(committee.name));
@@ -4265,6 +4629,66 @@ function planlamaExpectedRolesHtml(committee, members) {
     return `<div class="list-item"><span>${ok ? "✅" : "⬜"} <strong>${esc(r.role)}</strong> <span style="color:var(--muted)">— ${esc(r.who)}</span></span><span class="pill ${ok ? "good" : "warn"}">${have}/${r.n}</span></div>`;
   }).join("");
   return `<div style="margin:6px 0 12px"><div style="font-size:12.5px;font-weight:600;margin-bottom:4px">Beklenen üyelik yapısı <span style="font-weight:400;color:var(--muted)">(${tpl.basis ? esc(tpl.basis) : "yaygın uygulama"}; üye rolünü aynı adla gir — Başkan, Asil üye, Yedek üye…)</span></div>${rows}</div>`;
+}
+
+/* Üyenin kim olduğunu belirler: müdür (okul kaydındaki müdür adı), müdür yardımcısı (Personel'de yönetici), öğretmen, diğer. */
+function planlamaKisiTuru(member, school, teacherById) {
+  const nm = planlamaNorm(member.member_name);
+  if (nm && nm === planlamaNorm(school.mudur_adi)) return "mudur";
+  const t = member.teacher_id ? teacherById[member.teacher_id] : null;
+  const roleText = (member.role || "").toLocaleLowerCase("tr-TR");
+  if (t) {
+    const title = (t.title || "").toLocaleLowerCase("tr-TR");
+    if (t.staff_type === "yonetici") {
+      if (title.includes("yardımcı")) return "mudur_yrd";
+      if (title.includes("müdür")) return "mudur";
+      return "mudur_yrd";
+    }
+    if (t.staff_type === "ogretmen") return roleText.includes("müdür yardımcısı") ? "mudur_yrd" : "ogretmen";
+    return "diger";
+  }
+  if (roleText.includes("müdür yardımcısı") || roleText.includes("md. yrd") || roleText.includes("md.yrd")) return "mudur_yrd";
+  if (roleText.includes("müdür")) return "mudur";
+  return "bilinmiyor";
+}
+function planlamaBaskanKontrol(tpl, members, school, teachers) {
+  const rule = PLANLAMA_BASKAN[tpl.chair];
+  if (!tpl.basis || !rule) return { level: "info", lines: ["Bu kurul için mevzuatta doğrulanmış sabit bir başkanlık kuralı bulunmuyor; yapı yaygın okul uygulamasıdır, sistem uyarı üretmez."] };
+  const teacherById = Object.fromEntries((teachers || []).map(t => [t.id, t]));
+  const chairs = (members || []).filter(m => { const r = (m.role || "").toLocaleLowerCase("tr-TR"); return r.includes("başkan") && !r.includes("yardımcı"); });
+  if (!rule.uygun) {
+    return { level: chairs.length ? "ok" : "info", lines: [chairs.length ? `Başkan: ${chairs.map(c => c.member_name).join(", ")} — kural: ${rule.beklenen}.` : `Başkan henüz girilmedi — kural: ${rule.beklenen}.`] };
+  }
+  if (!chairs.length) return { level: (members || []).length ? "warn" : "info", lines: [`Başkan girilmedi. Mevzuata göre başkan: ${rule.beklenen}. Üyeyi eklerken rolüne "Başkan" yaz.`] };
+  const lines = [];
+  let level = "ok";
+  const bump = to => { const order = ["ok", "info", "warn", "err"]; if (order.indexOf(to) > order.indexOf(level)) level = to; };
+  chairs.forEach(c => {
+    const tur = planlamaKisiTuru(c, school, teacherById);
+    const lbl = PLANLAMA_KISI_LABELS[tur];
+    if (rule.uygun.includes(tur)) lines.push(`✅ ${c.member_name} (${lbl}) — başkanlık kuralına uygun.`);
+    else if (tur === "bilinmiyor") { bump("info"); lines.push(`ℹ️ ${c.member_name}: müdür / müdür yardımcısı / öğretmen olduğu belirlenemedi. Kontrol için kişiyi personel listesinden seç ya da rolüne unvanını ekle (örn. "Başkan — Müdür Yardımcısı").`); }
+    else if (rule.vekil.includes(tur)) { bump("warn"); lines.push(`⚠️ ${c.member_name} (${lbl}) başkan girildi; mevzuata göre başkan ${rule.beklenen}.${tpl.chair === "mudur" ? " Yönerge md.9/2: müdürün bulunmadığı durumlarda müdürlüğe vekâlet eden başkanlık eder; vekâlet yoksa" : ""} farklı uygulamanın gerekçesini aşağıya yaz.`); }
+    else { bump("err"); lines.push(`⛔ ${c.member_name} (${lbl}) başkan girildi; mevzuata göre başkan ${rule.beklenen} olmalıdır. Farklı uygulama yapılacaksa gerekçesini aşağıya yaz ve toplantı tutanağında belirt.`); }
+  });
+  if (chairs.length > 1) { bump("warn"); lines.push("⚠️ Birden fazla üyenin rolü Başkan; tek başkan olmalı."); }
+  return { level, lines };
+}
+function planlamaBaskanHtml(committee, members, school, teachers) {
+  const tpl = PLANLAMA_SEED_ORTAOKUL.find(s => planlamaNorm(s.name) === planlamaNorm(committee.name));
+  if (!tpl) return "";
+  const k = planlamaBaskanKontrol(tpl, members, school, teachers);
+  const color = { ok: "var(--good)", warn: "var(--warn)", err: "var(--crit)", info: "var(--line)" }[k.level];
+  return `
+    <div style="border:1px solid ${color};border-radius:8px;padding:10px 12px;margin:0 0 12px;font-size:12.5px">
+      <div style="font-weight:600">Başkanlık ve kuruluş kuralı ${tpl.basis ? `<span style="font-weight:400;color:var(--muted)">— ${esc(tpl.basis)}</span>` : `<span class="pill">yaygın uygulama</span>`}</div>
+      ${tpl.rule ? `<div style="margin-top:4px">${esc(tpl.rule)}</div>` : ""}
+      <div style="margin-top:6px">${k.lines.map(l => `<div>${esc(l)}</div>`).join("")}</div>
+      ${tpl.basis ? `
+        <label style="margin-top:8px">Farklı uygulama gerekçesi <span style="color:var(--muted);font-weight:400">(mevzuattan sapıldığında; toplantı tutanağına da yazılır)</span></label>
+        <textarea id="c-chair-note" rows="2" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px">${esc(committee.chair_note || "")}</textarea>
+        <button class="secondary" id="c-chair-note-save" style="margin-top:6px;width:100%">Gerekçeyi kaydet</button>` : ""}
+    </div>`;
 }
 
 async function renderPlanlamaModule(profile, school) {
@@ -4323,7 +4747,7 @@ async function renderPlanlama(school, content, activeId = null) {
       <div id="c-msg"></div>
       <div style="border-top:1px solid var(--line);margin-top:14px;padding-top:12px">
         <button class="secondary" id="c-seed" style="width:100%">Ortaokul kurul/komisyon şablonunu yükle <span style="color:var(--muted);font-weight:400">(${PLANLAMA_SEED_ORTAOKUL.length} kalem — listede olmayanları ekler, üyeleri sen seçersin)</span></button>
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0">Şablon, seçilen kurulun ayrıntısında beklenen üyelik yapısını (başkan, asil, yedek…) gösterir ve eksikleri işaretler. ÖDDK yapısı İlköğretim Yönetmeliği md.57'den; diğerleri yaygın okul uygulamasıdır.</p>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0">Şablon, seçilen kurulun ayrıntısında beklenen üyelik yapısını gösterir, eksikleri işaretler ve başkanlık kuralını mevzuattan doğrular: Öğretmenler Kurulu, Sınıf/Şube Öğretmenler Kurulu, Zümre Başkanları Kurulu, ÖDDK, RPD Yürütme Komisyonu, BEP Birimi, Sosyal Etkinlikler Kurulu, OAB Denetleme Kurulu, Kantin Denetim, Taşınır Sayım ve Değer Tespit komisyonları için madde numarasıyla; dayanağı olmayanlar "yaygın uygulama" olarak işaretlenir. Kurala uymayan bir başkan girildiğinde uyarır ve farklı uygulama gerekçesi ister.</p>
       </div>
     </div>
     <div class="card" style="margin-bottom:16px">
@@ -4383,13 +4807,14 @@ async function renderCommitteeDetail(school, committee, el) {
   const [{ data: members }, { data: meetings }, { data: teachers }] = await Promise.all([
     sb.from("committee_members").select("*").eq("committee_id", committee.id).order("created_at"),
     sb.from("committee_meetings").select("*").eq("committee_id", committee.id).order("meeting_date", { ascending: false }),
-    sb.from("teachers").select("id, full_name").eq("school_id", school.id).order("full_name"),
+    sb.from("teachers").select("id, full_name, staff_type, title").eq("school_id", school.id).order("full_name"),
   ]);
 
   el.innerHTML = `
     <div class="card" style="margin-bottom:16px;border-color:var(--accent)">
       <h3 style="margin-top:0">${esc(committee.name)}${committee.established_on ? ` <span style="color:var(--muted);font-weight:400;font-size:12.5px">— ${fmtDate(committee.established_on)} kuruldu</span>` : ""}</h3>
       ${planlamaExpectedRolesHtml(committee, members)}
+      ${planlamaBaskanHtml(committee, members, school, teachers)}
       <div class="grid">
         <div>
           <h4>Üyeler (${(members || []).length})</h4>
@@ -4432,6 +4857,15 @@ async function renderCommitteeDetail(school, committee, el) {
   `;
 
   wireDate3("mt-date");
+  const noteBtn = document.getElementById("c-chair-note-save");
+  if (noteBtn) noteBtn.onclick = async () => {
+    const chair_note = document.getElementById("c-chair-note").value.trim() || null;
+    const msg = document.getElementById("detail-msg");
+    const { error } = await sb.from("committees").update({ chair_note }).eq("id", committee.id);
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    committee.chair_note = chair_note;
+    msg.innerHTML = `<div class="msg ok">Gerekçe kaydedildi.</div>`;
+  };
   const teacherNameById = Object.fromEntries((teachers || []).map(t => [t.id, t.full_name]));
   document.getElementById("m-select").onchange = (ev) => {
     document.getElementById("m-custom-wrap").classList.toggle("hidden", ev.target.value !== "__custom__");
