@@ -3355,6 +3355,58 @@ function dersKontrolListHtml(k) {
     ${k.infos.length ? `<div style="color:var(--muted);margin-top:4px">${k.infos.map(esc).join("<br>")}</div>` : ""}
   </div>`;
 }
+/**
+ * Haftalık ders yükü normu — Ek Ders Kararı md.5/1 (aylık karşılığı ders görevi: yönetici 6, okul öncesi ve sınıf
+ * öğretmeni 18, genel bilgi ve meslek dersleri öğretmeni 15, atölye/laboratuvar 20 saat) ve md.6 (ek ders üst sınırı:
+ * yönetici 6; genel bilgi/meslek 6 saati zorunlu olmak üzere 15; atölye/laboratuvar 20 saati zorunlu olmak üzere 24 (md.6/1);
+ * okul öncesi ve sınıf öğretmenlerinde fiilen okutulan her saat zorunlu ek ders olup anaokulunda tam gün şartıyla 24,
+ * diğer ana sınıfları ve sınıf öğretmenleri için 12 saati geçemez (md.6/2)).
+ */
+const DERS_YUK_DAYANAK = "Millî Eğitim Bakanlığı Yönetici ve Öğretmenlerinin Ders ve Ek Ders Saatlerine İlişkin Karar md.5/1 ve md.6/1-2";
+function dersOgretmenNorm(t, school) {
+  const b = `${t.branch || ""} ${t.title || ""}`.toLocaleLowerCase("tr-TR");
+  if (t.staff_type === "yonetici") return { tip: "Yönetici", maas: 6, azamiEk: 6, basis: "md.5/1-a, md.6/1-a" };
+  if (/atölye|atolye|laboratuvar/.test(b)) return { tip: "Atölye / laboratuvar öğretmeni", maas: 20, azamiEk: 24, basis: "md.5/1-ç, md.6/1-c" };
+  if (/okul öncesi|anasınıfı|ana sınıfı|anaokulu/.test(b) || school?.okul_turu === "okul_oncesi") return { tip: "Okul öncesi öğretmeni", maas: 18, azamiEk: school?.okul_turu === "okul_oncesi" ? 24 : 12, basis: "md.5/1-b, md.6/2" };
+  if (/sınıf öğretmen/.test(b) || (school?.okul_turu === "ilkokul" && !/ingilizce|yabancı|din kültürü|beden|müzik|görsel|bilişim|rehber|özel eğitim/.test(b))) return { tip: "Sınıf öğretmeni", maas: 18, azamiEk: 12, basis: "md.5/1-b, md.6/2" };
+  return { tip: "Genel bilgi ve meslek dersleri öğretmeni", maas: 15, azamiEk: 15, basis: "md.5/1-c, md.6/1-b" };
+}
+function dersOgretmenYuku(school, teachers, hours, classes, subjects) {
+  const classById = Object.fromEntries((classes || []).map(c => [c.id, c]));
+  const subjectById = Object.fromEntries((subjects || []).map(s => [s.id, s]));
+  return (teachers || []).map(t => {
+    const rows = (hours || []).filter(h => h.teacher_id === t.id);
+    const total = rows.reduce((s, h) => s + h.weekly_hours, 0);
+    const norm = dersOgretmenNorm(t, school);
+    const ek = Math.max(0, total - norm.maas);
+    let status, level;
+    if (!total) { status = "atama yok"; level = ""; }
+    else if (total < norm.maas) { status = `aylık karşılığı dolmadı (−${norm.maas - total})`; level = "warn"; }
+    else if (total > norm.maas + norm.azamiEk) { status = `üst sınır aşıldı (+${total - norm.maas - norm.azamiEk})`; level = "warn"; }
+    else { status = ek ? `ek ders ${ek} saat` : "aylık karşılığı tam"; level = "good"; }
+    const parts = rows.map(h => `${classById[h.class_id]?.name || "?"} ${subjectById[h.subject_id]?.name || "?"} ${h.weekly_hours}`);
+    return { t, norm, total, ek, status, level, parts };
+  });
+}
+function dersOgretmenYukuHtml(school, yuk, kontrol) {
+  const atanan = yuk.reduce((s, y) => s + y.total, 0);
+  const hedefli = kontrol.filter(k => k.target);
+  const gereken = hedefli.reduce((s, k) => s + k.target, 0);
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Öğretmen Yükü <span style="color:var(--muted);font-weight:400;font-size:12.5px">(kişide kaç saat)</span></h3>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Öğretmen</th><th>Görev türü</th><th style="text-align:center">Aylık karşılığı</th><th style="text-align:center">Atanan</th><th style="text-align:center">Ek ders</th><th>Durum</th><th>Dersler</th></tr></thead>
+          <tbody>
+            ${yuk.map(y => `<tr><td>${esc(y.t.full_name)}${y.t.branch ? `<div style="font-size:11px;color:var(--muted)">${esc(y.t.branch)}</div>` : ""}</td><td style="font-size:12px">${esc(y.norm.tip)}<div style="font-size:10.5px;color:var(--muted)">${esc(y.norm.basis)}</div></td><td style="text-align:center">${y.norm.maas}</td><td style="text-align:center"><strong>${y.total}</strong></td><td style="text-align:center">${y.ek}<span style="color:var(--muted)"> / ${y.norm.azamiEk}</span></td><td><span class="pill ${y.level}">${esc(y.status)}</span></td><td style="font-size:11.5px;color:var(--muted)">${esc(y.parts.join(" · ")) || "—"}</td></tr>`).join("") || `<tr><td colspan="7" style="color:var(--muted)">Öğretmen yok.</td></tr>`}
+          </tbody>
+          <tfoot><tr style="background:var(--surface-2)"><td colspan="3"><strong>Okul toplamı</strong></td><td style="text-align:center"><strong>${atanan}</strong></td><td colspan="3" style="font-size:12px;color:var(--muted)">${gereken ? `çizelgeye göre gereken ${gereken} saat (${hedefli.length} sınıf)${kontrol.length > hedefli.length ? `; ${kontrol.length - hedefli.length} sınıf kontrol dışı` : ""}` : ""}</td></tr></tfoot>
+        </table>
+      </div>
+      <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0">Dayanak: ${esc(DERS_YUK_DAYANAK)}. Aylık karşılığı: yönetici 6, okul öncesi ve sınıf öğretmeni 18, genel bilgi ve meslek dersleri öğretmeni 15, atölye/laboratuvar 20 saat. Ek ders üst sınırı: yönetici 6; genel bilgi ve meslek dersleri öğretmeni 6 saati zorunlu olmak üzere 15; atölye/laboratuvar 20 saati zorunlu olmak üzere 24; sınıf öğretmeni ve ana sınıfı 12, anaokulunda tam gün şartıyla 24. Görev türü branş/unvan metninden okunur; yanlışsa Personel'de branşı düzelt.</p>
+    </div>`;
+}
 function dersKontrolOzetHtml(school, kontrol) {
   const ciz = dersCizelge(school);
   if (!ciz) return "";
@@ -3403,6 +3455,22 @@ async function renderDersModule(profile, school, tab) {
   else await renderDersAyarlar(profile, school, content);
 }
 
+/* Ayarlar tablosunun alt satırları: her sınıf düzeyinde zorunlu/serbest toplamı ve çizelge hedefi. */
+function dersAyarlarToplamHtml(school, subs, grades) {
+  const ciz = dersCizelge(school);
+  const cols = grades.length ? grades : [0];
+  const sumKind = (kind, g) => subs.filter(s => (s.kind || "zorunlu") === kind).reduce((a, s) => a + (dersHoursFor(s, g) || 0), 0);
+  const cell = (val, target) => `<td style="text-align:center">${val}${target != null ? `<span style="color:var(--muted)"> / ${target}</span> ${val === target ? '<span class="pill good">✓</span>' : '<span class="pill warn">≠</span>'}` : ""}</td>`;
+  const row = (label, note, cells) => `<tr><td colspan="2"><strong>${label}</strong>${note ? ` <span style="font-size:11px;color:var(--muted)">${note}</span>` : ""}</td>${cells}<td></td></tr>`;
+  let html = row("Zorunlu toplam", "", cols.map(g => cell(sumKind("zorunlu", g), ciz ? ciz.zorunluToplam[g] : null)).join(""));
+  if (ciz?.serbestSaat) html += row("Serbest etkinlik", "", cols.map(g => cell(sumKind("serbest", g), ciz.serbestSaat[g] || 0)).join(""));
+  if (ciz?.secmeliSaat) html += row("Seçmeli dilimi", `${subs.filter(s => s.kind === "secmeli").length} seçmeli ders tanımlı; her sınıf 3 ders × 2 saat seçer`, cols.map(g => `<td style="text-align:center">${ciz.secmeliSaat[g]}</td>`).join(""));
+  html += ciz
+    ? row("Haftalık toplam (çizelge)", "", cols.map(g => `<td style="text-align:center"><strong>${ciz.toplam[g]}</strong></td>`).join(""))
+    : row("Toplam", "tüm dersler", cols.map(g => `<td style="text-align:center"><strong>${sumKind("zorunlu", g) + sumKind("secmeli", g) + sumKind("serbest", g)}</strong></td>`).join(""));
+  return html;
+}
+
 async function renderDersAyarlar(profile, school, content) {
   const [{ data: subjects }, { data: classes }, { data: periods }] = await Promise.all([
     sb.from("subjects").select("*").eq("school_id", school.id).order("sort_order"),
@@ -3448,6 +3516,7 @@ async function renderDersAyarlar(profile, school, content) {
           <tbody>
             ${subs.map(s => `<tr><td>${esc(s.name)}</td><td>${kindCell(s)}</td>${grades.length ? grades.map(g => hourCell(s, g)).join("") : hourCell(s, 0)}<td class="row-actions"><button data-del-subject="${s.id}">Sil</button></td></tr>`).join("") || `<tr><td colspan="${grades.length + 3}" style="color:var(--muted)">Henüz ders eklenmedi.</td></tr>`}
           </tbody>
+          <tfoot style="background:var(--surface-2)">${dersAyarlarToplamHtml(school, subs, grades)}</tfoot>
         </table>
       </div>
       <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0">Saat kutusunu değiştirince kaydedilir; o sınıfta okutulmayan ders için kutuyu boş bırak. Sınıf adları rakamla başlamalı (5-A, 6/B) — sınıf düzeyi bu rakamdan okunur.</p>
@@ -3591,6 +3660,8 @@ async function renderDersAtamalar(profile, school, content) {
   (assigns || []).forEach(a => { (byClass[a.class_id] ??= []).push(a); });
   const kontrol = dersSinifKontrol(school, classes, subjects, assigns || []);
   const kontrolById = Object.fromEntries(kontrol.map(k => [k.class.id, k]));
+  const yuk = dersOgretmenYuku(school, teachers, assigns || [], classes, subjects);
+  const yukById = Object.fromEntries(yuk.map(y => [y.t.id, y]));
   const kindOf = s => s?.kind || "zorunlu";
   const optgroup = (label, list) => list.length ? `<optgroup label="${label}">${list.map(s => `<option value="${s.id}">${esc(s.name)}${s.group_label ? ` — ${esc(s.group_label)}` : ""}</option>`).join("")}</optgroup>` : "";
 
@@ -3600,13 +3671,14 @@ async function renderDersAtamalar(profile, school, content) {
       <div class="grid">
         <div><label style="margin-top:0">Sınıf</label><select id="a-class">${classes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select></div>
         <div><label style="margin-top:0">Ders</label><select id="a-subject">${optgroup("Zorunlu", subjects.filter(s => kindOf(s) === "zorunlu"))}${optgroup("Seçmeli", subjects.filter(s => kindOf(s) === "secmeli"))}${optgroup("Serbest etkinlik", subjects.filter(s => kindOf(s) === "serbest"))}</select></div>
-        <div><label style="margin-top:0">Öğretmen</label><select id="a-teacher">${teachers.map(t => `<option value="${t.id}">${esc(t.full_name)}</option>`).join("")}</select></div>
+        <div><label style="margin-top:0">Öğretmen</label><select id="a-teacher">${teachers.map(t => `<option value="${t.id}">${esc(t.full_name)} (${yukById[t.id]?.total || 0} saat)</option>`).join("")}</select><div id="a-teacher-hint" style="font-size:11.5px;color:var(--muted);margin-top:4px"></div></div>
         <div><label style="margin-top:0">Haftalık saat</label><input id="a-hours" type="number" min="1" value="2"><div id="a-hours-hint" style="font-size:11.5px;color:var(--muted);margin-top:4px"></div></div>
       </div>
       <button class="primary" id="a-save">Ekle</button>
       <div id="a-msg"></div>
     </div>
     ${dersKontrolOzetHtml(school, kontrol)}
+    ${dersOgretmenYukuHtml(school, yuk, kontrol)}
     ${classes.map(c => {
       const k = kontrolById[c.id];
       return `
@@ -3647,6 +3719,13 @@ async function renderDersAtamalar(profile, school, content) {
     else hint.textContent = ciz ? `Bu ders için ${grade}. sınıfta çizelge saati tanımlı değil; Ayarlar'dan girebilirsin.` : "Haftalık saati elle gir.";
   }
   classSel.onchange = refreshHint; subjSel.onchange = refreshHint; refreshHint();
+  const teacherSel = document.getElementById("a-teacher"), teacherHint = document.getElementById("a-teacher-hint");
+  function refreshTeacherHint() {
+    const y = yukById[teacherSel.value];
+    if (!y) { teacherHint.textContent = ""; return; }
+    teacherHint.textContent = `${y.t.full_name}: ${y.total} saat atanmış — aylık karşılığı ${y.norm.maas}, ek ders ${y.ek} / en çok ${y.norm.azamiEk} (${y.norm.tip}).`;
+  }
+  teacherSel.onchange = refreshTeacherHint; refreshTeacherHint();
 
   document.getElementById("a-save").onclick = async () => {
     const class_id = classSel.value;
@@ -3933,8 +4012,13 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
     `).join("");
   }
 
-  const sinifHtml = renderEntityGrid(classes, byClassCell, c => c.name, a => esc(teacherById[a.teacher_id]?.full_name || "?"), true);
-  const ogretmenHtml = renderEntityGrid(teachers || [], byTeacherCell, t => t.full_name, a => esc(classById[a.class_id]?.name || "?"), false);
+  const plannedByClass = {}, plannedByTeacher = {};
+  hours.forEach(h => { plannedByClass[h.class_id] = (plannedByClass[h.class_id] || 0) + h.weekly_hours; plannedByTeacher[h.teacher_id] = (plannedByTeacher[h.teacher_id] || 0) + h.weekly_hours; });
+  const placedIn = (map, id) => Object.keys(map[id] || {}).length;
+  const classLabel = c => { const p = plannedByClass[c.id] || 0, pl = placedIn(byClassCell, c.id); const k = kontrolById[c.id]; return `${c.name} — ${p} saat/hafta${k?.target ? ` (çizelge ${k.target})` : ""}${pl !== p ? ` · ${pl} yerleşti` : ""}`; };
+  const teacherLabel = t => { const p = plannedByTeacher[t.id] || 0, pl = placedIn(byTeacherCell, t.id); const n = dersOgretmenNorm(t, school); return `${t.full_name} — ${p} saat/hafta (aylık karşılığı ${n.maas}, ek ders ${Math.max(0, p - n.maas)})${pl !== p ? ` · ${pl} yerleşti` : ""}`; };
+  const sinifHtml = renderEntityGrid(classes, byClassCell, classLabel, a => esc(teacherById[a.teacher_id]?.full_name || "?"), true);
+  const ogretmenHtml = renderEntityGrid(teachers || [], byTeacherCell, teacherLabel, a => esc(classById[a.class_id]?.name || "?"), false);
 
   content.innerHTML = `
     ${warningHtml}
@@ -3979,7 +4063,7 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
     const cellMap = isOgr ? byTeacherCell : byClassCell;
     const cell = "border:1px solid #000;padding:4px";
     const body = entities.map(e => `
-      <h3 style="margin:16px 0 6px;font-size:12pt">${esc(isOgr ? e.full_name : e.name)}${!isOgr && kontrolById[e.id]?.target ? ` <span style="font-weight:normal;font-size:9.5pt">— haftada ${kontrolById[e.id].total} saat (çizelge ${kontrolById[e.id].target})</span>` : ""}</h3>
+      <h3 style="margin:16px 0 6px;font-size:12pt">${esc(isOgr ? teacherLabel(e) : classLabel(e))}</h3>
       <table style="width:100%;border-collapse:collapse;font-size:9.5pt;page-break-inside:avoid">
         <thead><tr><th style="${cell}"></th>${DERS_DAYS.map(d => `<th style="${cell}">${DAY_NAMES_DERS[d]}</th>`).join("")}</tr></thead>
         <tbody>${periods.map(p => `<tr><td style="${cell};white-space:nowrap"><strong>${esc(p.label)}</strong></td>${DERS_DAYS.map(d => {
