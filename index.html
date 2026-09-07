@@ -1028,6 +1028,11 @@ async function renderPersonelStaff(school, content, editingId = null, notice = "
         <div><label>Görev / unvan <span style="color:var(--muted);font-weight:400">(örn. Müdür Yardımcısı, Sınıf Öğretmeni, Hizmetli)</span></label><input id="ps-title" value="${esc(edit?.title || "")}"></div>
         <div id="ps-branch-wrap" class="${st === "ogretmen" || st === "yonetici" ? "" : "hidden"}"><label>Branş</label><input id="ps-branch" value="${esc(edit?.branch || "")}" placeholder="örn. Matematik"></div>
       </div>
+      <div id="ps-offdays-wrap" class="${st === "ogretmen" || st === "yonetici" ? "" : "hidden"}">
+        <label>Ders programında boş gün talebi <span style="color:var(--muted);font-weight:400">(program motoru seçilen güne bu öğretmene ders yazmaz; nöbet de o güne düşmez)</span></label>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin:4px 0 2px">${[1, 2, 3, 4, 5].map(d => `<label style="display:flex;align-items:center;gap:6px;font-weight:400;margin:0;cursor:pointer"><input type="checkbox" class="ps-off" value="${d}" ${(edit?.off_days || []).includes(d) ? "checked" : ""} style="width:auto;margin:0">${DAY_NAMES_DERS[d]}</label>`).join("")}</div>
+        <p style="font-size:11.5px;color:var(--muted);margin:4px 0 0">Bayrak töreni hafta başında ve sonunda yapılır (MEB Eğitim Kurumları Sosyal Etkinlikler Yönetmeliği md.19/2); töreni yürüten beden eğitimi ve müzik öğretmenleri için pazartesi ve cuma boş gün seçilemez.</p>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end">
         <div><label>Telefon <span style="color:var(--muted);font-weight:400">(WhatsApp bildirimleri için)</span></label><input id="ps-phone" value="${esc(edit?.phone || "")}" placeholder="05xx xxx xx xx"></div>
         <div><label>Cinsiyet <span style="color:var(--muted);font-weight:400">(nöbet kıdem muafiyeti için)</span></label><select id="ps-gender"><option value="">—</option><option value="kadin" ${edit?.gender === "kadin" ? "selected" : ""}>Kadın</option><option value="erkek" ${edit?.gender === "erkek" ? "selected" : ""}>Erkek</option></select></div>
@@ -1050,7 +1055,7 @@ async function renderPersonelStaff(school, content, editingId = null, notice = "
             <tr>
               <td><strong>${esc(t.full_name)}</strong></td>
               <td><span class="pill ${STAFF_TYPE_PILL[t.staff_type] || ""}">${esc(STAFF_TYPE_LABELS[t.staff_type] || t.staff_type)}</span>${t.title ? `<div style="font-size:11.5px;color:var(--muted)">${esc(t.title)}</div>` : ""}</td>
-              <td>${esc(t.branch || "")}</td>
+              <td>${esc(t.branch || "")}${(t.off_days || []).length ? `<div style="font-size:11px;color:var(--muted)">Boş gün: ${t.off_days.map(d => DERS_GUN_KISA[d]).join(", ")}</div>` : ""}</td>
               <td>${t.phone ? `<a href="${waLink(t.phone)}" target="_blank" rel="noopener">${esc(t.phone)}</a>` : ""}</td>
               <td>${t.hire_date ? `${fmtDate(t.hire_date)}${ky !== null ? `<div style="font-size:11.5px;color:var(--muted)">${ky} yıl</div>` : ""}` : ""}</td>
               <td style="font-size:12px">${t.user_id ? `<span style="color:var(--good)">✅ Bağlı</span>` : t.invite_code ? `Davet kodu: <strong style="font-family:ui-monospace,monospace">${esc(t.invite_code)}</strong>` : `<span style="color:var(--muted)">—</span>`}</td>
@@ -1062,7 +1067,7 @@ async function renderPersonelStaff(school, content, editingId = null, notice = "
     </div>
   `;
   wireDate3("ps-hire");
-  document.getElementById("ps-type").onchange = (ev) => document.getElementById("ps-branch-wrap").classList.toggle("hidden", !(ev.target.value === "ogretmen" || ev.target.value === "yonetici"));
+  document.getElementById("ps-type").onchange = (ev) => { const isT = ev.target.value === "ogretmen" || ev.target.value === "yonetici"; document.getElementById("ps-branch-wrap").classList.toggle("hidden", !isT); document.getElementById("ps-offdays-wrap").classList.toggle("hidden", !isT); };
   document.getElementById("ps-save").onclick = async () => {
     const msg = document.getElementById("ps-msg");
     const full_name = document.getElementById("ps-name").value.trim();
@@ -1079,6 +1084,12 @@ async function renderPersonelStaff(school, content, editingId = null, notice = "
       notes: document.getElementById("ps-notes").value.trim() || null,
       is_idareci: staff_type === "yonetici",
     };
+    const isTeacherType = staff_type === "ogretmen" || staff_type === "yonetici";
+    payload.off_days = isTeacherType ? [...document.querySelectorAll(".ps-off:checked")].map(i => parseInt(i.value, 10)) : [];
+    if (isTeacherType && dersTorenBransi(payload) && payload.off_days.some(d => DERS_TOREN_GUNLERI.includes(d))) {
+      msg.innerHTML = `<div class="msg err">Beden eğitimi ve müzik öğretmenleri bayrak töreni günlerinde (pazartesi, cuma) okulda olmalı — Sosyal Etkinlikler Yönetmeliği md.19/2. Bu günleri boş gün olarak seçme.</div>`;
+      return;
+    }
     const { error } = edit
       ? await sb.from("teachers").update(payload).eq("id", edit.id)
       : await sb.from("teachers").insert({ ...payload, school_id: school.id });
@@ -3401,7 +3412,7 @@ function dersOgretmenYukuHtml(school, yuk, kontrol) {
         <table class="data">
           <thead><tr><th>Öğretmen</th><th>Görev türü</th><th style="text-align:center">Aylık karşılığı</th><th style="text-align:center">Atanan</th><th style="text-align:center">Ek ders</th><th>Durum</th><th>Dersler</th></tr></thead>
           <tbody>
-            ${yuk.map(y => `<tr><td>${esc(y.t.full_name)}${y.t.branch ? `<div style="font-size:11px;color:var(--muted)">${esc(y.t.branch)}</div>` : ""}</td><td style="font-size:12px">${esc(y.norm.tip)}<div style="font-size:10.5px;color:var(--muted)">${esc(y.norm.basis)}</div></td><td style="text-align:center">${y.norm.maas}</td><td style="text-align:center"><strong>${y.total}</strong></td><td style="text-align:center">${y.ek}<span style="color:var(--muted)"> / ${y.norm.azamiEk}</span></td><td><span class="pill ${y.level}">${esc(y.status)}</span></td><td style="font-size:11.5px;color:var(--muted)">${esc(y.parts.join(" · ")) || "—"}</td></tr>`).join("") || `<tr><td colspan="7" style="color:var(--muted)">Öğretmen yok.</td></tr>`}
+            ${yuk.map(y => `<tr><td>${esc(y.t.full_name)}${y.t.branch ? `<div style="font-size:11px;color:var(--muted)">${esc(y.t.branch)}</div>` : ""}${(y.t.off_days || []).length ? `<div style="font-size:11px;color:var(--muted)">Boş gün: ${y.t.off_days.map(d => DERS_GUN_KISA[d]).join(", ")}</div>` : ""}</td><td style="font-size:12px">${esc(y.norm.tip)}<div style="font-size:10.5px;color:var(--muted)">${esc(y.norm.basis)}</div></td><td style="text-align:center">${y.norm.maas}</td><td style="text-align:center"><strong>${y.total}</strong></td><td style="text-align:center">${y.ek}<span style="color:var(--muted)"> / ${y.norm.azamiEk}</span></td><td><span class="pill ${y.level}">${esc(y.status)}</span></td><td style="font-size:11.5px;color:var(--muted)">${esc(y.parts.join(" · ")) || "—"}</td></tr>`).join("") || `<tr><td colspan="7" style="color:var(--muted)">Öğretmen yok.</td></tr>`}
           </tbody>
           <tfoot><tr style="background:var(--surface-2)"><td colspan="3"><strong>Okul toplamı</strong></td><td style="text-align:center"><strong>${atanan}</strong></td><td colspan="3" style="font-size:12px;color:var(--muted)">${bosSaat > 0 ? `<span style="color:var(--warn)">+ ${bosSaat} saat öğretmensiz</span> · ` : ""}${gereken ? `çizelgeye göre gereken ${gereken} saat (${hedefli.length} sınıf)${kontrol.length > hedefli.length ? `; ${kontrol.length - hedefli.length} sınıf kontrol dışı` : ""}` : ""}</td></tr></tfoot>
         </table>
@@ -3785,7 +3796,7 @@ async function renderDersAtamalar(profile, school, content) {
   const kindOf = s => s?.kind || "zorunlu";
   const kindSira = { zorunlu: 0, serbest: 1, secmeli: 2 };
   const optgroup = (label, list) => list.length ? `<optgroup label="${label}">${list.map(s => `<option value="${s.id}">${esc(s.name)}${s.group_label ? ` — ${esc(s.group_label)}` : ""}</option>`).join("")}</optgroup>` : "";
-  const teacherOpt = (t, star) => `<option value="${t.id}">${star ? "★ " : ""}${esc(t.full_name)}${t.branch ? ` — ${esc(t.branch)}` : ""} (${loadOf(t.id)} saat)</option>`;
+  const teacherOpt = (t, star) => `<option value="${t.id}">${star ? "★ " : ""}${esc(t.full_name)}${t.branch ? ` — ${esc(t.branch)}` : ""} (${loadOf(t.id)} saat${(t.off_days || []).length ? `, boş: ${t.off_days.map(d => DERS_GUN_KISA[d]).join("/")}` : ""})</option>`;
   /* Öneri sıralı öğretmen seçenekleri; en iyi aday ★ ile işaretlenir. */
   function oneriOptions(subject, h, withEmpty) {
     const o = dersOgretmenOnerisi(subject, teachers, assigns || [], loadOf, school, h);
@@ -3956,191 +3967,288 @@ async function renderDersAtamalar(profile, school, content) {
   });
 }
 
+const DERS_GUN_KISA = { 1: "Pzt", 2: "Sal", 3: "Çar", 4: "Per", 5: "Cum" };
+/* Bayrak töreni hafta başında ve sonunda yapılır (Sosyal Etkinlikler Yönetmeliği md.19/2); yaygın uygulamada töreni beden eğitimi ve müzik öğretmenleri yürütür. */
+const DERS_TOREN_GUNLERI = [1, 5];
+function dersTorenBransi(t) { return /beden|müzik|muzik/.test(dersMetin(`${t?.branch || ""} ${t?.title || ""}`)); }
+/* Pedagojik sınıflandırma: akademik dersler erken saatlere, beceri/sanat/spor dersleri geç saatlere, seçmeliler ortak dilime. */
+function dersKategori(subject) {
+  if (!subject) return "orta";
+  if ((subject.kind || "zorunlu") === "secmeli") return "secmeli";
+  if ((subject.kind || "zorunlu") === "serbest") return "beceri";
+  const n = dersMetin(subject.name);
+  if (/türkçe|matematik|fen bilimleri|sosyal bilgiler|inkılap|yabancı dil|ingilizce|almanca|fransızca|hayat bilgisi|türk dili|edebiyat|fizik|kimya|biyoloji|tarih|coğrafya|felsefe/.test(n)) return "akademik";
+  if (/beden|müzik|görsel|teknoloji ve tasarım|oyun|spor|sanat|serbest etkinlik/.test(n)) return "beceri";
+  return "orta";
+}
+/* Haftalık saat → blok boyutları: 6 → 2+2+2, 5 → 2+2+1, 3 → 2+1, 1 → 1. Bloklar farklı günlere dağıtılır. */
+function dersBloklar(h) { const out = []; let k = h; while (k >= 2) { out.push(2); k -= 2; } if (k === 1) out.push(1); return out; }
+
 /**
- * İki fazlı çizelgeleme motoru:
- * Faz 1 — yapılandırma: en yüklü öğretmenden başlayarak, çoklu yumuşak-kısıt skoruna göre
- *   en iyi uygun hücreye greedy yerleştirme (kısıt-yoğunluğu sıralı sezgisel).
- * Faz 2 — simulated annealing: sabitlenmemiş atamalar üzerinde move/swap komşuluklarıyla
- *   yerel arama, toplam ceza (öğretmen boşlukları + aynı gün ders tekrarı + sınıf günlük
- *   yük dengesizliği) minimize edilene kadar iyileştirme.
- * Sert kısıtlar (öğretmen/sınıf çakışması, günlük tekrar sınırı) her iki fazda da asla ihlal edilmez.
+ * Blok tabanlı çizelgeleme motoru (v2).
+ * Sert kısıtlar: sınıf ve öğretmen çakışması yok; öğretmenin boş gün talebi (Personel → off_days) olan güne ders yazılmaz;
+ *   aynı ders bir sınıfta günde tek blok (en çok 2 ardışık saat), bloklar farklı günlerde.
+ * Yumuşak kısıtlar (ceza): akademik dersler erken, beceri/sanat/spor dersleri geç saatlerde; seçmeliler okul geneli ortak
+ *   dilimde (TTKB çizelge açıklaması: haftanın belirli günlerinde 6 saatlik "seçmeli ders saatleri" dilimi); aynı dersin blokları
+ *   ardışık günlere gelmesin; çift blok çift saate hizalansın; öğretmenin gününde boşluk olmasın, günlük yükü hedefe
+ *   (toplam saat ÷ gelebildiği gün) yakın olsun, 4'ten uzun ardışık ders dizisi olmasın; sınıfın günlük yükü dengeli olsun.
+ * Faz 1: kısıt-yoğun sıralı (çift bloklar, sonra en sıkışık öğretmen) greedy yerleştirme; yer bulunamayan çift blok iki tek
+ *   saate bölünür (istatistikte "bölünen" olarak raporlanır). Faz 2: blok düzeyinde taşı/değiştir hamleleriyle simulated annealing.
  */
-function generateLessonSchedule(school, { classes, subjects, periods, hours, existing, teachers }) {
+/* Motor hızlı olduğu için (tipik okulda < 1 sn) birkaç bağımsız deneme yapılır; yerleşmeyen saat, bölünen blok ve ceza puanına göre en iyisi seçilir. */
+function generateLessonSchedule(school, input) {
+  const started = performance.now();
+  const better = (a, b) => { for (let i = 0; i < a.length; i++) { if (a[i] < b[i]) return true; if (a[i] > b[i]) return false; } return false; };
+  let best = null, n = 0;
+  for (let i = 0; i < 10; i++) {
+    const r = generateLessonScheduleOnce(school, input);
+    n++;
+    const key = [r.unplaced.length, r.stats.bolunen, r.stats.bosGunIhlal, r.score];
+    if (!best || better(key, best.key)) best = { r, key };
+    if (performance.now() - started > 6000) break;
+  }
+  best.r.stats.deneme = n;
+  return best.r;
+}
+function generateLessonScheduleOnce(school, { classes, subjects, periods, hours, existing, teachers }) {
   const days = DERS_DAYS;
+  const P = periods.length;
+  const pIdxOf = {}; periods.forEach((p, i) => pIdxOf[p.id] = i);
   const subjectById = Object.fromEntries(subjects.map(s => [s.id, s]));
-  const periodSortByIdx = {};
-  periods.forEach((p, idx) => periodSortByIdx[p.id] = idx);
+  const classIds = new Set(classes.map(c => c.id));
+  const offDays = {}; (teachers || []).forEach(t => offDays[t.id] = new Set((t.off_days || []).map(Number)));
+  const isOff = (tid, d) => !!offDays[tid]?.has(d);
+  const kategori = {}; subjects.forEach(s => kategori[s.id] = dersKategori(s));
+  const key3 = (a, d, p) => `${a}|${d}|${p}`;
 
-  const classOccupied = {};
-  const teacherOccupied = {};
-  const classDaySubjectCount = {};
-  const classDayCount = {};
-  const teacherDayPeriods = {};
-  const placed = [];
-  const unplaced = [];
+  /* seçmeli ortak dilimi: haftanın orta günleri × günün son iki saati */
+  const secmeliDays = days.length >= 5 ? [2, 3, 4] : days.slice(0, Math.min(3, days.length));
+  const secmeliPeriods = P >= 2 ? [P - 2, P - 1] : [P - 1];
+  const secmeliSlot = new Set(); secmeliDays.forEach(d => secmeliPeriods.forEach(p => secmeliSlot.add(`${d}|${p}`)));
 
-  function markOccupied(class_id, teacher_id, day, period_id, subject_id) {
-    classOccupied[`${class_id}|${day}|${period_id}`] = true;
-    teacherOccupied[`${teacher_id}|${day}|${period_id}`] = true;
-    classDaySubjectCount[`${class_id}|${day}|${subject_id}`] = (classDaySubjectCount[`${class_id}|${day}|${subject_id}`] || 0) + 1;
-    classDayCount[`${class_id}|${day}`] = (classDayCount[`${class_id}|${day}`] || 0) + 1;
-    (teacherDayPeriods[`${teacher_id}|${day}`] ??= new Set()).add(periodSortByIdx[period_id]);
-  }
+  const pinned = (existing || []).filter(a => a.is_pinned);
+  const pinnedCount = {}; pinned.forEach(a => { const k = `${a.class_id}|${a.subject_id}|${a.teacher_id}`; pinnedCount[k] = (pinnedCount[k] || 0) + 1; });
 
-  (existing || []).filter(a => a.is_pinned).forEach(a => {
-    markOccupied(a.class_id, a.teacher_id, a.day_of_week, a.period_id, a.subject_id);
-    placed.push({ class_id: a.class_id, subject_id: a.subject_id, teacher_id: a.teacher_id, day_of_week: a.day_of_week, period_id: a.period_id, is_pinned: true, id: a.id });
+  let blocks = [];
+  hours.filter(h => h.teacher_id && classIds.has(h.class_id) && subjectById[h.subject_id]).forEach(h => {
+    const remaining = Math.max(h.weekly_hours - (pinnedCount[`${h.class_id}|${h.subject_id}|${h.teacher_id}`] || 0), 0);
+    dersBloklar(remaining).forEach(size => blocks.push({ class_id: h.class_id, subject_id: h.subject_id, teacher_id: h.teacher_id, size, day: null, start: null, pinned: false, split: false }));
   });
+  const classHasSecmeli = {}; blocks.forEach(b => { if (kategori[b.subject_id] === "secmeli") classHasSecmeli[b.class_id] = true; });
+  const teacherTotal = {}; blocks.forEach(b => teacherTotal[b.teacher_id] = (teacherTotal[b.teacher_id] || 0) + b.size);
+  const teacherDaysAvail = {}, teacherTarget = {};
+  Object.keys(teacherTotal).forEach(tid => { teacherDaysAvail[tid] = days.filter(d => !isOff(tid, d)).length || 1; teacherTarget[tid] = Math.ceil(teacherTotal[tid] / teacherDaysAvail[tid]); });
+  const blocksPerSubject = {}; blocks.forEach(b => { const k = `${b.class_id}|${b.subject_id}`; blocksPerSubject[k] = (blocksPerSubject[k] || 0) + 1; });
+  const maxBlocksPerDay = b => Math.max(1, Math.ceil((blocksPerSubject[`${b.class_id}|${b.subject_id}`] || 1) / days.length));
 
-  const pinnedCountByReq = {};
-  (existing || []).filter(a => a.is_pinned).forEach(a => {
-    const key = `${a.class_id}|${a.subject_id}|${a.teacher_id}`;
-    pinnedCountByReq[key] = (pinnedCountByReq[key] || 0) + 1;
-  });
-
-  let units = [];
-  hours.filter(h => h.teacher_id).forEach(h => {
-    const key = `${h.class_id}|${h.subject_id}|${h.teacher_id}`;
-    const remaining = Math.max(h.weekly_hours - (pinnedCountByReq[key] || 0), 0);
-    for (let i = 0; i < remaining; i++) units.push({ class_id: h.class_id, subject_id: h.subject_id, teacher_id: h.teacher_id });
-  });
-
-  const teacherLoad = {};
-  units.forEach(u => teacherLoad[u.teacher_id] = (teacherLoad[u.teacher_id] || 0) + 1);
-  units = units
-    .map(u => ({ u, r: Math.random() }))
-    .sort((a, b) => (teacherLoad[b.u.teacher_id] - teacherLoad[a.u.teacher_id]) || (a.r - b.r))
-    .map(x => x.u);
-
-  function candidateScore(class_id, teacher_id, subject_id, day, period_id) {
-    let score = 0;
-    const pIdx = periodSortByIdx[period_id];
-    score += (classDaySubjectCount[`${class_id}|${day}|${subject_id}`] || 0) * 8;
-    score += (classDayCount[`${class_id}|${day}`] || 0) * 2;
-    const existingPeriods = teacherDayPeriods[`${teacher_id}|${day}`];
-    if (existingPeriods && existingPeriods.size) {
-      const minDist = Math.min(...[...existingPeriods].map(idx => Math.abs(idx - pIdx)));
-      if (minDist > 1) score += minDist * 4;
+  const classSlot = {}, teacherSlot = {}, csDayBlocks = {};
+  function occupy(b, on) {
+    for (let i = 0; i < b.size; i++) {
+      const p = b.start + i;
+      classSlot[key3(b.class_id, b.day, p)] = on ? b : undefined;
+      teacherSlot[key3(b.teacher_id, b.day, p)] = on ? b : undefined;
     }
-    return score;
+    const k = `${b.class_id}|${b.subject_id}|${b.day}`;
+    csDayBlocks[k] = (csDayBlocks[k] || 0) + (on ? 1 : -1);
+  }
+  const pinnedBlocks = pinned.map(a => ({ class_id: a.class_id, subject_id: a.subject_id, teacher_id: a.teacher_id, size: 1, day: a.day_of_week, start: pIdxOf[a.period_id], pinned: true, id: a.id }));
+  pinnedBlocks.forEach(b => occupy(b, true));
+
+  function canPlace(b, d, start) {
+    if (start < 0 || start + b.size > P) return false;
+    if (isOff(b.teacher_id, d)) return false;
+    for (let i = 0; i < b.size; i++) {
+      const p = start + i;
+      if (classSlot[key3(b.class_id, d, p)] || teacherSlot[key3(b.teacher_id, d, p)]) return false;
+    }
+    return (csDayBlocks[`${b.class_id}|${b.subject_id}|${d}`] || 0) < maxBlocksPerDay(b);
+  }
+  function teacherDayPeriods(tid, d) { const arr = []; for (let p = 0; p < P; p++) if (teacherSlot[key3(tid, d, p)]) arr.push(p); return arr; }
+  function classDayCount(cid, d) { let n = 0; for (let p = 0; p < P; p++) if (classSlot[key3(cid, d, p)]) n++; return n; }
+  function subjectOnDay(cid, sid, d) { return (csDayBlocks[`${cid}|${sid}|${d}`] || 0) > 0; }
+
+  const W = { akademik: 3, orta: 1, beceri: 1.5, secmeliDisi: 12, dilimIsgal: 6, hiza: 3, sinifGun: 1.5, komsuGun: 3, bosluk: 7, gunYuk: 6, dizi: 5, ayniGun: -1.5, bolunme: 10, sinifDenge: 2 };
+  function periodPenalty(b, d, p) {
+    const kat = kategori[b.subject_id];
+    let s = 0;
+    if (kat === "akademik") s += p * W.akademik;
+    else if (kat === "orta") s += p * W.orta;
+    else if (kat === "beceri") s += (P - 1 - p) * W.beceri;
+    else if (kat === "secmeli") s += secmeliSlot.has(`${d}|${p}`) ? 0 : W.secmeliDisi + (P - 1 - p) * 0.5;
+    if (kat !== "secmeli" && classHasSecmeli[b.class_id] && secmeliSlot.has(`${d}|${p}`)) s += W.dilimIsgal;
+    return s;
+  }
+  function runPenalty(periodSet) {
+    let run = 0, maxRun = 0;
+    for (let p = 0; p < P; p++) { run = periodSet.has(p) ? run + 1 : 0; if (run > maxRun) maxRun = run; }
+    return maxRun > 4 ? (maxRun - 4) * W.dizi : 0;
+  }
+  function placeScore(b, d, start) {
+    let s = 0;
+    for (let i = 0; i < b.size; i++) s += periodPenalty(b, d, start + i);
+    if (b.size === 2 && start % 2 === 1) s += W.hiza;
+    s += classDayCount(b.class_id, d) * W.sinifGun;
+    if (subjectOnDay(b.class_id, b.subject_id, d - 1) || subjectOnDay(b.class_id, b.subject_id, d + 1)) s += W.komsuGun;
+    const tp = teacherDayPeriods(b.teacher_id, d);
+    if (tp.length) {
+      const minDist = Math.min(...tp.map(p => Math.min(Math.abs(p - start), Math.abs(p - (start + b.size - 1)))));
+      if (minDist > 1) s += (minDist - 1) * W.bosluk;
+      s += W.ayniGun;
+      const set = new Set(tp); for (let i = 0; i < b.size; i++) set.add(start + i);
+      s += runPenalty(set);
+    }
+    const load = tp.length + b.size;
+    if (load > teacherTarget[b.teacher_id]) s += (load - teacherTarget[b.teacher_id]) * W.gunYuk;
+    return s;
   }
 
-  for (const u of units) {
-    let best = null, bestScore = Infinity;
-    for (const day of days) {
-      if ((classDaySubjectCount[`${u.class_id}|${day}|${u.subject_id}`] || 0) >= DERS_MAX_PER_DAY) continue;
-      for (const p of periods) {
-        if (classOccupied[`${u.class_id}|${day}|${p.id}`] || teacherOccupied[`${u.teacher_id}|${day}|${p.id}`]) continue;
-        const s = candidateScore(u.class_id, u.teacher_id, u.subject_id, day, p.id);
-        if (s < bestScore) { bestScore = s; best = { day, period_id: p.id }; }
+  const tightness = tid => teacherTotal[tid] / (teacherDaysAvail[tid] * P);
+  const katOrder = { secmeli: 0, akademik: 1, orta: 2, beceri: 3 };
+  blocks = blocks.map(b => ({ b, r: Math.random() })).sort((x, y) => (y.b.size - x.b.size) || (tightness(y.b.teacher_id) - tightness(x.b.teacher_id)) || (katOrder[kategori[x.b.subject_id]] - katOrder[kategori[y.b.subject_id]]) || (x.r - y.r)).map(x => x.b);
+
+  const placedBlocks = [], unplacedBlocks = [];
+  function tryPlace(b) {
+    let best = null, bestS = Infinity;
+    for (const d of days) for (let start = 0; start + b.size <= P; start++) {
+      if (!canPlace(b, d, start)) continue;
+      const s = placeScore(b, d, start);
+      if (s < bestS) { bestS = s; best = [d, start]; }
+    }
+    if (!best) return false;
+    b.day = best[0]; b.start = best[1]; occupy(b, true); placedBlocks.push(b);
+    return true;
+  }
+  for (const b of blocks) {
+    if (tryPlace(b)) continue;
+    if (b.size === 2) {
+      b.size = 1; b.split = true;
+      const b2 = { ...b };
+      if (!tryPlace(b)) unplacedBlocks.push(b);
+      if (!tryPlace(b2)) unplacedBlocks.push(b2);
+    } else unplacedBlocks.push(b);
+  }
+
+  /* Onarım: yerleşemeyen blok için aynı sınıftaki aynı boyutlu bir bloğu başka yere taşıyıp boşalan yere yerleştirmeyi dener. */
+  function repair() {
+    for (const u of [...unplacedBlocks]) {
+      if (tryPlace(u)) { unplacedBlocks.splice(unplacedBlocks.indexOf(u), 1); continue; }
+      let done = false;
+      const cands = placedBlocks.filter(x => !x.pinned && x.class_id === u.class_id && x.size === u.size).sort(() => Math.random() - 0.5);
+      for (const x of cands) {
+        const ox = [x.day, x.start];
+        occupy(x, false);
+        if (canPlace(u, ox[0], ox[1])) {
+          u.day = ox[0]; u.start = ox[1]; occupy(u, true);
+          let bestX = null, bestS = Infinity;
+          for (const d of days) for (let s = 0; s + x.size <= P; s++) {
+            if (!canPlace(x, d, s)) continue;
+            const sc = placeScore(x, d, s);
+            if (sc < bestS) { bestS = sc; bestX = [d, s]; }
+          }
+          if (bestX) { x.day = bestX[0]; x.start = bestX[1]; occupy(x, true); placedBlocks.push(u); done = true; break; }
+          occupy(u, false); u.day = null; u.start = null;
+        }
+        x.day = ox[0]; x.start = ox[1]; occupy(x, true);
+      }
+      if (done) unplacedBlocks.splice(unplacedBlocks.indexOf(u), 1);
+    }
+  }
+  repair();
+
+  function totalPenalty() {
+    let pen = 0;
+    const subjDays = {};
+    for (const b of placedBlocks) {
+      for (let i = 0; i < b.size; i++) pen += periodPenalty(b, b.day, b.start + i);
+      if (b.size === 2 && b.start % 2 === 1) pen += W.hiza;
+      if (b.split) pen += W.bolunme;
+      (subjDays[`${b.class_id}|${b.subject_id}`] ??= new Set()).add(b.day);
+    }
+    Object.values(subjDays).forEach(set => { set.forEach(d => { if (set.has(d + 1)) pen += W.komsuGun; }); });
+    for (const tid of Object.keys(teacherTotal)) {
+      for (const d of days) {
+        const tp = teacherDayPeriods(tid, d);
+        if (!tp.length) continue;
+        for (let i = 1; i < tp.length; i++) pen += (tp[i] - tp[i - 1] - 1) * W.bosluk;
+        if (tp.length > teacherTarget[tid]) pen += (tp.length - teacherTarget[tid]) * W.gunYuk;
+        pen += runPenalty(new Set(tp));
       }
     }
-    if (best) {
-      markOccupied(u.class_id, u.teacher_id, best.day, best.period_id, u.subject_id);
-      placed.push({ class_id: u.class_id, subject_id: u.subject_id, teacher_id: u.teacher_id, day_of_week: best.day, period_id: best.period_id, is_pinned: false });
-    } else {
-      unplaced.push(u);
-    }
-  }
-
-  function fullPenalty(schedule) {
-    let penalty = 0;
-    const perTeacherDay = {}, perClassDaySubject = {}, perClassDay = {};
-    schedule.forEach(a => {
-      const pIdx = periodSortByIdx[a.period_id];
-      (perTeacherDay[`${a.teacher_id}|${a.day_of_week}`] ??= []).push(pIdx);
-      const csKey = `${a.class_id}|${a.day_of_week}|${a.subject_id}`;
-      perClassDaySubject[csKey] = (perClassDaySubject[csKey] || 0) + 1;
-      const cdKey = `${a.class_id}|${a.day_of_week}`;
-      perClassDay[cdKey] = (perClassDay[cdKey] || 0) + 1;
-    });
-    Object.values(perTeacherDay).forEach(arr => {
-      arr.sort((a, b) => a - b);
-      for (let i = 1; i < arr.length; i++) penalty += (arr[i] - arr[i - 1] - 1) * 4;
-    });
-    Object.values(perClassDaySubject).forEach(c => { if (c > 1) penalty += (c - 1) * 8; });
-    const classIds = [...new Set(schedule.map(a => a.class_id))];
-    classIds.forEach(cid => {
-      const counts = days.map(d => perClassDay[`${cid}|${d}`] || 0);
+    for (const cid of classIds) {
+      const counts = days.map(d => classDayCount(cid, d));
       const mean = counts.reduce((s, c) => s + c, 0) / days.length;
-      const variance = counts.reduce((s, c) => s + (c - mean) ** 2, 0) / days.length;
-      penalty += variance * 2;
-    });
-    return penalty;
+      pen += counts.reduce((s, c) => s + (c - mean) ** 2, 0) / days.length * W.sinifDenge;
+    }
+    return pen;
   }
 
-  const movable = placed.filter(a => !a.is_pinned);
+  const movable = placedBlocks.filter(b => !b.pinned);
+  let currentPen = totalPenalty(), bestPen = currentPen;
+  let bestState = movable.map(b => [b.day, b.start]);
   if (movable.length > 1) {
-    let current = placed.slice();
-    let currentPenalty = fullPenalty(current);
-    let best = current.slice();
-    let bestPenalty = currentPenalty;
-    let temperature = 10;
-    const iterations = Math.min(4000, movable.length * 60);
-    const cooling = 0.997;
-
-    function isFree(schedule, class_id, teacher_id, day, period_id, excludeIdx) {
-      for (let i = 0; i < schedule.length; i++) {
-        if (i === excludeIdx) continue;
-        const a = schedule[i];
-        if (a.day_of_week !== day || a.period_id !== period_id) continue;
-        if (a.class_id === class_id || a.teacher_id === teacher_id) return false;
-      }
-      return true;
-    }
-
+    let temperature = 8;
+    const iterations = Math.min(30000, Math.max(6000, movable.length * 200)), cooling = 0.9996;
     for (let iter = 0; iter < iterations; iter++) {
-      const movableIdxs = current.map((a, i) => a.is_pinned ? -1 : i).filter(i => i >= 0);
-      if (!movableIdxs.length) break;
-      const i = movableIdxs[Math.floor(Math.random() * movableIdxs.length)];
-      const a = current[i];
-      let candidate = current.slice();
-      let valid = false;
-
+      const b = movable[Math.floor(Math.random() * movable.length)];
+      let applied = false, undo = null;
       if (Math.random() < 0.5) {
-        const day = days[Math.floor(Math.random() * days.length)];
-        const p = periods[Math.floor(Math.random() * periods.length)];
-        if (isFree(current, a.class_id, a.teacher_id, day, p.id, i)) {
-          const csCount = current.filter((x, xi) => xi !== i && x.class_id === a.class_id && x.day_of_week === day && x.subject_id === a.subject_id).length;
-          if (csCount < DERS_MAX_PER_DAY) {
-            candidate[i] = { ...a, day_of_week: day, period_id: p.id };
-            valid = true;
-          }
-        }
+        const d = days[Math.floor(Math.random() * days.length)];
+        const start = Math.floor(Math.random() * (P - b.size + 1));
+        const old = [b.day, b.start];
+        occupy(b, false);
+        if (canPlace(b, d, start)) { b.day = d; b.start = start; occupy(b, true); applied = true; undo = () => { occupy(b, false); b.day = old[0]; b.start = old[1]; occupy(b, true); }; }
+        else occupy(b, true);
       } else {
-        const j = movableIdxs[Math.floor(Math.random() * movableIdxs.length)];
-        if (j !== i) {
-          const b = current[j];
-          const aNew = { ...a, day_of_week: b.day_of_week, period_id: b.period_id };
-          const bNew = { ...b, day_of_week: a.day_of_week, period_id: a.period_id };
-          const others = current.filter((_, idx) => idx !== i && idx !== j);
-          const aOk = !others.some(x => x.day_of_week === aNew.day_of_week && x.period_id === aNew.period_id && (x.class_id === aNew.class_id || x.teacher_id === aNew.teacher_id));
-          const bOk = !others.some(x => x.day_of_week === bNew.day_of_week && x.period_id === bNew.period_id && (x.class_id === bNew.class_id || x.teacher_id === bNew.teacher_id));
-          const aCs = others.filter(x => x.class_id === aNew.class_id && x.day_of_week === aNew.day_of_week && x.subject_id === aNew.subject_id).length;
-          const bCs = others.filter(x => x.class_id === bNew.class_id && x.day_of_week === bNew.day_of_week && x.subject_id === bNew.subject_id).length;
-          if (aOk && bOk && aCs < DERS_MAX_PER_DAY && bCs < DERS_MAX_PER_DAY) {
-            candidate[i] = aNew;
-            candidate[j] = bNew;
-            valid = true;
-          }
+        const cands = movable.filter(c => c !== b && c.class_id === b.class_id && c.size === b.size);
+        if (cands.length) {
+          const c = cands[Math.floor(Math.random() * cands.length)];
+          const ob = [b.day, b.start], oc = [c.day, c.start];
+          occupy(b, false); occupy(c, false);
+          if (canPlace(b, oc[0], oc[1]) && canPlace(c, ob[0], ob[1])) {
+            b.day = oc[0]; b.start = oc[1]; c.day = ob[0]; c.start = ob[1];
+            occupy(b, true); occupy(c, true); applied = true;
+            undo = () => { occupy(b, false); occupy(c, false); b.day = ob[0]; b.start = ob[1]; c.day = oc[0]; c.start = oc[1]; occupy(b, true); occupy(c, true); };
+          } else { occupy(b, true); occupy(c, true); }
         }
       }
-
-      if (!valid) { temperature *= cooling; continue; }
-
-      const candidatePenalty = fullPenalty(candidate);
-      const delta = candidatePenalty - currentPenalty;
-      if (delta < 0 || Math.random() < Math.exp(-delta / Math.max(temperature, 0.01))) {
-        current = candidate;
-        currentPenalty = candidatePenalty;
-        if (currentPenalty < bestPenalty) { best = current.slice(); bestPenalty = currentPenalty; }
+      if (applied) {
+        const pen = totalPenalty();
+        const delta = pen - currentPen;
+        if (delta <= 0 || Math.random() < Math.exp(-delta / Math.max(temperature, 0.01))) {
+          currentPen = pen;
+          if (pen < bestPen) { bestPen = pen; bestState = movable.map(x => [x.day, x.start]); }
+        } else undo();
       }
       temperature *= cooling;
     }
-    return { placed: best, unplaced, score: Math.round(bestPenalty * 10) / 10 };
+    /* en iyi duruma dön */
+    movable.forEach(b => occupy(b, false));
+    movable.forEach((b, i) => { b.day = bestState[i][0]; b.start = bestState[i][1]; occupy(b, true); });
+    currentPen = bestPen;
+    if (unplacedBlocks.length) { repair(); currentPen = totalPenalty(); }
   }
 
-  return { placed, unplaced, score: Math.round(fullPenalty(placed) * 10) / 10 };
+  const placed = pinned.map(a => ({ class_id: a.class_id, subject_id: a.subject_id, teacher_id: a.teacher_id, day_of_week: a.day_of_week, period_id: a.period_id, is_pinned: true, id: a.id }));
+  placedBlocks.filter(b => !b.pinned).forEach(b => { for (let i = 0; i < b.size; i++) placed.push({ class_id: b.class_id, subject_id: b.subject_id, teacher_id: b.teacher_id, day_of_week: b.day, period_id: periods[b.start + i].id, is_pinned: false }); });
+  const unplaced = []; unplacedBlocks.forEach(b => { for (let i = 0; i < b.size; i++) unplaced.push({ class_id: b.class_id, subject_id: b.subject_id, teacher_id: b.teacher_id }); });
+
+  /* kalite istatistikleri */
+  let bosluk = 0;
+  for (const tid of Object.keys(teacherTotal)) for (const d of days) { const tp = teacherDayPeriods(tid, d); for (let i = 1; i < tp.length; i++) bosluk += tp[i] - tp[i - 1] - 1; }
+  const akademikPeriods = placedBlocks.filter(b => kategori[b.subject_id] === "akademik").flatMap(b => Array.from({ length: b.size }, (_, i) => b.start + i));
+  const sabahSinir = Math.ceil(P / 2);
+  const secmeliPer = placedBlocks.filter(b => kategori[b.subject_id] === "secmeli").flatMap(b => Array.from({ length: b.size }, (_, i) => `${b.day}|${b.start + i}`));
+  const stats = {
+    cift: placedBlocks.filter(b => b.size === 2).length,
+    tek: placedBlocks.filter(b => b.size === 1 && !b.split && !b.pinned).length,
+    bolunen: placedBlocks.filter(b => b.split).length / 2,
+    bosluk,
+    akademikSabah: akademikPeriods.length ? Math.round(100 * akademikPeriods.filter(p => p < sabahSinir).length / akademikPeriods.length) : null,
+    secmeliHiza: secmeliPer.length ? Math.round(100 * secmeliPer.filter(k => secmeliSlot.has(k)).length / secmeliPer.length) : null,
+    secmeliDilim: `${secmeliDays.map(d => DERS_GUN_KISA[d]).join("/")} ${secmeliPeriods.map(p => periods[p]?.label).join("–")}`,
+    bosGunIhlal: placed.filter(a => !a.is_pinned && isOff(a.teacher_id, a.day_of_week)).length,
+  };
+  return { placed, unplaced, score: Math.round(currentPen * 10) / 10, stats };
 }
 
 async function renderDersProgram(profile, school, content, viewMode = "sinif", genResult = null) {
@@ -4172,6 +4280,27 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
   const kontrol = dersSinifKontrol(school, classes, subjects || [], hours);
   const kontrolById = Object.fromEntries(kontrol.map(k => [k.class.id, k]));
   const uyariSiniflar = kontrol.filter(k => k.issues.length);
+  /* öğretmen kapasitesi: toplam saat, gelebildiği gün × günlük ders saati sayısını aşmamalı */
+  const P = periods.length;
+  const yukByTeacher = {}; hours.forEach(h => { if (h.teacher_id) yukByTeacher[h.teacher_id] = (yukByTeacher[h.teacher_id] || 0) + h.weekly_hours; });
+  const bosGunlu = (teachers || []).filter(t => (t.off_days || []).length);
+  const kapasiteAsan = (teachers || []).filter(t => yukByTeacher[t.id] > (DERS_DAYS.length - (t.off_days || []).length) * P);
+  const bosGunHtml = bosGunlu.length || kapasiteAsan.length ? `
+    <div class="card" style="margin-bottom:16px${kapasiteAsan.length ? ";border-color:var(--warn)" : ""}">
+      <h3 style="margin-top:0">Boş gün talepleri <span style="color:var(--muted);font-weight:400;font-size:12.5px">(Personel İşleri'nden; motor bu günlere ders yazmaz)</span></h3>
+      ${bosGunlu.length ? `<p style="margin:0;font-size:13px">${bosGunlu.map(t => `<strong>${esc(t.full_name)}</strong>: ${t.off_days.map(d => DAY_NAMES_DERS[d]).join(", ")} (${yukByTeacher[t.id] || 0} saat, ${DERS_DAYS.length - t.off_days.length} gün → günde ~${Math.ceil((yukByTeacher[t.id] || 0) / (DERS_DAYS.length - t.off_days.length))})`).join(" · ")}</p>` : ""}
+      ${kapasiteAsan.length ? `<p style="margin:6px 0 0;font-size:13px;color:var(--warn)">⚠️ Kapasite aşımı: ${kapasiteAsan.map(t => `${esc(t.full_name)} ${yukByTeacher[t.id]} saat, gelebildiği ${DERS_DAYS.length - (t.off_days || []).length} gün × ${P} saat = ${(DERS_DAYS.length - (t.off_days || []).length) * P}`).join("; ")}. Bu saatlerin bir kısmı yerleşemez — boş gün talebini ya da ders yükünü azalt.</p>` : ""}
+    </div>` : "";
+  const statsHtml = genResult?.stats ? (() => { const s = genResult.stats; return `
+    <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;margin-top:8px">
+      <span title="2 saatlik ardışık bloklar">Çift blok: <strong>${s.cift}</strong></span>
+      <span>Tek saat: <strong>${s.tek}</strong></span>
+      <span title="Yer bulunamadığı için iki tek saate bölünen çift bloklar" style="${s.bolunen ? "color:var(--warn)" : ""}">Bölünen blok: <strong>${s.bolunen}</strong></span>
+      <span title="Öğretmenlerin gün içindeki toplam boş saat sayısı" style="${s.bosluk ? "color:var(--warn)" : ""}">Öğretmen boşluğu: <strong>${s.bosluk}</strong> saat</span>
+      ${s.akademikSabah != null ? `<span title="Türkçe, Matematik, Fen, Sosyal, İnkılap, Yabancı Dil saatlerinin günün ilk yarısına düşme oranı">Akademik dersler ilk yarıda: <strong>%${s.akademikSabah}</strong></span>` : ""}
+      ${s.secmeliHiza != null ? `<span title="Seçmeli saatlerinin okul geneli ortak dilime (${esc(s.secmeliDilim)}) düşme oranı">Seçmeli ortak dilimde: <strong>%${s.secmeliHiza}</strong> (${esc(s.secmeliDilim)})</span>` : ""}
+      <span style="${s.bosGunIhlal ? "color:var(--crit)" : ""}">Boş gün ihlali: <strong>${s.bosGunIhlal}</strong></span>
+    </div>`; })() : "";
   const cizelgeHtml = ciz ? `
     <div class="card" style="margin-bottom:16px${uyariSiniflar.length ? ";border-color:var(--warn)" : ""}">
       <h3 style="margin-top:0">${uyariSiniflar.length ? "⚠️ Çizelge kontrolü" : "✅ Çizelge kontrolü"}</h3>
@@ -4228,13 +4357,14 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
   hours.forEach(h => { plannedByClass[h.class_id] = (plannedByClass[h.class_id] || 0) + h.weekly_hours; if (h.teacher_id) plannedByTeacher[h.teacher_id] = (plannedByTeacher[h.teacher_id] || 0) + h.weekly_hours; });
   const placedIn = (map, id) => Object.keys(map[id] || {}).length;
   const classLabel = c => { const p = plannedByClass[c.id] || 0, pl = placedIn(byClassCell, c.id); const k = kontrolById[c.id]; return `${c.name} — ${p} saat/hafta${k?.target ? ` (çizelge ${k.target})` : ""}${pl !== p ? ` · ${pl} yerleşti` : ""}`; };
-  const teacherLabel = t => { const p = plannedByTeacher[t.id] || 0, pl = placedIn(byTeacherCell, t.id); const n = dersOgretmenNorm(t, school); return `${t.full_name} — ${p} saat/hafta (aylık karşılığı ${n.maas}, ek ders ${Math.max(0, p - n.maas)})${pl !== p ? ` · ${pl} yerleşti` : ""}`; };
+  const teacherLabel = t => { const p = plannedByTeacher[t.id] || 0, pl = placedIn(byTeacherCell, t.id); const n = dersOgretmenNorm(t, school); return `${t.full_name} — ${p} saat/hafta (aylık karşılığı ${n.maas}, ek ders ${Math.max(0, p - n.maas)})${(t.off_days || []).length ? ` · boş gün: ${t.off_days.map(d => DERS_GUN_KISA[d]).join(", ")}` : ""}${pl !== p ? ` · ${pl} yerleşti` : ""}`; };
   const sinifHtml = renderEntityGrid(classes, byClassCell, classLabel, a => esc(teacherById[a.teacher_id]?.full_name || "?"), true);
   const ogretmenHtml = renderEntityGrid(teachers || [], byTeacherCell, teacherLabel, a => esc(classById[a.class_id]?.name || "?"), false);
 
   content.innerHTML = `
     ${warningHtml}
     ${ogretmensizHtml}
+    ${bosGunHtml}
     ${cizelgeHtml}
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
@@ -4247,7 +4377,8 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
           <button class="primary" id="gen-ders-btn" style="margin:0;width:auto;padding:10px 18px">${existing?.length ? "Yeniden Oluştur" : "Program Oluştur"}</button>
         </div>
       </div>
-      <p style="color:var(--muted);font-size:11.5px;margin:6px 0 0">Yeniden oluşturma, sabitlenmiş dersleri korur. Optimizasyon: yapılandırma + simulated annealing yerel arama.${ciz ? ` Haftalık saatler ${esc(HDC_DAYANAK)} esas alınarak Atamalar'da belirlenir; program o saatleri dağıtır.` : ""}</p>
+      <p style="color:var(--muted);font-size:11.5px;margin:6px 0 0">Yeniden oluşturma, sabitlenmiş dersleri korur. Kurallar: dersler 2 saatlik bloklar hâlinde ve farklı günlere (6 → 2+2+2, 5 → 2+2+1); akademik dersler erken, beceri/sanat/spor dersleri geç saatlerde; seçmeliler okul geneli ortak dilimde (çizelge açıklaması); öğretmenin boş gün talebine ders yazılmaz, gününde boşluk bırakılmaz, yükü günlere dengeli dağıtılır, 4 saatten uzun ardışık dizi kaçınılır.${ciz ? ` Haftalık saatler ${esc(HDC_DAYANAK)} esas alınarak belirlenir.` : ""}</p>
+      ${statsHtml}
       <div id="gen-ders-msg"></div>
     </div>
     <div id="ders-print" style="margin-bottom:16px"></div>
