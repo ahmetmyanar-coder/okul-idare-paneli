@@ -260,7 +260,7 @@ function renderAuth(mode = "login") {
         : await sb.auth.signUp({ email, password });
     } catch (e) {
       btn.disabled = false;
-      msg.innerHTML = `<div class="msg err">Sunucuya ulaşılamadı (${e.message}). İnternet bağlantını kontrol et; bu sayfayı bir dosya yöneticisinden değil, bir bağlantı üzerinden açtığından emin ol.</div>`;
+      msg.innerHTML = `<div class="msg err">Sunucuya ulaşılamadı (${esc(errMsg(e))}). İnternet bağlantını kontrol et; bu sayfayı bir dosya yöneticisinden değil, bir bağlantı üzerinden açtığından emin ol.</div>`;
       return;
     }
     btn.disabled = false;
@@ -394,7 +394,7 @@ async function renderTeacherNobet(school, content) {
     .from("duty_assignments")
     .select("*, duty_time_slots(label), duty_areas(label), duty_periods(title)")
     .order("duty_date");
-  if (error) { content.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+  if (error) { content.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
 
   const today = toLocalISO(new Date());
   const upcoming = (assignments || []).filter(a => a.duty_date >= today);
@@ -439,7 +439,7 @@ async function renderTeacherProgram(school, content) {
     sb.from("lesson_assignments").select("*, classes(name), subjects(name)"),
     sb.from("lesson_periods").select("*").eq("school_id", school.id).order("sort_order"),
   ]);
-  if (error) { content.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+  if (error) { content.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
   if (!periods?.length || !(assignments || []).length) {
     content.innerHTML = `<p style="color:var(--muted)">Henüz sana ait bir ders programı kaydı yok.</p>`;
     return;
@@ -498,7 +498,7 @@ async function renderTeacherRequestsList(profile, school, content) {
     sb.rpc("current_teacher_id"),
     sb.from("requests").select("*").order("created_at", { ascending: false }),
   ]);
-  if (error) { content.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+  if (error) { content.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
 
   content.innerHTML = `
     <div class="card" style="margin-bottom:16px">
@@ -541,7 +541,7 @@ async function renderTeacherRequestsList(profile, school, content) {
     const { error: insErr } = await sb.from("requests").insert({
       school_id: school.id, requester_teacher_id: teacherId, requester_name: profile.full_name || "Öğretmen", category, description,
     });
-    if (insErr) { msg.innerHTML = `<div class="msg err">${esc(insErr.message)}</div>`; return; }
+    if (insErr) { msg.innerHTML = `<div class="msg err">${esc(errMsg(insErr))}</div>`; return; }
     await renderTeacherRequestsList(profile, school, content);
   };
 }
@@ -599,7 +599,7 @@ function renderSchoolSetup(user) {
       .single();
     if (schoolErr) {
       btn.disabled = false;
-      msg.innerHTML = `<div class="msg err">${schoolErr.message}</div>`;
+      msg.innerHTML = `<div class="msg err">${esc(errMsg(schoolErr))}</div>`;
       return;
     }
     const { error: profileErr } = await sb
@@ -607,7 +607,7 @@ function renderSchoolSetup(user) {
       .upsert({ id: user.id, full_name: mudur_adi, role, school_id: school.id });
     btn.disabled = false;
     if (profileErr) {
-      msg.innerHTML = `<div class="msg err">${profileErr.message}</div>`;
+      msg.innerHTML = `<div class="msg err">${esc(errMsg(profileErr))}</div>`;
       return;
     }
     boot();
@@ -625,7 +625,7 @@ async function changePasswordPrompt() {
   if (p2 === null) return;
   if (p1 !== p2) { alert("İki şifre aynı değil; değişiklik yapılmadı."); return; }
   const { error } = await sb.auth.updateUser({ password: p1 });
-  alert(error ? `Şifre değiştirilemedi: ${error.message}` : "Şifre değiştirildi. Bir sonraki girişte yeni şifreni kullan.");
+  alert(error ? `Şifre değiştirilemedi: ${esc(errMsg(error))}` : "Şifre değiştirildi. Bir sonraki girişte yeni şifreni kullan.");
 }
 
 function accountLineHtml(profile) {
@@ -810,7 +810,7 @@ async function renderIdareciList(profile, school, content) {
   content.innerHTML = `
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">Mevcut İdareciler (${(idareciler || []).length})</h3>
-      ${idareciErr ? `<div class="msg err">${esc(idareciErr.message)}</div>` : (idareciler || []).map(p => `
+      ${idareciErr ? `<div class="msg err">${esc(errMsg(idareciErr))}</div>` : (idareciler || []).map(p => `
         <div class="list-item">
           <span>${esc(p.full_name || "İsimsiz hesap")}${p.id === profile.id ? " (Sen)" : ""}</span>
           <span class="pill">${esc(ROLE_LABELS[p.role] || p.role)}</span>
@@ -854,7 +854,7 @@ async function renderIdareciList(profile, school, content) {
     const code = randomInviteCode();
     const { error } = await sb.from("idareci_invites").insert({ school_id: school.id, role, code, created_by: profile.id });
     btn.disabled = false;
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderIdareciList(profile, school, content);
   };
 
@@ -925,7 +925,7 @@ function savePersonel(school, data) {
 
 function localStorageSaveErrHtml() {
   const detail = lastLocalStorageError
-    ? `${lastLocalStorageError.name || "Error"}: ${lastLocalStorageError.message || "(mesaj yok)"}`
+    ? `${lastLocalStorageError.name || "Error"}: ${esc(lastLocalStorageError.message || "(mesaj yok)")}`
     : "bilinmeyen hata (istisna nesnesi yakalanamadı)";
   return `<div class="msg err">Kaydedilemedi — tarayıcının yerel depolaması (localStorage) bu sayfada kapalı ya da dolu olabilir. Gizli/Private sekmede olabilirsin ya da tarayıcı ayarlarında site verileri engellenmiş olabilir. Teknik ayrıntı: ${esc(detail)}</div>`;
 }
@@ -1093,7 +1093,7 @@ async function renderPersonelStaff(school, content, editingId = null, notice = "
     const { error } = edit
       ? await sb.from("teachers").update(payload).eq("id", edit.id)
       : await sb.from("teachers").insert({ ...payload, school_id: school.id });
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderPersonelStaff(school, content, null, `<div class="msg ok">${esc(full_name)} ${edit ? "güncellendi" : "eklendi"}.</div>`);
   };
   const cancelBtn = document.getElementById("ps-cancel");
@@ -1103,7 +1103,7 @@ async function renderPersonelStaff(school, content, editingId = null, notice = "
     const t = teachers.find(x => x.id === b.dataset.psDel);
     if (!confirm(`${t.full_name} silinsin mi? Nöbet, ders dağıtımı, ek ders ve denetim kayıtlarındaki bağlantıları da etkilenir. Okuldan ayrılan personel için silmek yerine "Not" alanına ayrılış tarihini yazmayı düşün.`)) return;
     const { error } = await sb.from("teachers").delete().eq("id", t.id);
-    if (error) { await renderPersonelStaff(school, content, null, `<div class="msg err">Silinemedi: ${esc(error.message)} — önce bu personele bağlı nöbet/ders kayıtlarını kaldır.</div>`); return; }
+    if (error) { await renderPersonelStaff(school, content, null, `<div class="msg err">Silinemedi: ${esc(errMsg(error))} — önce bu personele bağlı nöbet/ders kayıtlarını kaldır.</div>`); return; }
     await renderPersonelStaff(school, content, null, `<div class="msg ok">${esc(t.full_name)} silindi.</div>`);
   });
 }
@@ -1509,11 +1509,11 @@ async function renderAylik(school, content, editingId = null) {
         ${MONTH_ORDER.map(m => `<option value="${m}" ${editTask?.month === m ? "selected" : ""}>${MONTH_NAMES[m]}</option>`).join("")}
       </select>
       <label>Görev başlığı</label>
-      <input id="m-title" value="${editTask?.title || ""}" placeholder="örn. Okul Aile Birliği genel kurulu">
+      <input id="m-title" value="${esc(editTask?.title || "")}" placeholder="örn. Okul Aile Birliği genel kurulu">
       <label>Açıklama <span style="color:var(--muted);font-weight:400">(opsiyonel)</span></label>
-      <textarea id="m-desc" rows="2" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px">${editTask?.description || ""}</textarea>
+      <textarea id="m-desc" rows="2" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px">${esc(editTask?.description || "")}</textarea>
       <label>Resmî dayanak <span style="color:var(--muted);font-weight:400">(varsa, emin değilsen boş bırak, uydurma)</span></label>
-      <input id="m-dayanak" value="${editTask?.resmi_dayanak || ""}" placeholder="örn. İlgili yönetmelik, madde numarası">
+      <input id="m-dayanak" value="${esc(editTask?.resmi_dayanak || "")}" placeholder="örn. İlgili yönetmelik, madde numarası">
       <button class="primary" id="m-save">${editTask ? "Güncelle" : "Ekle"}</button>
       ${editTask ? `<button class="secondary" id="m-cancel" style="margin-top:8px;width:100%">İptal</button>` : ""}
       <div id="m-msg"></div>
@@ -1561,10 +1561,10 @@ async function renderAylik(school, content, editingId = null) {
     if (!title) { msg.innerHTML = `<div class="msg err">Görev başlığı gerekli.</div>`; return; }
     if (editTask) {
       const { error } = await sb.from("monthly_tasks").update({ month, title, description, resmi_dayanak }).eq("id", editTask.id);
-      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     } else {
       const { error } = await sb.from("monthly_tasks").insert({ school_id: school.id, month, title, description, resmi_dayanak, sort_order: (tasks || []).length });
-      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     }
     await renderAylik(school, content);
   };
@@ -1681,13 +1681,13 @@ async function renderTeftis(school, content, editingId = null) {
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">${editItem ? "Maddeyi Düzenle" : "Yeni Madde Ekle"}</h3>
       <label>Kategori</label>
-      <input id="c-category" value="${editItem?.category || ""}" placeholder="örn. İş Sağlığı ve Güvenliği">
+      <input id="c-category" value="${esc(editItem?.category || "")}" placeholder="örn. İş Sağlığı ve Güvenliği">
       <label>Kontrol maddesi</label>
-      <textarea id="c-madde" rows="2" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px">${editItem?.madde_metni || ""}</textarea>
+      <textarea id="c-madde" rows="2" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px">${esc(editItem?.madde_metni || "")}</textarea>
       <label>Resmî dayanak <span style="color:var(--muted);font-weight:400">(emin değilsen boş bırak, uydurma)</span></label>
-      <input id="c-dayanak" value="${editItem?.resmi_dayanak || ""}" placeholder="örn. İlgili yönetmelik, madde numarası">
+      <input id="c-dayanak" value="${esc(editItem?.resmi_dayanak || "")}" placeholder="örn. İlgili yönetmelik, madde numarası">
       <label>Pratik not <span style="color:var(--muted);font-weight:400">(sahadan — asıl fark burada)</span></label>
-      <textarea id="c-not" rows="3" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px">${editItem?.pratik_not || ""}</textarea>
+      <textarea id="c-not" rows="3" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px">${esc(editItem?.pratik_not || "")}</textarea>
       <button class="primary" id="c-save">${editItem ? "Güncelle" : "Ekle"}</button>
       ${editItem ? `<button class="secondary" id="c-cancel" style="margin-top:8px;width:100%">İptal</button>` : ""}
       <div id="c-msg"></div>
@@ -1731,10 +1731,10 @@ async function renderTeftis(school, content, editingId = null) {
     if (!category || !madde_metni) { msg.innerHTML = `<div class="msg err">Kategori ve madde metni gerekli.</div>`; return; }
     if (editItem) {
       const { error } = await sb.from("checklist_items").update({ category, madde_metni, resmi_dayanak, pratik_not }).eq("id", editItem.id);
-      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     } else {
       const { error } = await sb.from("checklist_items").insert({ school_id: school.id, category, madde_metni, resmi_dayanak, pratik_not, sort_order: (items || []).length });
-      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     }
     await renderTeftis(school, content);
   };
@@ -1758,6 +1758,33 @@ async function renderTeftis(school, content, editingId = null) {
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* Supabase/PostgREST/Auth hatalarını kullanıcıya gösterilecek güvenli Türkçe metne çevirir; ham teknik ayrıntı ekrana yazılmaz (konsola yazılır). */
+const ERR_TR = [
+  [/PANO_URL_GECERSIZ/, "Bağlantı reddedildi: yalnızca https:// ile başlayan YouTube veya Vimeo bağlantısı kabul edilir."],
+  [/Invalid login credentials/i, "E-posta ya da şifre hatalı."],
+  [/Email not confirmed/i, "E-posta adresi henüz doğrulanmamış."],
+  [/User already registered|already been registered/i, "Bu e-posta ile zaten bir hesap var."],
+  [/Password should be at least|weak password|password.*(short|length)/i, "Şifre çok kısa; en az 8 karakter kullan."],
+  [/rate limit|too many requests|429/i, "Çok fazla deneme yapıldı; birkaç dakika sonra tekrar dene."],
+  [/JWT|token.*expired|invalid claim|session_not_found|refresh_token/i, "Oturum süresi dolmuş; yeniden giriş yap."],
+  [/YETKI_YOK|permission denied|row-level security|violates row-level|42501/i, "Bu işlem için yetkin yok."],
+  [/OKUL_YOK/, "Hesabın bir okula bağlı değil."],
+  [/PIN_FORMAT/, "PIN 4–8 haneli rakamlardan oluşmalı."],
+  [/duplicate key|23505/, "Bu kayıt zaten var; aynı kaydı ikinci kez ekleyemezsin."],
+  [/foreign key|23503/, "Bu kayda bağlı başka kayıtlar var; önce onları kaldır ya da kaydı pasifleştir."],
+  [/not-null|23502/, "Zorunlu bir alan boş bırakılmış."],
+  [/check constraint|23514/, "Girilen değer izin verilen aralığın dışında."],
+  [/Failed to fetch|NetworkError|network|ERR_INTERNET|Load failed/i, "Sunucuya ulaşılamadı; internet bağlantını kontrol edip tekrar dene."],
+  [/Payload too large|413|exceeded the maximum allowed size/i, "Dosya çok büyük."],
+];
+function errMsg(err) {
+  const raw = typeof err === "string" ? err : String(err?.message || err?.error_description || err?.msg || "");
+  const code = String(err?.code || err?.status || "");
+  if (err && typeof err !== "string") { try { console.error("[okul-idare-paneli]", code, raw); } catch { /* yoksay */ } }
+  for (const [re, tr] of ERR_TR) if (re.test(raw) || (code && re.test(code))) return tr;
+  return code ? `İşlem tamamlanamadı (hata kodu: ${code}).` : "İşlem tamamlanamadı; tekrar dene, sorun sürerse yöneticine bildir.";
 }
 
 /* Üç parçalı (gg/aa/yyyy) tarih girişi — native <input type="date">'in bazı
@@ -2456,11 +2483,11 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">${editTeacher ? "Öğretmeni Düzenle" : "Yeni Öğretmen Ekle"}</h3>
       <label>Ad Soyad</label>
-      <input id="t-name" value="${editTeacher?.full_name || ""}" placeholder="Ad Soyad">
+      <input id="t-name" value="${esc(editTeacher?.full_name || "")}" placeholder="Ad Soyad">
       <label>Branş</label>
-      <input id="t-branch" value="${editTeacher?.branch || ""}" placeholder="örn. Okul Öncesi">
+      <input id="t-branch" value="${esc(editTeacher?.branch || "")}" placeholder="örn. Okul Öncesi">
       <label>Telefon <span style="color:var(--muted);font-weight:400">(WhatsApp bildirimi için, opsiyonel)</span></label>
-      <input id="t-phone" value="${editTeacher?.phone || ""}" placeholder="0532 000 00 00">
+      <input id="t-phone" value="${esc(editTeacher?.phone || "")}" placeholder="0532 000 00 00">
       <label>Haftalık nöbet kotası</label>
       <input id="t-quota" type="number" min="0" value="${editTeacher?.weekly_duty_quota ?? 2}">
       <div class="check-row"><input type="checkbox" id="t-idareci" ${editTeacher?.is_idareci ? "checked" : ""}><label for="t-idareci">Müdür yardımcısı (idareci)</label></div>
@@ -2574,10 +2601,10 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
     let teacherId = editTeacher?.id;
     if (teacherId) {
       const { error } = await sb.from("teachers").update(payload).eq("id", teacherId);
-      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     } else {
       const { data, error } = await sb.from("teachers").insert(payload).select().single();
-      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
       teacherId = data.id;
     }
     const selectedAreas = Array.from(content.querySelectorAll("#t-blocked .chip.on")).map(c => c.dataset.area);
@@ -2659,7 +2686,7 @@ async function renderDonem(profile, school, content, activePeriodId = null) {
     if (badTokens.length) { msg.innerHTML = `<div class="msg err">Tatil tarihi okunamadı: ${esc(badTokens.join(", "))} — GG.AA.YYYY biçiminde yaz.</div>`; return; }
     const holiday_dates = rawList.length ? [...new Set(rawList.map(parseTr))].sort() : takvimTatilGunleri(starts_on, ends_on);
     const { data, error } = await sb.from("duty_periods").insert({ school_id: school.id, title, starts_on, ends_on, holiday_dates }).select().single();
-    if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderDonem(profile, school, content, data.id);
   };
 
@@ -2757,7 +2784,7 @@ async function renderSchedule(profile, school, period, area, devretId = null, ge
           const info = teacherInfo[name];
           const message = `Merhaba ${name}, ${period.title} nöbet çizelgeniz:\n${info.items.slice().sort((a, b) => a.date.localeCompare(b.date)).map(i => `- ${fmtDate(i.date)} ${i.slot} (${i.area})`).join("\n")}\n\nİyi çalışmalar.\n${school.name}`;
           const link = waLink(info.phone, message);
-          return `<div class="list-item"><span>${esc(name)}</span><span style="display:flex;align-items:center;gap:10px"><strong>${count}</strong>${link ? `<a href="${link}" target="_blank" rel="noopener" class="pill" style="text-decoration:none">📲 WhatsApp</a>` : `<span style="font-size:10.5px;color:var(--muted)">tel. yok</span>`}</span></div>`;
+          return `<div class="list-item"><span>${esc(name)}</span><span style="display:flex;align-items:center;gap:10px"><strong>${count}</strong>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener" class="pill" style="text-decoration:none">📲 WhatsApp</a>` : `<span style="font-size:10.5px;color:var(--muted)">tel. yok</span>`}</span></div>`;
         }).join("")}
       </div>
     ` : ""}
@@ -2793,7 +2820,7 @@ async function renderSchedule(profile, school, period, area, devretId = null, ge
     try {
       result = await generateSchedule(school, period);
     } catch (e) {
-      msg.innerHTML = `<div class="msg err">${e.message}</div>`;
+      msg.innerHTML = `<div class="msg err">${esc(errMsg(e))}</div>`;
       btn.disabled = false;
       return;
     }
@@ -2820,7 +2847,7 @@ async function renderSchedule(profile, school, period, area, devretId = null, ge
         substituted_at: new Date().toISOString(),
         is_pinned: true,
       }).eq("id", devretAssignment.id);
-      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
       await renderSchedule(profile, school, period, area);
     };
   }
@@ -3074,7 +3101,7 @@ async function renderIdareciNobeti(profile, school, content, editingId = null) {
               <td>${esc(a.teachers?.full_name || "(silinmiş öğretmen)")}</td>
               <td>${esc(a.note || "")}</td>
               <td class="row-actions">
-                ${link ? `<a href="${link}" target="_blank" rel="noopener">📲</a>` : ""}
+                ${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">📲</a>` : ""}
                 <button data-edit-idareci="${a.id}">Düzenle</button>
                 <button data-del-idareci="${a.id}">Sil</button>
               </td>
@@ -3099,10 +3126,10 @@ async function renderIdareciNobeti(profile, school, content, editingId = null) {
     if (ends_on < starts_on) { msg.innerHTML = `<div class="msg err">Bitiş, başlangıçtan önce olamaz.</div>`; return; }
     if (editAssign) {
       const { error } = await sb.from("idareci_duty_assignments").update({ teacher_id, starts_on, ends_on, note }).eq("id", editAssign.id);
-      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     } else {
       const { error } = await sb.from("idareci_duty_assignments").insert({ school_id: school.id, teacher_id, starts_on, ends_on, note });
-      if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     }
     await renderIdareciNobeti(profile, school, content);
   };
@@ -3157,7 +3184,7 @@ async function renderMevzuat(school, content) {
     resultsEl.innerHTML = `<p style="color:var(--muted)">Aranıyor…</p>`;
     const { data, error } = await sb.rpc("search_mevzuat", { p_query: query });
     if (error) {
-      resultsEl.innerHTML = `<div class="msg err">${esc(error.message)}</div>`;
+      resultsEl.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`;
       return;
     }
     resultsEl.innerHTML = (data && data.length)
@@ -3625,11 +3652,11 @@ async function renderDersAyarlar(profile, school, content) {
     if (Number.isFinite(v) && v > 0) {
       if (existing) {
         const { error } = await sb.from("class_subject_hours").update({ weekly_hours: v }).eq("id", existing.id);
-        if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; inp.value = existing.weekly_hours; return; }
+        if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; inp.value = existing.weekly_hours; return; }
         existing.weekly_hours = v;
       } else {
         const { data, error } = await sb.from("class_subject_hours").insert({ school_id: school.id, class_id, subject_id, teacher_id: null, weekly_hours: v }).select().single();
-        if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; inp.value = ""; return; }
+        if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; inp.value = ""; return; }
         cell[key] = [data];
         inp.style.borderColor = "var(--warn)";
       }
@@ -3637,7 +3664,7 @@ async function renderDersAyarlar(profile, school, content) {
     } else {
       if (existing) {
         const { error } = await sb.from("class_subject_hours").delete().eq("id", existing.id);
-        if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; inp.value = existing.weekly_hours; return; }
+        if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; inp.value = existing.weekly_hours; return; }
         delete cell[key];
         inp.style.borderColor = "";
         inp.nextElementSibling?.remove();
@@ -3652,7 +3679,7 @@ async function renderDersAyarlar(profile, school, content) {
   if (fillCells) fillCells.onclick = async () => {
     const list = bosHucreler();
     const { error } = await sb.from("class_subject_hours").insert(list.map(x => ({ school_id: school.id, class_id: x.c.id, subject_id: x.s.id, teacher_id: null, weekly_hours: x.h })));
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderDersModule(profile, school, "ayarlar");
   };
   document.getElementById("add-subject").onclick = async () => {
@@ -3664,7 +3691,7 @@ async function renderDersAyarlar(profile, school, content) {
     const v = parseInt(document.getElementById("new-subject-hours").value, 10);
     const hours_by_grade = Number.isFinite(v) && v > 0 ? (grades.length ? Object.fromEntries(grades.map(g => [String(g), v])) : { "0": v }) : {};
     const { error } = await sb.from("subjects").insert({ school_id: school.id, name, kind, group_label, hours_by_grade, sort_order: subs.length });
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderDersModule(profile, school, "ayarlar");
   };
   const seedBtn = document.getElementById("seed-subjects");
@@ -3673,14 +3700,14 @@ async function renderDersAyarlar(profile, school, content) {
       ? missingZorunlu.map(([name, hb, kind], idx) => ({ school_id: school.id, name, kind, hours_by_grade: toHours(hb), basis: HDC_DAYANAK, sort_order: subs.length + idx }))
       : nameDefaults.map((name, idx) => ({ school_id: school.id, name, kind: "zorunlu", hours_by_grade: {}, sort_order: subs.length + idx }));
     const { error } = await sb.from("subjects").insert(list);
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderDersModule(profile, school, "ayarlar");
   };
   const fillBtn = document.getElementById("fill-hours");
   if (fillBtn) fillBtn.onclick = async () => {
     for (const f of fillable) {
       const { error } = await sb.from("subjects").update({ hours_by_grade: f.hb, basis: HDC_DAYANAK }).eq("id", f.s.id);
-      if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     }
     await renderDersModule(profile, school, "ayarlar");
   };
@@ -3693,7 +3720,7 @@ async function renderDersAyarlar(profile, school, content) {
       school_id: school.id, name: dersSecmeliAdi(x, school), kind: "secmeli", group_label: HDC_GROUPS[x[1]],
       hours_by_grade: Object.fromEntries(x[3].map(g => [String(g), 2])), basis: `${HDC_DAYANAK} (seçmeli; ${x[2]} kez alınabilir)`, sort_order: subs.length,
     });
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderDersModule(profile, school, "ayarlar");
   };
   document.getElementById("add-class").onclick = async () => {
@@ -3714,7 +3741,7 @@ async function renderDersAyarlar(profile, school, content) {
     const n = (rows || []).filter(r => r.subject_id === s?.id).length;
     if (n && !confirm(`${s.name} dersinin ${n} sınıfta saati var; ders silinince bu satırlar ve varsa öğretmen atamaları da silinir. Devam edilsin mi?`)) return;
     const { error } = await sb.from("subjects").delete().eq("id", b.dataset.delSubject);
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderDersModule(profile, school, "ayarlar");
   });
   content.querySelectorAll("[data-del-class]").forEach(b => b.onclick = async () => {
@@ -3924,11 +3951,11 @@ async function renderDersAtamalar(profile, school, content) {
     if (!confirm(`${cls.name} için ${updates.length + inserts.length} ders doldurulacak:\n\n${added.join("\n")}${skipped.length ? `\n\nAtlanacak (branşı uygun öğretmen yok, elle seç): ${skipped.join(", ")}` : ""}\n\nDevam edilsin mi?`)) return;
     for (const u of updates) {
       const { error } = await sb.from("class_subject_hours").update({ teacher_id: u.teacher_id }).eq("id", u.id);
-      if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     }
     if (inserts.length) {
       const { error } = await sb.from("class_subject_hours").insert(inserts);
-      if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     }
     dersAtamaFlash = `${esc(cls.name)}: ${updates.length + inserts.length} ders dolduruldu (${esc(added.join("; "))}).${skipped.length ? ` Elle seçilecekler: ${esc(skipped.join(", "))}.` : ""}`;
     await renderDersModule(profile, school, "atamalar");
@@ -3945,20 +3972,20 @@ async function renderDersAtamalar(profile, school, content) {
     const { error } = bos
       ? await sb.from("class_subject_hours").update({ teacher_id, weekly_hours }).eq("id", bos.id)
       : await sb.from("class_subject_hours").insert({ school_id: school.id, class_id, subject_id, teacher_id, weekly_hours });
-    if (error) { msg.innerHTML = `<div class="msg err">${error.code === "23505" ? "Bu sınıf/ders/öğretmen kombinasyonu zaten eklenmiş — saatini tablodaki kutudan değiştir." : esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${error.code === "23505" ? "Bu sınıf/ders/öğretmen kombinasyonu zaten eklenmiş — saatini tablodaki kutudan değiştir." : esc(errMsg(error))}</div>`; return; }
     await renderDersModule(profile, school, "atamalar");
   };
   content.querySelectorAll("[data-assign-teacher]").forEach(sel => sel.onchange = async () => {
     if (!sel.value) return;
     const { error } = await sb.from("class_subject_hours").update({ teacher_id: sel.value }).eq("id", sel.dataset.assignTeacher);
-    if (error) { document.getElementById("a-msg").innerHTML = `<div class="msg err">${error.code === "23505" ? "Bu öğretmen aynı sınıf/ders için zaten kayıtlı; öğretmensiz satırı sil." : esc(error.message)}</div>`; return; }
+    if (error) { document.getElementById("a-msg").innerHTML = `<div class="msg err">${error.code === "23505" ? "Bu öğretmen aynı sınıf/ders için zaten kayıtlı; öğretmensiz satırı sil." : esc(errMsg(error))}</div>`; return; }
     await renderDersModule(profile, school, "atamalar");
   });
   content.querySelectorAll("[data-edit-hours]").forEach(inp => inp.onchange = async () => {
     const v = parseInt(inp.value, 10);
     if (!Number.isFinite(v) || v < 1) return;
     const { error } = await sb.from("class_subject_hours").update({ weekly_hours: v }).eq("id", inp.dataset.editHours);
-    if (error) { document.getElementById("a-msg").innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { document.getElementById("a-msg").innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderDersModule(profile, school, "atamalar");
   });
   content.querySelectorAll("[data-del-assign]").forEach(b => b.onclick = async () => {
@@ -4443,7 +4470,7 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
         if (error) throw error;
       }
     } catch (e) {
-      msg.innerHTML = `<div class="msg err">${e.message}</div>`;
+      msg.innerHTML = `<div class="msg err">${esc(errMsg(e))}</div>`;
       btn.disabled = false;
       return;
     }
@@ -4802,7 +4829,7 @@ async function renderKelebek(school, content, draftGroups = null, lastExam = nul
     try {
       result = generateKelebekSeating(rawGroups, rows, cols);
     } catch (e) {
-      msg.innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
+      msg.innerHTML = `<div class="msg err">${esc(errMsg(e))}</div>`;
       return;
     }
     const exam = {
@@ -4952,7 +4979,7 @@ async function renderTalep(school, content, filterStatus = "hepsi") {
     const msg = document.getElementById("r-msg");
     if (!requester_name || !description) { msg.innerHTML = `<div class="msg err">Talep eden ve açıklama gerekli.</div>`; return; }
     const { error } = await sb.from("requests").insert({ school_id: school.id, requester_name, requester_teacher_id, category, description });
-    if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderTalep(school, content, filterStatus);
   };
 
@@ -5201,7 +5228,7 @@ async function renderPlanlama(school, content, activeId = null) {
     if (!missing.length) { msg.innerHTML = `<div class="msg ok">Şablondaki tüm kurul ve komisyonlar zaten listede.</div>`; return; }
     if (!confirm(`${missing.length} kurul/komisyon eklenecek (mevcutlar korunur). Devam edilsin mi?`)) return;
     const { error } = await sb.from("committees").insert(missing.map(s => ({ school_id: school.id, name: s.name, committee_type: s.type })));
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderPlanlama(school, content, activeId);
   };
   document.getElementById("c-save").onclick = async () => {
@@ -5211,7 +5238,7 @@ async function renderPlanlama(school, content, activeId = null) {
     const msg = document.getElementById("c-msg");
     if (!name) { msg.innerHTML = `<div class="msg err">Ad gerekli.</div>`; return; }
     const { error } = await sb.from("committees").insert({ school_id: school.id, name, committee_type, established_on });
-    if (error) { msg.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderPlanlama(school, content, activeId);
   };
 
@@ -5290,7 +5317,7 @@ async function renderCommitteeDetail(school, committee, el) {
     const chair_note = document.getElementById("c-chair-note").value.trim() || null;
     const msg = document.getElementById("detail-msg");
     const { error } = await sb.from("committees").update({ chair_note }).eq("id", committee.id);
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     committee.chair_note = chair_note;
     msg.innerHTML = `<div class="msg ok">Gerekçe kaydedildi.</div>`;
   };
@@ -5953,7 +5980,7 @@ async function renderDenetimModule(profile, school, state = { tab: "kayitlar" })
       let saved, error;
       if (editing) ({ data: saved, error } = await sb.from("lesson_observations").update(payload).eq("id", editing.id).select().single());
       else ({ data: saved, error } = await sb.from("lesson_observations").insert({ ...payload, created_by: profile.id }).select().single());
-      if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
       if (editing) { await rerender({ tab: "kayitlar", editingId: null }); return; }
       msg.innerHTML = `<div class="msg ok">Kaydedildi. Form aşağıda — yazdırıp öğretmene tebliğ et; "Geliştirilmeli" maddeler için geri bildirim tarihi: ${saved.followup_due ? fmtDate(saved.followup_due) : "—"}.</div>`;
       document.getElementById("dn-save").disabled = true;
@@ -6009,7 +6036,7 @@ async function renderDenetimModule(profile, school, state = { tab: "kayitlar" })
       const section = document.getElementById("oc-section").value.trim(), text = document.getElementById("oc-text").value.trim(), msg = document.getElementById("oc-msg");
       if (!section || !text) { msg.innerHTML = `<div class="msg err">Bölüm ve ölçüt metni gerekli.</div>`; return; }
       const { error } = editing ? await sb.from("observation_criteria").update({ section, text }).eq("id", editing.id) : await sb.from("observation_criteria").insert({ school_id: school.id, section, text, sort_order: criteria.length });
-      if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
       await rerender({ editingCriterion: null });
     };
     content.querySelectorAll("[data-oc-edit]").forEach(b => b.onclick = () => rerender({ editingCriterion: b.dataset.ocEdit }));
@@ -6207,7 +6234,7 @@ async function renderEkdersList(profile, school, content) {
       school_id: school.id, title, period_start: document.getElementById("es-start").value || null, period_end: document.getElementById("es-end").value || null,
       katsayi: ekdersParseK(kRaw), kurum_kategori: document.getElementById("es-kategori").value, olur_makam: document.getElementById("es-olur").value.trim() || null, created_by: profile.id,
     }).select().single();
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderEkdersModule(profile, school, data.id);
   };
 }
@@ -6370,7 +6397,7 @@ async function renderEkdersSheet(profile, school, content, sheetId) {
       removed.length ? sb.from("ekders_rows").delete().in("id", removed) : Promise.resolve({}),
     ]);
     const err = results.find(x => x && x.error);
-    if (err) { msg.innerHTML = `<div class="msg err">${esc(err.error.message)}</div>`; return; }
+    if (err) { msg.innerHTML = `<div class="msg err">${esc(errMsg(err.error))}</div>`; return; }
     await sb.from("ekders_sheets").update({ updated_at: new Date().toISOString() }).eq("id", sheetId);
     await renderEkdersSheet(profile, school, content, sheetId);
   };
@@ -6381,7 +6408,7 @@ async function renderEkdersSheet(profile, school, content, sheetId) {
     const newKat = document.getElementById("ek-kategori").value;
     const patch = { period_start: document.getElementById("ek-start").value || null, period_end: document.getElementById("ek-end").value || null, katsayi: ekdersParseK(kRaw), kurum_kategori: newKat, olur_makam: document.getElementById("ek-olur").value.trim() || null, updated_at: new Date().toISOString() };
     const { error } = await sb.from("ekders_sheets").update(patch).eq("id", sheetId);
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     if (newKat !== kat && rows.length) {
       rows.forEach(r => { r.yonetim_gorevi = (EKDERS_GOREV[r.gorev] || EKDERS_GOREV.ogretmen).yonetim[newKat] ?? 0; });
       await Promise.all(rows.filter(r => r.id).map(r => sb.from("ekders_rows").update({ yonetim_gorevi: r.yonetim_gorevi }).eq("id", r.id)));
@@ -7118,7 +7145,7 @@ async function renderDisiplinList(profile, school, content, filter = "acik") {
       created_by: profile.id,
     };
     const { data, error } = await sb.from("discipline_cases").insert(payload).select().single();
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderDisiplinModule(profile, school, data.id);
   };
 }
@@ -7306,7 +7333,7 @@ async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
       msg.innerHTML = `<div class="msg err">${esc(disSanctionLabel(R, patch.sanction))} ${L ? "cezası" : "yaptırımı"} okul müdürü tarafından onaylanamaz; onay ${esc(disUstKurul(R, R.approvalBy(patch.sanction)))}ndan gelir (${L ? "md.169/2" : "Madde 56/6"}). Kurula gönderim tarihini gir.</div>`; return;
     }
     const { error } = await sb.from("discipline_cases").update(patch).eq("id", caseId);
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await rerender();
   };
 
@@ -7320,7 +7347,7 @@ async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
     docFields.forEach(f => data[f.id] = document.getElementById("dd-" + f.id).value);
     const doc_date = data.tarih || data.tespit || toLocalISO(new Date());
     const { data: saved, error } = await sb.from("discipline_docs").insert({ school_id: school.id, case_id: caseId, doc_type: docTpl.key, title: docTpl.title, doc_date, data, created_by: profile.id }).select().single();
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     const patch = { updated_at: new Date().toISOString() };
     if (DIS_STAGE_IDX[docTpl.stage] > stageIdx) patch.stage = docTpl.stage;
     if (docTpl.key === "kurul_karari") { if (data.karar_no) patch.decision_no = data.karar_no; if (data.tarih) patch.decision_date = data.tarih; if (data.gerekce) patch.decision_rationale = data.gerekce; }
@@ -7595,7 +7622,7 @@ async function renderBakim(profile, school, content, state = {}) {
     const { error } = editItem
       ? await sb.from("maintenance_items").update(payload).eq("id", editItem.id)
       : await sb.from("maintenance_items").insert(payload);
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await rerender({ editingId: null });
   };
   const cancelBtn = document.getElementById("b-cancel");
@@ -7627,7 +7654,7 @@ async function renderBakim(profile, school, content, state = {}) {
     if (done_on > todayISO) { msg.innerHTML = `<div class="msg err">Tarih bugünden ileri olamaz.</div>`; return; }
     const item = rows.find(x => x.id === logItemId);
     const { error } = await sb.from("maintenance_logs").insert({ school_id: school.id, item_id: logItemId, done_on, performed_by, note, cost });
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     // Geriye dönük (eski tarihli) bir kayıt giriliyorsa son yapılma tarihi geri gitmesin.
     const newLast = !item.last_done_on || done_on > item.last_done_on ? done_on : item.last_done_on;
     await sb.from("maintenance_items").update({ last_done_on: newLast }).eq("id", logItemId);
@@ -7847,7 +7874,7 @@ async function renderLgsOgrenciler(profile, school, content, editingId = null) {
     const { error } = editStudent
       ? await sb.from("lgs_students").update(payload).eq("id", editStudent.id)
       : await sb.from("lgs_students").insert({ ...payload, sort_order: (students || []).length });
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderLgsOgrenciler(profile, school, content);
   };
   const cancelBtn = document.getElementById("s-cancel");
@@ -8012,7 +8039,7 @@ async function renderLgsDenemeler(profile, school, content, activeExamId = null)
       kaynak: document.getElementById("e-kaynak").value.trim() || null,
       sort_order: (exams || []).length,
     }).select().single();
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderLgsDenemeler(profile, school, content, newExam.id);
   };
   content.querySelectorAll("[data-open-exam]").forEach(el => el.onclick = () => renderLgsDenemeler(profile, school, content, el.dataset.openExam));
@@ -8131,7 +8158,7 @@ async function renderLgsDenemeDetay(profile, school, el, exam, editStudentId = n
       rows.push({ school_id: school.id, mock_exam_id: exam.id, student_id: studentId, lgs_subject_id: s.id, correct_count: c, wrong_count: w, blank_count: b });
     }
     const { error } = await sb.from("lgs_mock_exam_results").upsert(rows, { onConflict: "mock_exam_id,student_id,lgs_subject_id" });
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
 
     const topicUpserts = [];
     const topicDeleteIds = [];
@@ -8489,7 +8516,7 @@ async function renderLgsGorevler(profile, school, content, formStudentId = null)
       week_start: document.getElementById("tk-week").value || null,
       note: document.getElementById("tk-note").value.trim() || null,
     });
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     await renderLgsGorevler(profile, school, content, studentId);
   };
   content.querySelectorAll("[data-advance]").forEach(b => b.onclick = async () => {
@@ -8579,7 +8606,7 @@ async function renderLgsVeli(profile, school, content) {
                   <td>${esc(m.latestNetLabel)}</td>
                   <td>${esc(m.taskLabel)}</td>
                   <td>${link
-                    ? `<a href="${link}" target="_blank" rel="noopener" class="pill" style="text-decoration:none">📲 Veliye Gönder</a>`
+                    ? `<a href="${esc(link)}" target="_blank" rel="noopener" class="pill" style="text-decoration:none">📲 Veliye Gönder</a>`
                     : `<span style="font-size:10.5px;color:var(--muted)">tel. yok</span>`}</td>
                 </tr>
               `;
@@ -9060,7 +9087,7 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
     const pin = document.getElementById("pano-pin").value.trim();
     if (!/^[0-9]{4,8}$/.test(pin)) { msg.innerHTML = `<div class="msg err">PIN 4–8 rakamdan oluşmalı.</div>`; return; }
     const { error } = await sb.rpc("set_pano_pin", { p_pin: pin });
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     try { localStorage.setItem(`pano_pin_${schoolRow.display_token}`, pin); } catch { /* önizleme PIN isteyecek */ }
     await renderPano(profile, school, content, typeFilter, statusFilter);
   };
@@ -9068,7 +9095,7 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
   if (pinClearBtn) pinClearBtn.onclick = async () => {
     if (!confirm("PIN kaldırılırsa bağlantıyı bilen herkes panoyu görebilir; genelge gereği öğrenci bilgisi içeren içerik yayınlamamalısın. Yine de kaldırılsın mı?")) return;
     const { error } = await sb.rpc("set_pano_pin", { p_pin: null });
-    if (error) { document.getElementById("pano-pin-msg").innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { document.getElementById("pano-pin-msg").innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     try { localStorage.removeItem(`pano_pin_${schoolRow.display_token}`); } catch { /* yoksay */ }
     await renderPano(profile, school, content, typeFilter, statusFilter);
   };
@@ -9112,7 +9139,7 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
           payload.media_kind = "upload_image";
           payload.media_path = path;
           payload.media_url = null;
-        } catch (e) { msg.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+        } catch (e) { msg.innerHTML = `<div class="msg err">${esc(errMsg(e))}</div>`; return; }
       }
     } else if (type === "medya") {
       const kind = document.getElementById("p-media-kind").value;
@@ -9131,7 +9158,7 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
             const path = await panoUploadFile(school, fileInput.files[0], kind);
             payload.media_path = path;
             payload.media_url = null;
-          } catch (e) { msg.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+          } catch (e) { msg.innerHTML = `<div class="msg err">${esc(errMsg(e))}</div>`; return; }
         } else if (!editItem?.media_path) {
           msg.innerHTML = `<div class="msg err">Dosya seç.</div>`; return;
         }
@@ -9140,7 +9167,7 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
     const { error } = editItem
       ? await sb.from("pano_items").update(payload).eq("id", editItem.id)
       : await sb.from("pano_items").insert({ ...payload, created_by: profile.id, sort_order: (items || []).length });
-    if (error) { msg.innerHTML = `<div class="msg err">${/PANO_URL_GECERSIZ/.test(error.message) ? "Sunucu bağlantıyı reddetti: yalnızca https:// ile başlayan YouTube veya Vimeo bağlantısı kabul edilir." : "Kaydedilemedi: " + esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${/PANO_URL_GECERSIZ/.test(error.message) ? "Sunucu bağlantıyı reddetti: yalnızca https:// ile başlayan YouTube veya Vimeo bağlantısı kabul edilir." : "Kaydedilemedi: " + esc(errMsg(error))}</div>`; return; }
     await renderPano(profile, school, content, typeFilter, statusFilter);
   };
 
@@ -9463,7 +9490,7 @@ async function renderPlatformAdmin(profile, formMsg = "") {
     const { error } = await sb.from("schools").insert({ name, il, ilce, mudur_adi: mudur_adi || null, okul_turu, created_by: profile.id, invite_code, enabled_modules: defaultEnabledModulesFor(okul_turu) });
     btn.disabled = false;
     if (error) {
-      msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`;
+      msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`;
       return;
     }
     await renderPlatformAdmin(profile, `<div class="msg ok">"${esc(name)}" oluşturuldu. Davet kodu: <strong style="font-family:ui-monospace,monospace">${esc(invite_code)}</strong> — aşağıdaki listede linkini bulup müdüre gönderebilirsin.</div>`);
@@ -9472,7 +9499,7 @@ async function renderPlatformAdmin(profile, formMsg = "") {
   const listEl = document.getElementById("pa-list");
   const { data: schools, error } = await sb.from("schools").select("*").order("created_at", { ascending: false });
   if (error) {
-    listEl.innerHTML = `<div class="msg err">${esc(error.message)}</div>`;
+    listEl.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`;
     return;
   }
   if (!schools || !schools.length) {
@@ -9536,7 +9563,7 @@ async function renderPlatformAdmin(profile, formMsg = "") {
       const { error: saveErr } = await sb.from("schools").update({ enabled_modules: allOn ? null : selected }).eq("id", schoolId);
       btn.disabled = false;
       if (saveErr) {
-        msgEl.innerHTML = `<span style="color:var(--crit)">${esc(saveErr.message)}</span>`;
+        msgEl.innerHTML = `<span style="color:var(--crit)">${esc(errMsg(saveErr))}</span>`;
         return;
       }
       msgEl.innerHTML = `<span style="color:var(--good)">Kaydedildi ✓</span>`;
