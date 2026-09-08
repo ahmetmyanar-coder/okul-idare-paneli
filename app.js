@@ -75,9 +75,10 @@ function renderAuth(mode = "login") {
         ${pendingSchool ? `<div class="msg ok">🏫 Okul kurma daveti (kod: ${esc(pendingSchool)}) — ${mode === "signup" ? "hesap oluşturunca" : "giriş yapınca"} otomatik olarak bu okulun müdürü olarak bağlanacaksın.</div>` : ""}
         ${pendingIdareci && !pendingSchool ? `<div class="msg ok">🗝️ İdareci daveti (kod: ${esc(pendingIdareci)}) — ${mode === "signup" ? "hesap oluşturunca" : "giriş yapınca"} otomatik olarak bu okulun idarecisi olarak bağlanacaksın.</div>` : ""}
         <label>E-posta</label>
-        <input id="email" type="email" autocomplete="email" placeholder="ornek@meb.gov.tr">
+        <input id="email" type="email" autocomplete="email" required inputmode="email" placeholder="ornek@meb.gov.tr">
         <label>Şifre</label>
-        <input id="password" type="password" autocomplete="${mode === "login" ? "current-password" : "new-password"}" placeholder="en az 6 karakter">
+        <input id="password" type="password" autocomplete="${mode === "login" ? "current-password" : "new-password"}" required ${mode === "signup" ? 'minlength="8"' : ""} placeholder="${mode === "signup" ? "en az 8 karakter" : "şifren"}">
+        ${mode === "login" ? `<div style="text-align:right;margin-top:-4px"><button type="button" class="navlink" id="forgot-pw" style="font-size:12.5px">Şifremi unuttum</button></div>` : ""}
         ${mode === "signup" && pendingIdareci && !pendingSchool ? `
           <label>Adın Soyadın</label>
           <input id="idareci-name" placeholder="Ad Soyad">
@@ -93,6 +94,17 @@ function renderAuth(mode = "login") {
   `;
   document.getElementById("tab-login").onclick = () => renderAuth("login");
   document.getElementById("tab-signup").onclick = () => renderAuth("signup");
+  const forgot = document.getElementById("forgot-pw");
+  if (forgot) forgot.onclick = async () => {
+    const email = document.getElementById("email").value.trim();
+    const msg = document.getElementById("msg");
+    if (!email) { msg.innerHTML = `<div class="msg err">Önce e-posta adresini yaz, sonra "Şifremi unuttum"a bas.</div>`; return; }
+    forgot.disabled = true;
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}${location.pathname}?reset=1` });
+    forgot.disabled = false;
+    msg.innerHTML = error ? `<div class="msg err">${esc(errMsg(error))}</div>` : `<div class="msg ok">Bu adrese kayıtlı bir hesap varsa şifre sıfırlama bağlantısı gönderildi. Gelen kutunu ve spam klasörünü kontrol et; bağlantı bir saat geçerlidir.</div>`;
+  };
+  document.getElementById("password").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("submit").click(); });
   document.getElementById("submit").onclick = async () => {
     const email = document.getElementById("email").value.trim();
     const password = document.getElementById("password").value;
@@ -111,6 +123,8 @@ function renderAuth(mode = "login") {
       msg.innerHTML = `<div class="msg err">E-posta ve şifre gerekli.</div>`;
       return;
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { msg.innerHTML = `<div class="msg err">E-posta adresi geçerli görünmüyor.</div>`; return; }
+    if (mode === "signup" && password.length < 8) { msg.innerHTML = `<div class="msg err">Şifre en az 8 karakter olmalı.</div>`; return; }
     btn.disabled = true;
     let result;
     try {
@@ -141,6 +155,120 @@ function renderAuth(mode = "login") {
     }
     boot();
   };
+}
+
+/* Şifre sıfırlama bağlantısından gelen oturum (PASSWORD_RECOVERY) ya da ?reset=1: yeni şifre formu. */
+function renderPasswordReset() {
+  app.innerHTML = `
+    <div class="wrap">
+      <div class="eyebrow">Okul İdare Paneli</div>
+      <h1>Yeni şifre belirle</h1>
+      <div class="card">
+        <label for="pw1">Yeni şifre <span style="color:var(--muted);font-weight:400">(en az 8 karakter)</span></label>
+        <input id="pw1" type="password" autocomplete="new-password" minlength="8" required>
+        <label for="pw2">Yeni şifre (tekrar)</label>
+        <input id="pw2" type="password" autocomplete="new-password" minlength="8" required>
+        <button class="primary" id="pw-save">Şifreyi kaydet</button>
+        <div id="pw-msg" aria-live="polite"></div>
+      </div>
+    </div>`;
+  document.getElementById("pw-save").onclick = async () => {
+    const p1 = document.getElementById("pw1").value, p2 = document.getElementById("pw2").value, msg = document.getElementById("pw-msg");
+    if (p1.length < 8) { msg.innerHTML = `<div class="msg err">Şifre en az 8 karakter olmalı.</div>`; return; }
+    if (p1 !== p2) { msg.innerHTML = `<div class="msg err">İki şifre aynı değil.</div>`; return; }
+    const { error } = await sb.auth.updateUser({ password: p1 });
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
+    sessionStorage.removeItem("pwRecovery");
+    history.replaceState(null, "", location.pathname);
+    toast("Şifre değiştirildi.");
+    boot();
+  };
+}
+
+/* İki adımlı doğrulama (TOTP) — giriş sonrası kod ekranı. */
+async function renderMfaChallenge() {
+  const { data: f } = await sb.auth.mfa.listFactors();
+  const factor = (f?.totp || []).find(x => x.status === "verified") || (f?.totp || [])[0];
+  app.innerHTML = `
+    <div class="wrap">
+      <div class="eyebrow">Okul İdare Paneli</div>
+      <h1>İki adımlı doğrulama</h1>
+      <div class="card">
+        <p style="margin-top:0">Doğrulayıcı uygulamandaki (Google Authenticator, Microsoft Authenticator vb.) 6 haneli kodu gir.</p>
+        <label for="mfa-code">Kod</label>
+        <input id="mfa-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+        <button class="primary" id="mfa-verify">Doğrula</button>
+        <button class="secondary" id="mfa-signout" style="width:100%;margin-top:8px">Çıkış yap</button>
+        <div id="mfa-msg" aria-live="polite"></div>
+      </div>
+    </div>`;
+  document.getElementById("mfa-signout").onclick = async () => { await sb.auth.signOut(); boot(); };
+  document.getElementById("mfa-verify").onclick = async () => {
+    const code = document.getElementById("mfa-code").value.trim(), msg = document.getElementById("mfa-msg");
+    if (!factor) { msg.innerHTML = `<div class="msg err">Kayıtlı doğrulayıcı bulunamadı; çıkış yapıp yöneticine bildir.</div>`; return; }
+    const { error } = await sb.auth.mfa.challengeAndVerify({ factorId: factor.id, code });
+    if (error) { msg.innerHTML = `<div class="msg err">Kod doğrulanamadı; uygulamadaki güncel kodu ve cihaz saatini kontrol et.</div>`; return; }
+    boot();
+  };
+  document.getElementById("mfa-code").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("mfa-verify").click(); });
+}
+
+/* Hesap güvenliği kartı (İdareci Yönetimi): e-posta doğrulama durumu, TOTP kurulumu/kaldırma, diğer oturumları kapatma. */
+async function renderMfaCard(el) {
+  if (!el) return;
+  const { data: { user } } = await sb.auth.getUser();
+  const { data: f } = await sb.auth.mfa.listFactors();
+  const verified = (f?.totp || []).filter(x => x.status === "verified");
+  const pending = (f?.totp || []).filter(x => x.status !== "verified");
+  el.innerHTML = `
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin-top:0">Hesap Güvenliği</h3>
+      <div class="list-item"><span>E-posta: ${esc(user?.email || "")}</span>${user?.email_confirmed_at ? `<span class="pill good">doğrulandı</span>` : `<span style="display:flex;gap:8px;align-items:center"><span class="pill warn">doğrulanmadı</span><button class="secondary" id="resend-verify" style="margin:0;width:auto;padding:6px 10px">Doğrulama e-postasını yeniden gönder</button></span>`}</div>
+      <div class="list-item"><span>İki adımlı doğrulama (TOTP) <span style="color:var(--muted);font-size:12px">— idareci hesapları için önerilir</span></span>${verified.length ? `<span style="display:flex;gap:8px;align-items:center"><span class="pill good">etkin</span><button class="secondary" id="mfa-remove" style="margin:0;width:auto;padding:6px 10px">Kaldır</button></span>` : `<button class="secondary" id="mfa-enroll" style="margin:0;width:auto;padding:6px 10px">Kur</button>`}</div>
+      <div id="mfa-enroll-wrap"></div>
+      <div class="list-item"><span>Oturumlar</span><button class="secondary" id="signout-others" style="margin:0;width:auto;padding:6px 10px" title="Bu cihaz açık kalır; diğer tüm cihaz ve tarayıcılardaki oturumlar kapanır">Diğer cihazlardaki oturumları kapat</button></div>
+      <div id="sec-msg" aria-live="polite"></div>
+    </div>`;
+  const msg = el.querySelector("#sec-msg");
+  el.querySelector("#resend-verify")?.addEventListener("click", async () => {
+    const { error } = await sb.auth.resend({ type: "signup", email: user.email });
+    msg.innerHTML = error ? `<div class="msg err">${esc(errMsg(error))}</div>` : `<div class="msg ok">Doğrulama e-postası gönderildi.</div>`;
+  });
+  el.querySelector("#signout-others")?.addEventListener("click", async () => {
+    if (!confirm("Diğer tüm cihaz ve tarayıcılardaki oturumlar kapatılacak; bu cihaz açık kalır. Devam edilsin mi?")) return;
+    const { error } = await sb.auth.signOut({ scope: "others" });
+    msg.innerHTML = error ? `<div class="msg err">${esc(errMsg(error))}</div>` : `<div class="msg ok">Diğer oturumlar kapatıldı.</div>`;
+  });
+  el.querySelector("#mfa-enroll")?.addEventListener("click", async () => {
+    for (const p of pending) await sb.auth.mfa.unenroll({ factorId: p.id });
+    const { data, error } = await sb.auth.mfa.enroll({ factorType: "totp", friendlyName: "Okul İdare Paneli" });
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
+    el.querySelector("#mfa-enroll-wrap").innerHTML = `
+      <div class="card" style="background:var(--surface-2);margin-top:8px">
+        <p style="margin-top:0;font-size:13px">1) Doğrulayıcı uygulamanla (Google/Microsoft Authenticator, Aegis vb.) kareyi tara ya da anahtarı elle gir. 2) Uygulamanın ürettiği 6 haneli kodu yazıp onayla.</p>
+        <img src="${data.totp.qr_code}" alt="TOTP kare kodu" style="width:180px;height:180px;background:#fff;border-radius:8px">
+        <div style="font-size:12px;margin:6px 0">Anahtar: <code style="user-select:all">${esc(data.totp.secret)}</code></div>
+        <label for="mfa-first">Kod</label>
+        <input id="mfa-first" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+        <button class="primary" id="mfa-confirm" style="margin-top:8px">Etkinleştir</button>
+      </div>`;
+    el.querySelector("#mfa-confirm").onclick = async () => {
+      const code = el.querySelector("#mfa-first").value.trim();
+      const { error: e2 } = await sb.auth.mfa.challengeAndVerify({ factorId: data.id, code });
+      if (e2) { msg.innerHTML = `<div class="msg err">Kod doğrulanamadı; uygulamadaki güncel kodu gir.</div>`; return; }
+      toast("İki adımlı doğrulama etkin. Bir sonraki girişte kod istenecek.");
+      await renderMfaCard(el);
+    };
+  });
+  el.querySelector("#mfa-remove")?.addEventListener("click", async () => {
+    if (!confirm("İki adımlı doğrulama kaldırılsın mı? Hesabın yalnızca şifreyle korunur.")) return;
+    for (const v of verified) {
+      const { error } = await sb.auth.mfa.unenroll({ factorId: v.id });
+      if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))} Kaldırmak için bu oturumda kodla doğrulanmış olman gerekir; çıkıp kodla yeniden gir.</div>`; return; }
+    }
+    toast("İki adımlı doğrulama kaldırıldı.");
+    await renderMfaCard(el);
+  });
 }
 
 function renderJoinError(message) {
@@ -704,6 +832,7 @@ async function renderIdareciList(profile, school, content) {
     ${(invites || []).length ? `
     <div class="card">
       <h3 style="margin-top:0">Bekleyen Davetler</h3>
+      ${idareciInviteFlash ? `<div class="msg ok" style="margin-bottom:10px"><strong>Davet oluşturuldu — bu kod bir daha gösterilmeyecek, şimdi kopyala:</strong><br><span style="font-family:ui-monospace,monospace;font-size:16px;letter-spacing:.08em">${esc(idareciInviteFlash.code)}</span><br><input readonly value="${esc(idareciInviteUrl(idareciInviteFlash.code))}" style="font-size:10.5px;padding:4px;margin-top:6px" data-select-all><div style="font-size:11.5px;margin-top:4px">${INVITE_DAYS.idareci} gün geçerli, tek kullanımlık; hatalı denemeler sınırlanır ve kaydedilir.</div></div>` : ""}
       ${invites.map(inv => `
         <div style="padding:12px 0;border-bottom:1px solid var(--line)">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
@@ -711,22 +840,27 @@ async function renderIdareciList(profile, school, content) {
             <button data-cancel-invite="${inv.id}" style="font-size:11.5px;background:none;border:1px solid var(--line);border-radius:6px;padding:4px 8px;cursor:pointer;color:var(--muted)">İptal Et</button>
           </div>
           <div style="font-size:11.5px;margin-top:6px">Kod: <strong style="font-family:ui-monospace,monospace">${esc(inv.code)}</strong></div>
-          <input readonly value="${esc(idareciInviteUrl(inv.code))}" style="font-size:10.5px;padding:4px;margin-top:4px" data-select-all>
+          ${inv.code ? `<input readonly value="${esc(idareciInviteUrl(inv.code))}" style="font-size:10.5px;padding:4px;margin-top:4px" data-select-all>` : `<div style="font-size:11.5px;color:var(--muted);margin-top:4px">Kod yalnızca oluşturulurken gösterildi (sunucuda özet olarak saklanır) · ${inv.expires_at ? (new Date(inv.expires_at) < new Date() ? "süresi doldu" : `${fmtDate(inv.expires_at.slice(0, 10))} tarihine kadar geçerli`) : ""}</div>`}
         </div>
       `).join("")}
     </div>` : ""}
+    <div id="mfa-card"></div>
     ${auditHtml}
   `;
+  renderMfaCard(document.getElementById("mfa-card"));
 
+  idareciInviteFlash = null;
   document.getElementById("inv-create").onclick = async () => {
     const role = document.getElementById("inv-role").value;
     const btn = document.getElementById("inv-create");
     const msg = document.getElementById("inv-msg");
     btn.disabled = true;
     const code = randomInviteCode();
-    const { error } = await sb.from("idareci_invites").insert({ school_id: school.id, role, code, created_by: profile.id });
+    const code_hash = await sha256Hex(code);
+    const { error } = await sb.from("idareci_invites").insert({ school_id: school.id, role, code: null, code_hash, expires_at: inviteExpiry("idareci"), created_by: profile.id });
     btn.disabled = false;
     if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
+    idareciInviteFlash = { code, role };
     await renderIdareciList(profile, school, content);
   };
 
@@ -1669,6 +1803,8 @@ const ERR_TR = [
   [/CAKISMA_ALAN|CAKISMA_SINIF/, "Aynı noktaya iki atama düşüyor (sabitlenmiş kayıtlarla çakışma); programı yeniden oluştur."],
   [/CAKISMA_OGRETMEN/, "Bir öğretmen aynı anda iki yerde görünüyor (sabitlenmiş kayıtlarla çakışma); programı yeniden oluştur."],
   [/GUN_GECERSIZ/, "Geçersiz gün değeri."],
+  [/22P02|invalid input syntax/i, "Girilen değer beklenen biçimde değil (örn. sayı alanına metin)."],
+  [/MFA|factor|aal2|TOTP/i, "İki adımlı doğrulama işlemi tamamlanamadı; kodu ve saati kontrol et."],
 ];
 let nobetFlash = null, dersFlash = null, lgsFlash = null;
 
@@ -1686,6 +1822,7 @@ function toast(text, kind = "ok") {
   setTimeout(() => t.remove(), kind === "err" ? 7000 : 2600);
 }
 const MUT_OK = { POST: "Kaydedildi.", PATCH: "Güncellendi.", DELETE: "Silindi." };
+let idareciInviteFlash = null;
 const AUDIT_TABLE_TR = { teachers: "Personel", monthly_tasks: "Aylık görev", checklist_items: "Teftiş maddesi", committees: "Kurul/komisyon", committee_members: "Kurul üyesi", requests: "Talep", pano_items: "Pano içeriği", discipline_cases: "Disiplin dosyası", discipline_docs: "Disiplin belgesi", ekders_sheets: "Ek ders çizelgesi", lesson_observations: "Ders denetimi", maintenance_items: "Bakım kalemi", subjects: "Ders", classes: "Sınıf", class_subject_hours: "Ders çizelgesi satırı", duty_periods: "Nöbet dönemi", duty_areas: "Nöbet alanı", duty_time_slots: "Nöbet dilimi", idareci_duty_assignments: "İdareci nöbeti", idareci_invites: "İdareci daveti", schools: "Okul ayarları", profiles: "Profil", teacher_blocked_areas: "Yasaklı alan", lesson_periods: "Ders saati", observation_criteria: "Denetim ölçütü" };
 const AUDIT_ACTION_TR = { INSERT: "Eklendi", UPDATE: "Güncellendi", DELETE: "Silindi" };
 /* Ortak mutasyon katmanı: Supabase hatası her zaman kontrol edilir, Türkçe bildirim gösterilir, sonuç nesnesi döner. */
@@ -2478,6 +2615,7 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
                     ? `<div style="font-size:11.5px">
                         <div>Kod: <strong style="font-family:ui-monospace,monospace">${esc(t.invite_code)}</strong></div>
                         <input readonly value="${esc(location.origin + location.pathname)}?join=${esc(t.invite_code)}" style="font-size:10.5px;padding:4px;margin:4px 0" data-select-all>
+                        <div style="font-size:11px;color:var(--muted)">${t.invite_expires_at ? (new Date(t.invite_expires_at) < new Date() ? "⚠️ Kodun süresi doldu — yeni kod üret" : `${fmtDate(t.invite_expires_at.slice(0, 10))} tarihine kadar geçerli`) : "Süresiz eski kod — yeni kod üretmen önerilir"}</div>
                         <button data-gen-code="${t.id}" style="margin-top:2px">Yeni kod</button>
                        </div>`
                     : `<button data-gen-code="${t.id}">Davet Kodu Oluştur</button>`
@@ -2569,17 +2707,23 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
   });
   content.querySelectorAll("[data-gen-code]").forEach(b => b.onclick = async () => {
     const code = randomInviteCode();
-    await mut(sb.from("teachers").update({ invite_code: code }).eq("id", b.dataset.genCode));
+    await mut(sb.from("teachers").update({ invite_code: code, invite_expires_at: inviteExpiry("ogretmen") }).eq("id", b.dataset.genCode));
     await renderNobet(profile, school, "ogretmenler");
   });
 }
 
+/* Davet kodu: kriptografik rastgele (crypto.getRandomValues), 32 karakterlik karışıklığa kapalı alfabe, 8 hane (~40 bit). */
 function randomInviteCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
+  const buf = new Uint32Array(8); crypto.getRandomValues(buf);
+  return [...buf].map(n => chars[n % chars.length]).join("");
 }
+async function sha256Hex(s) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+const INVITE_DAYS = { idareci: 7, ogretmen: 7, okul: 30 };
+const inviteExpiry = kind => new Date(Date.now() + INVITE_DAYS[kind] * 86400000).toISOString();
 
 async function renderDonem(profile, school, content, activePeriodId = null) {
   const { data: periods } = await sb.from("duty_periods").select("*").eq("school_id", school.id).order("starts_on", { ascending: false });
@@ -9567,7 +9711,7 @@ async function renderPlatformAdmin(profile, formMsg = "") {
     }
     btn.disabled = true;
     const invite_code = randomInviteCode();
-    const { error } = await sb.from("schools").insert({ name, il, ilce, mudur_adi: mudur_adi || null, okul_turu, created_by: profile.id, invite_code, enabled_modules: defaultEnabledModulesFor(okul_turu) });
+    const { error } = await sb.from("schools").insert({ name, il, ilce, mudur_adi: mudur_adi || null, okul_turu, created_by: profile.id, invite_code, invite_expires_at: inviteExpiry("okul"), enabled_modules: defaultEnabledModulesFor(okul_turu) });
     btn.disabled = false;
     if (error) {
       msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`;
@@ -9627,7 +9771,7 @@ async function renderPlatformAdmin(profile, formMsg = "") {
   listEl.querySelectorAll("[data-regen-school]").forEach(btn => {
     btn.onclick = async () => {
       btn.disabled = true;
-      await mut(sb.from("schools").update({ invite_code: randomInviteCode() }).eq("id", btn.dataset.regenSchool));
+      await mut(sb.from("schools").update({ invite_code: randomInviteCode(), invite_expires_at: inviteExpiry("okul") }).eq("id", btn.dataset.regenSchool));
       await renderPlatformAdmin(profile);
     };
   });
@@ -9663,6 +9807,11 @@ async function boot() {
     renderAuth("login");
     return;
   }
+  if (new URLSearchParams(location.search).get("reset") === "1" || sessionStorage.getItem("pwRecovery") === "1") { renderPasswordReset(); return; }
+  try {
+    const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aal && aal.nextLevel === "aal2" && aal.currentLevel !== "aal2") { renderMfaChallenge(); return; }
+  } catch (e) { console.error("[mfa]", e); }
   const { data: profile } = await sb
     .from("profiles")
     .select("*, schools(*)")
@@ -9672,34 +9821,34 @@ async function boot() {
   if (!profile || !profile.school_id) {
     const pendingSchoolCode = localStorage.getItem("pendingSchoolCode");
     if (pendingSchoolCode) {
-      const { error } = await sb.rpc("claim_school_as_mudur", { p_code: pendingSchoolCode });
-      if (!error) {
+      const { data: r, error } = await sb.rpc("claim_school_as_mudur", { p_code: pendingSchoolCode });
+      if (!error && r?.ok) {
         localStorage.removeItem("pendingSchoolCode");
         return boot();
       }
-      renderJoinError(error.message);
+      renderJoinError(error ? errMsg(error) : (r?.reason || "Davet tamamlanamadı."));
       return;
     }
     const pendingIdareciCode = localStorage.getItem("pendingIdareciCode");
     if (pendingIdareciCode) {
       const pendingIdareciName = localStorage.getItem("pendingIdareciName") || "";
-      const { error } = await sb.rpc("claim_idareci_invite", { p_code: pendingIdareciCode, p_full_name: pendingIdareciName });
-      if (!error) {
+      const { data: r, error } = await sb.rpc("claim_idareci_invite", { p_code: pendingIdareciCode, p_full_name: pendingIdareciName });
+      if (!error && r?.ok) {
         localStorage.removeItem("pendingIdareciCode");
         localStorage.removeItem("pendingIdareciName");
         return boot();
       }
-      renderJoinError(error.message);
+      renderJoinError(error ? errMsg(error) : (r?.reason || "Davet tamamlanamadı."));
       return;
     }
     const pendingCode = localStorage.getItem("pendingJoinCode");
     if (pendingCode) {
-      const { error } = await sb.rpc("join_school_as_teacher", { p_code: pendingCode });
-      if (!error) {
+      const { data: r, error } = await sb.rpc("join_school_as_teacher", { p_code: pendingCode });
+      if (!error && r?.ok) {
         localStorage.removeItem("pendingJoinCode");
         return boot();
       }
-      renderJoinError(error.message);
+      renderJoinError(error ? errMsg(error) : (r?.reason || "Davet tamamlanamadı."));
       return;
     }
     renderSchoolSetup(user);
@@ -9713,4 +9862,7 @@ async function boot() {
   renderDashboard(profile, profile.schools);
 }
 
+sb.auth.onAuthStateChange((event) => {
+  if (event === "PASSWORD_RECOVERY") { sessionStorage.setItem("pwRecovery", "1"); renderPasswordReset(); }
+});
 boot();
