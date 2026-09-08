@@ -87,6 +87,8 @@ function renderAuth(mode = "login") {
           <label>Öğretmen davet kodu <span style="color:var(--muted);font-weight:400">(okul idarenden aldıysan gir; boş bırakırsan yeni bir okul hesabı açılır)</span></label>
           <input id="join-code" value="${esc(pendingJoin)}" placeholder="örn. AB3K9XPZ" style="text-transform:uppercase">
         ` : (mode === "login" && pendingJoin && !pendingSchool && !pendingIdareci ? `<div class="msg ok" style="margin-top:10px">Bekleyen bir öğretmen daveti var (kod: ${esc(pendingJoin)}). Giriş yaptığında otomatik tamamlanacak.</div>` : "")}
+        <div id="legal-wrap" style="margin:10px 0 4px;font-size:12.5px"><button type="button" class="navlink" id="legal-toggle" style="font-size:12.5px">Aydınlatma metni</button></div>
+        <div id="legal-body" class="hidden"></div>
         <button class="primary" id="submit">${mode === "login" ? "Giriş yap" : "Hesap oluştur"}</button>
         <div id="msg"></div>
       </div>
@@ -94,6 +96,15 @@ function renderAuth(mode = "login") {
   `;
   document.getElementById("tab-login").onclick = () => renderAuth("login");
   document.getElementById("tab-signup").onclick = () => renderAuth("signup");
+  (async () => {
+    const t = await publishedLegalText();
+    window.__legalText = t;
+    const wrap = document.getElementById("legal-wrap"), body = document.getElementById("legal-body");
+    if (!wrap) return;
+    if (mode === "signup" && t) wrap.insertAdjacentHTML("beforeend", `<label style="display:flex;align-items:flex-start;gap:8px;font-weight:400;margin-top:6px;cursor:pointer"><input type="checkbox" id="legal-ok" required style="width:auto;margin:3px 0 0">Aydınlatma metnini (sürüm ${t.version}) okudum ve anladım.</label>`);
+    if (!t) wrap.insertAdjacentHTML("beforeend", `<div style="color:var(--muted);margin-top:4px">Aydınlatma metni hukuk onayı bekliyor; yayımlanınca burada gösterilir.</div>`);
+    document.getElementById("legal-toggle").onclick = () => { body.classList.toggle("hidden"); if (!body.innerHTML) body.innerHTML = legalTextHtml(t); };
+  })();
   const forgot = document.getElementById("forgot-pw");
   if (forgot) forgot.onclick = async () => {
     const email = document.getElementById("email").value.trim();
@@ -125,6 +136,8 @@ function renderAuth(mode = "login") {
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { msg.innerHTML = `<div class="msg err">E-posta adresi geçerli görünmüyor.</div>`; return; }
     if (mode === "signup" && password.length < 8) { msg.innerHTML = `<div class="msg err">Şifre en az 8 karakter olmalı.</div>`; return; }
+    if (mode === "signup" && window.__legalText && !document.getElementById("legal-ok")?.checked) { msg.innerHTML = `<div class="msg err">Devam etmek için aydınlatma metnini okuduğunu onayla.</div>`; return; }
+    if (mode === "signup" && window.__legalText) localStorage.setItem("pendingConsent", JSON.stringify({ id: window.__legalText.id, key: window.__legalText.key, version: window.__legalText.version }));
     btn.disabled = true;
     let result;
     try {
@@ -271,6 +284,130 @@ async function renderMfaCard(el) {
   });
 }
 
+/* KVKK — ilgili kişi ekranı: aydınlatma, kendi verisini dışa aktarma, düzeltme/silme/anonimleştirme talebi, talep geçmişi. */
+async function renderVerilerim(profile, school) {
+  const back = () => profile.role === "ogretmen" ? renderTeacherDashboard(profile, school) : renderDashboard(profile, school);
+  const [{ data: { user } }, legal, { data: teacherRow }, { data: reqs }, { data: consents }] = await Promise.all([
+    sb.auth.getUser(), publishedLegalText(),
+    sb.from("teachers").select("full_name, branch, title, phone, hire_date, staff_type, off_days, is_active").eq("user_id", profile.id).maybeSingle(),
+    sb.from("data_requests").select("*").eq("user_id", profile.id).order("created_at", { ascending: false }),
+    sb.from("consent_records").select("text_key, version, accepted_at").eq("user_id", profile.id).order("accepted_at", { ascending: false }),
+  ]);
+  app.innerHTML = `
+    <div class="wrap">
+      <button class="navlink" id="back-dash">← Panele dön</button>
+      <div class="eyebrow">Kişisel Verilerim</div>
+      <h1>${esc(profile.full_name || user?.email || "")}</h1>
+      <div class="subtitle">6698 sayılı KVKK kapsamında: hakkında tutulan veriyi gör, dışa aktar, düzeltme ya da silme/anonimleştirme talebi ilet.</div>
+      <div class="card" style="margin-bottom:16px">
+        <h3 style="margin-top:0">Aydınlatma metni</h3>
+        ${legalTextHtml(legal)}
+        ${(consents || []).length ? `<p style="font-size:12px;color:var(--muted);margin:8px 0 0">Onayladığın sürüm(ler): ${consents.map(c => `${esc(c.text_key)} s.${c.version} — ${fmtDateTime(c.accepted_at)}`).join("; ")}</p>` : ""}
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <h3 style="margin-top:0">Hakkında tutulan veriler</h3>
+        <div class="list-item"><span>Hesap e-postası</span><strong>${esc(user?.email || "")}</strong></div>
+        <div class="list-item"><span>Ad soyad</span><strong>${esc(profile.full_name || "—")}</strong></div>
+        <div class="list-item"><span>Rol / okul</span><strong>${esc(ROLE_LABELS[profile.role] || profile.role)} · ${esc(school?.name || "")}</strong></div>
+        ${teacherRow ? `<div class="list-item"><span>Personel kaydı</span><span style="font-size:12.5px">${esc(teacherRow.full_name)}${teacherRow.branch ? ` · ${esc(teacherRow.branch)}` : ""}${teacherRow.phone ? ` · ${esc(maskPhone(teacherRow.phone))}` : ""}${teacherRow.hire_date ? ` · işe başlama ${fmtDate(teacherRow.hire_date)}` : ""}</span></div>` : ""}
+        <p style="font-size:12px;color:var(--muted)">Nöbet, ders programı ve modül kayıtları okul idaresince tutulur; dışa aktarma dosyasında özetlenir. Muafiyet/sağlık bilgileri yalnızca nöbet uygunluğu için tutulur ve listede gösterilmez.</p>
+        <button class="secondary" id="dr-export" style="width:100%">Verilerimi JSON olarak indir</button>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <h3 style="margin-top:0">Talep ilet</h3>
+        <label for="dr-type">Talep türü</label>
+        <select id="dr-type">${Object.entries(DR_TYPE_TR).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
+        <label for="dr-note">Açıklama</label>
+        <textarea id="dr-note" rows="3" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px" placeholder="örn. Telefon numaram değişti / okuldan ayrıldım, kaydımın anonimleştirilmesini istiyorum"></textarea>
+        <button class="primary" id="dr-send">Talebi gönder</button>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0">Talep okul idaresine düşer; KVKK md.13 uyarınca en geç 30 gün içinde yanıtlanır. Yanıtı burada görürsün.</p>
+        <div id="dr-msg" aria-live="polite"></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Taleplerim (${(reqs || []).length})</h3>
+        ${(reqs || []).map(r => `<div class="list-item"><span><strong>${DR_TYPE_TR[r.request_type] || esc(r.request_type)}</strong> · ${fmtDateTime(r.created_at)}${r.note ? `<div style="font-size:12px;color:var(--muted)">${esc(r.note)}</div>` : ""}${r.response_note ? `<div style="font-size:12px">Yanıt: ${esc(r.response_note)}</div>` : ""}</span><span class="pill ${r.status === "tamamlandi" ? "good" : r.status === "reddedildi" ? "warn" : ""}">${DR_STATUS_TR[r.status]}</span></div>`).join("") || `<p style="color:var(--muted);font-size:13px">Henüz talep yok.</p>`}
+      </div>
+    </div>`;
+  document.getElementById("back-dash").onclick = back;
+  document.getElementById("dr-export").onclick = async () => {
+    const [{ data: duties }, { data: lessons }] = await Promise.all([
+      teacherRow ? sb.from("duty_assignments").select("duty_date, area, is_pinned").eq("teacher_id", (await sb.from("teachers").select("id").eq("user_id", profile.id).maybeSingle()).data?.id || "00000000-0000-0000-0000-000000000000") : { data: [] },
+      teacherRow ? sb.from("lesson_assignments").select("day_of_week, period_id, class_id, subject_id").eq("teacher_id", (await sb.from("teachers").select("id").eq("user_id", profile.id).maybeSingle()).data?.id || "00000000-0000-0000-0000-000000000000") : { data: [] },
+    ]);
+    const payload = { olusturma: new Date().toISOString(), hesap: { eposta: user?.email, ad: profile.full_name, rol: profile.role, okul: school?.name }, personel: teacherRow || null, nobetler: duties || [], ders_saatleri: lessons || [], talepler: reqs || [], onaylar: consents || [] };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `verilerim-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  document.getElementById("dr-send").onclick = async () => {
+    const request_type = document.getElementById("dr-type").value, note = document.getElementById("dr-note").value.trim() || null, msg = document.getElementById("dr-msg");
+    const { error } = await mut(sb.from("data_requests").insert({ school_id: profile.school_id, user_id: profile.id, request_type, note }), { ok: "Talebin iletildi." });
+    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
+    await renderVerilerim(profile, school);
+  };
+}
+
+/* Platform Yönetimi — hukuki metin sürümleri (KVKK md.10 başlıkları) ve saklama süresi temizliği. Hukuk onayı olmadan yayımlanmaz. */
+async function renderLegalAdmin(profile, el) {
+  if (!el) return;
+  const { data: texts } = await sb.from("legal_texts").select("*").order("key").order("version", { ascending: false });
+  const latest = (texts || []).find(t => t.key === "aydinlatma") || null;
+  const f = (id, label, val, rows = 2) => `<label for="${id}">${label}</label><textarea id="${id}" rows="${rows}" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:13px">${esc(val || "")}</textarea>`;
+  el.innerHTML = `
+    <div class="card" style="margin-top:20px">
+      <h3 style="margin-top:0">Hukuki Metinler — Aydınlatma <span style="color:var(--muted);font-weight:400;font-size:12.5px">(alanlar KVKK md.10 başlıkları; hukuk danışmanı doldurur ve onaylar)</span></h3>
+      ${latest ? `<p style="font-size:12.5px;margin:0 0 8px">Güncel sürüm: <strong>${latest.version}</strong> · durum: <span class="pill ${latest.status === "onayli" ? "good" : "warn"}">${esc({ taslak: "taslak", hukuk_onayi_bekliyor: "hukuk onayı bekliyor", onayli: "onaylı" }[latest.status] || latest.status)}</span>${latest.published_at ? ` · yayım: ${fmtDateTime(latest.published_at)}` : " · yayımlanmadı"}${latest.approval_note ? ` · onay notu: ${esc(latest.approval_note)}` : ""}</p>` : ""}
+      <label for="lt-title">Başlık</label><input id="lt-title" value="${esc(latest?.title || "Kişisel Verilerin İşlenmesine İlişkin Aydınlatma Metni")}">
+      ${f("lt-body", "Metin gövdesi", latest?.body, 6)}
+      <div class="grid">
+        <div><label for="lt-vs">Veri sorumlusu</label><input id="lt-vs" value="${esc(latest?.veri_sorumlusu || "")}"></div>
+        <div><label for="lt-vse">Veri sorumlusu e-posta</label><input id="lt-vse" type="email" value="${esc(latest?.veri_sorumlusu_eposta || "")}"></div>
+      </div>
+      <label for="lt-vsa">Veri sorumlusu adres</label><input id="lt-vsa" value="${esc(latest?.veri_sorumlusu_adres || "")}">
+      ${f("lt-amac", "İşleme amacı", latest?.isleme_amaci)}${f("lt-sebep", "Hukuki sebep", latest?.hukuki_sebep)}${f("lt-alici", "Alıcı / aktarım kategorileri", latest?.alici_kategorileri)}${f("lt-saklama", "Saklama süresi", latest?.saklama_suresi)}${f("lt-haklar", "İlgili kişi hakları", latest?.ilgili_kisi_haklari)}${f("lt-basvuru", "Başvuru yöntemi", latest?.basvuru_yontemi)}
+      <label for="lt-status">Durum</label>
+      <select id="lt-status"><option value="taslak" ${latest?.status === "taslak" ? "selected" : ""}>Taslak</option><option value="hukuk_onayi_bekliyor" ${latest?.status === "hukuk_onayi_bekliyor" ? "selected" : ""}>Hukuk onayı bekliyor</option><option value="onayli" ${latest?.status === "onayli" ? "selected" : ""}>Onaylı (hukuk danışmanı onayladı)</option></select>
+      <label for="lt-onay">Onay notu <span style="color:var(--muted);font-weight:400">(onaylayan, tarih, referans)</span></label><input id="lt-onay" value="${esc(latest?.approval_note || "")}">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="secondary" id="lt-save" style="margin:0;width:auto">Taslağı kaydet (aynı sürüm)</button>
+        <button class="primary" id="lt-publish" style="margin:0;width:auto" title="Yeni sürüm numarasıyla yayımlar; kullanıcılar kayıt sırasında bu sürümü onaylar">Yeni sürüm olarak yayımla</button>
+      </div>
+      <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0">Yayımlamak için durum "Onaylı" ve onay notu dolu olmalı. Metin içeriği hukuk görüşü değildir; taslak alanlar "[Hukuk danışmanı dolduracak]" ile işaretlidir.</p>
+      <div id="lt-msg" aria-live="polite"></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin-top:0">Saklama Süresi Temizliği</h3>
+      <p style="font-size:12.5px;margin:0 0 8px">Okul bazlı saklama süresi (varsayılan 5 yıl) dolmuş <strong>pasif</strong> personel kayıtları anonimleştirilir ("Eski Personel"), 90 günden eski davet denemeleri ve 30 günden eski pano PIN denemeleri silinir. Etkin personel ve öğrenci verilerine dokunmaz. Sunucuda günlük zamanlayıcı varsa otomatik çalışır; burada elle de çalıştırılır.</p>
+      <button class="secondary" id="ret-run" style="width:auto">Temizliği şimdi çalıştır</button>
+      <div id="ret-msg" aria-live="polite"></div>
+    </div>`;
+  const read = () => ({
+    title: el.querySelector("#lt-title").value.trim() || "Aydınlatma Metni", body: el.querySelector("#lt-body").value,
+    veri_sorumlusu: el.querySelector("#lt-vs").value.trim() || null, veri_sorumlusu_eposta: el.querySelector("#lt-vse").value.trim() || null, veri_sorumlusu_adres: el.querySelector("#lt-vsa").value.trim() || null,
+    isleme_amaci: el.querySelector("#lt-amac").value.trim() || null, hukuki_sebep: el.querySelector("#lt-sebep").value.trim() || null, alici_kategorileri: el.querySelector("#lt-alici").value.trim() || null,
+    saklama_suresi: el.querySelector("#lt-saklama").value.trim() || null, ilgili_kisi_haklari: el.querySelector("#lt-haklar").value.trim() || null, basvuru_yontemi: el.querySelector("#lt-basvuru").value.trim() || null,
+    status: el.querySelector("#lt-status").value, approval_note: el.querySelector("#lt-onay").value.trim() || null, updated_at: new Date().toISOString(),
+  });
+  el.querySelector("#lt-save").onclick = async () => {
+    const v = read(); const msg = el.querySelector("#lt-msg");
+    if (v.status === "onayli" && !v.approval_note) { msg.innerHTML = `<div class="msg err">"Onaylı" durumu için onay notu (kim, ne zaman) gerekli.</div>`; return; }
+    const patch = { ...v, approved_by: v.status === "onayli" ? profile.id : null, approved_at: v.status === "onayli" ? new Date().toISOString() : null };
+    const { error } = latest ? await mut(sb.from("legal_texts").update(patch).eq("id", latest.id)) : await mut(sb.from("legal_texts").insert({ key: "aydinlatma", version: 1, ...patch, created_by: profile.id }));
+    if (!error) await renderLegalAdmin(profile, el);
+  };
+  el.querySelector("#lt-publish").onclick = async () => {
+    const v = read(); const msg = el.querySelector("#lt-msg");
+    if (v.status !== "onayli" || !v.approval_note) { msg.innerHTML = `<div class="msg err">Yayımlamak için durum "Onaylı" ve onay notu dolu olmalı.</div>`; return; }
+    if (!confirm(`Yeni sürüm (${(latest?.version || 0) + 1}) yayımlanacak; bundan sonra kayıt olanlar bu sürümü onaylar. Devam edilsin mi?`)) return;
+    const { error } = await mut(sb.from("legal_texts").insert({ key: "aydinlatma", version: (latest?.version || 0) + 1, ...v, approved_by: profile.id, approved_at: new Date().toISOString(), published_at: new Date().toISOString(), created_by: profile.id }), { ok: "Yeni sürüm yayımlandı." });
+    if (!error) await renderLegalAdmin(profile, el);
+  };
+  el.querySelector("#ret-run").onclick = async () => {
+    if (!confirm("Saklama süresi temizliği çalıştırılsın mı? Süresi dolmuş pasif personel kayıtları geri alınamaz biçimde anonimleştirilir.")) return;
+    const { data, error } = await sb.rpc("run_retention_cleanup");
+    el.querySelector("#ret-msg").innerHTML = error ? `<div class="msg err">${esc(errMsg(error))}</div>` : `<div class="msg ok">Tamamlandı: ${data.anonimlestirilen_personel} personel anonimleştirildi, ${data.silinen_davet_denemesi} davet denemesi ve ${data.silinen_pin_denemesi} PIN denemesi silindi.</div>`;
+  };
+}
+
 function renderJoinError(message) {
   app.innerHTML = `
     <div class="wrap">
@@ -305,6 +442,7 @@ function renderTeacherDashboard(profile, school) {
         <div id="topbar-actions" style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
           <button class="signout" id="signout">Çıkış yap</button>
           <button class="signout" id="chpass" title="Hesabının şifresini değiştir">Şifre değiştir</button>
+          <button class="signout" id="verilerim" title="Kişisel verilerin: görüntüle, dışa aktar, düzeltme/silme talebi">Verilerim</button>
         </div>
       </div>
       <div class="grid">
@@ -335,6 +473,8 @@ function renderTeacherDashboard(profile, school) {
   };
   const chpassBtn = document.getElementById("chpass");
   if (chpassBtn) chpassBtn.onclick = changePasswordPrompt;
+  const verilerimBtn = document.getElementById("verilerim");
+  if (verilerimBtn) verilerimBtn.onclick = () => renderVerilerim(profile, school);
   const scheduleCard = document.querySelector('[data-mod="Nöbetim ve Programım"]');
   if (scheduleCard) scheduleCard.onclick = () => renderTeacherSchedule(profile, school, "nobet");
   const requestsCard = document.querySelector('[data-mod="Taleplerim"]');
@@ -705,6 +845,7 @@ function renderDashboard(profile, school) {
         <div id="topbar-actions" style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
           <button class="signout" id="signout">Çıkış yap</button>
           <button class="signout" id="chpass" title="Hesabının şifresini değiştir">Şifre değiştir</button>
+          <button class="signout" id="verilerim" title="Kişisel verilerin: görüntüle, dışa aktar, düzeltme/silme talebi">Verilerim</button>
           <button class="secondary" id="idareciler-btn" style="font-size:12.5px;padding:7px 12px">İdareciler</button>
         </div>
       </div>
@@ -724,6 +865,8 @@ function renderDashboard(profile, school) {
   };
   const chpassBtn = document.getElementById("chpass");
   if (chpassBtn) chpassBtn.onclick = changePasswordPrompt;
+  const verilerimBtn = document.getElementById("verilerim");
+  if (verilerimBtn) verilerimBtn.onclick = () => renderVerilerim(profile, school);
   document.getElementById("idareciler-btn").onclick = () => renderIdareciYonetimi(profile, school);
   maybeShowPlatformAdminLink(profile);
   maybeShowPendingBadges(school);
@@ -794,6 +937,9 @@ async function renderIdareciList(profile, school, content) {
     sb.from("idareci_invites").select("*").eq("school_id", school.id).is("used_at", null).order("created_at", { ascending: false }),
   ]);
 
+  const { data: drRows } = await sb.from("data_requests").select("*").eq("school_id", school.id).order("created_at", { ascending: false }).limit(50);
+  const { data: linkedTeachers } = await sb.from("teachers").select("id, user_id, full_name").eq("school_id", school.id).not("user_id", "is", null);
+  const teacherByUser = Object.fromEntries((linkedTeachers || []).map(t => [t.user_id, t]));
   const [{ data: auditRows }, { data: actorRows }] = await Promise.all([
     sb.from("audit_log").select("id, actor_id, action, table_name, record_id, label, changed_cols, created_at").eq("school_id", school.id).order("created_at", { ascending: false }).limit(100),
     sb.from("profiles").select("id, full_name").eq("school_id", school.id),
@@ -844,10 +990,30 @@ async function renderIdareciList(profile, school, content) {
         </div>
       `).join("")}
     </div>` : ""}
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin-top:0">KVKK Talepleri <span style="color:var(--muted);font-weight:400;font-size:12.5px">(ilgili kişi başvuruları; 30 gün içinde yanıtla — KVKK md.13)</span></h3>
+      ${(drRows || []).length ? drRows.map(r => { const t = teacherByUser[r.user_id]; return `<div class="list-item" style="align-items:flex-start"><span><strong>${DR_TYPE_TR[r.request_type] || esc(r.request_type)}</strong> · ${esc(actorName[r.user_id] || t?.full_name || "Kullanıcı")} · ${fmtDateTime(r.created_at)}${r.note ? `<div style="font-size:12px;color:var(--muted)">${esc(r.note)}</div>` : ""}${r.response_note ? `<div style="font-size:12px">Yanıt: ${esc(r.response_note)}</div>` : ""}</span><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end"><span class="pill ${r.status === "tamamlandi" ? "good" : r.status === "reddedildi" ? "warn" : ""}">${DR_STATUS_TR[r.status]}</span>${r.status === "acik" ? `${t && ["silme", "anonimlestirme"].includes(r.request_type) ? `<button data-dr-anon="${r.id}" data-teacher="${t.id}" title="Personel kaydındaki kimlik verileri silinir; program/nöbet geçmişi 'Eski Personel' adıyla kalır">Anonimleştir</button>` : ""}<button data-dr-done="${r.id}">Tamamlandı</button><button data-dr-reject="${r.id}">Reddet</button>` : ""}</span></div>`; }).join("") : `<p style="color:var(--muted);font-size:13px">Açık talep yok.</p>`}
+    </div>
     <div id="mfa-card"></div>
     ${auditHtml}
   `;
   renderMfaCard(document.getElementById("mfa-card"));
+  const drClose = async (id, status) => {
+    const response_note = prompt(status === "tamamlandi" ? "İlgili kişiye kısa yanıt (ne yapıldı?):" : "Ret gerekçesi (ilgili kişiye gösterilir):") ;
+    if (response_note === null) return;
+    const { error } = await mut(sb.from("data_requests").update({ status, response_note: response_note.trim() || null, handled_by: profile.id, handled_at: new Date().toISOString() }).eq("id", id));
+    if (!error) await renderIdareciList(profile, school, content);
+  };
+  content.querySelectorAll("[data-dr-done]").forEach(b => b.onclick = () => drClose(b.dataset.drDone, "tamamlandi"));
+  content.querySelectorAll("[data-dr-reject]").forEach(b => b.onclick = () => drClose(b.dataset.drReject, "reddedildi"));
+  content.querySelectorAll("[data-dr-anon]").forEach(b => b.onclick = async () => {
+    const t = (linkedTeachers || []).find(x => x.id === b.dataset.teacher);
+    if (!confirm(`${t?.full_name} anonimleştirilsin mi?\n\nAd, telefon, not, muafiyet ve hesap bağlantısı silinir; nöbet/ders geçmişi "Eski Personel" adıyla kalır. Geri alınamaz.`)) return;
+    const { data, error } = await sb.rpc("anonymize_teacher", { p_teacher_id: b.dataset.teacher });
+    if (error) { toast(errMsg(error), "err"); return; }
+    toast(`Anonimleştirildi: ${data.yeni_ad}`);
+    await drClose(b.dataset.drAnon, "tamamlandi");
+  });
 
   idareciInviteFlash = null;
   document.getElementById("inv-create").onclick = async () => {
@@ -1062,7 +1228,7 @@ async function renderPersonelStaff(school, content, editingId = null, notice = "
               <td><strong>${esc(t.full_name)}</strong></td>
               <td><span class="pill ${STAFF_TYPE_PILL[t.staff_type] || ""}">${esc(STAFF_TYPE_LABELS[t.staff_type] || t.staff_type)}</span>${t.is_active === false ? ` <span class="pill warn" title="${t.deactivated_at ? esc(fmtDate(t.deactivated_at.slice(0, 10))) + " tarihinde pasifleştirildi" : ""}">Pasif</span>` : ""}${t.title ? `<div style="font-size:11.5px;color:var(--muted)">${esc(t.title)}</div>` : ""}</td>
               <td>${esc(t.branch || "")}${(t.off_days || []).length ? `<div style="font-size:11px;color:var(--muted)">Boş gün: ${t.off_days.map(d => DERS_GUN_KISA[d]).join(", ")}</div>` : ""}</td>
-              <td>${t.phone ? `<a href="${waLink(t.phone)}" target="_blank" rel="noopener">${esc(t.phone)}</a>` : ""}</td>
+              <td>${t.phone ? `<a href="${waLink(t.phone)}" target="_blank" rel="noopener" title="WhatsApp ile yaz">${esc(maskPhone(t.phone))}</a>` : ""}</td>
               <td>${t.hire_date ? `${fmtDate(t.hire_date)}${ky !== null ? `<div style="font-size:11.5px;color:var(--muted)">${ky} yıl</div>` : ""}` : ""}</td>
               <td style="font-size:12px">${t.user_id ? `<span style="color:var(--good)">✅ Bağlı</span>` : t.invite_code ? `Davet kodu: <strong style="font-family:ui-monospace,monospace">${esc(t.invite_code)}</strong>` : `<span style="color:var(--muted)">—</span>`}</td>
               <td class="row-actions"><button data-ps-edit="${t.id}">Düzenle</button>${t.is_active === false ? `<button data-ps-activate="${t.id}">Etkinleştir</button>` : `<button data-ps-deactivate="${t.id}" title="Nöbet, ders ve diğer listelerden çıkar; kayıtları ve geçmişi korunur">Pasifleştir</button>`}<button data-ps-del="${t.id}">Sil</button></td>
@@ -1131,6 +1297,7 @@ async function renderPersonelChanges(school, content) {
   const teachers = await personelTeachers(school);
   const nameOf = id => teachers.find(t => t.id === id)?.full_name || data.staff.find(s => s.id === id)?.full_name || "(silinmiş personel)";
   content.innerHTML = `
+    ${localVeriNotuHtml([personelKey(school)], "terfi/maaş değişiklikleri ve devam kayıtları")}
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">Yeni Kayıt Ekle</h3>
       <p style="color:var(--muted);font-size:12.5px;margin:0 0 8px">🔒 Bu kayıtlar yalnızca bu tarayıcıda saklanır. Aylık "Maaş Değişiklik Bildirim Formu" (Evrak Deposu) terfi satırlarını buradan doldurur.</p>
@@ -1197,6 +1364,7 @@ async function renderPersonelAttendance(school, content) {
   const teachers = await personelTeachers(school);
   const nameOf = id => teachers.find(t => t.id === id)?.full_name || data.staff.find(s => s.id === id)?.full_name || "(silinmiş personel)";
   content.innerHTML = `
+    ${localVeriNotuHtml([personelKey(school)], "terfi/maaş değişiklikleri ve devam kayıtları")}
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">Yeni Kayıt Ekle</h3>
       <p style="color:var(--muted);font-size:12.5px;margin:0 0 8px">🔒 Rapor/izin kayıtları yalnızca bu tarayıcıda saklanır.</p>
@@ -1823,6 +1991,38 @@ function toast(text, kind = "ok") {
 }
 const MUT_OK = { POST: "Kaydedildi.", PATCH: "Güncellendi.", DELETE: "Silindi." };
 let idareciInviteFlash = null;
+const DR_TYPE_TR = { bilgi: "Bilgi edinme", duzeltme: "Düzeltme", silme: "Silme", anonimlestirme: "Anonimleştirme", disa_aktarma: "Dışa aktarma", itiraz: "İtiraz" };
+const DR_STATUS_TR = { acik: "Açık", tamamlandi: "Tamamlandı", reddedildi: "Reddedildi" };
+/* Telefon maskesi: liste ekranlarında yalnızca son iki hane görünür; WhatsApp bağlantısı çalışmaya devam eder. */
+function maskPhone(p) { const d = String(p || "").replace(/\D/g, ""); if (d.length < 4) return p || ""; return `${d.slice(0, 2)}** *** ** ${d.slice(-2)}`; }
+/* Yalnızca bu cihazda saklanan veriler için standart açıklama + güvenli silme. */
+function localVeriNotuHtml(keys, ne) {
+  return `<div class="msg" style="background:var(--surface-2);border:1px solid var(--line);color:var(--ink);font-size:12.5px;margin-bottom:12px"><strong>Bu veriler yalnızca bu cihazın tarayıcısında saklanır</strong> (${esc(ne)}). Sunucuya gönderilmez, başka cihazdan erişilemez ve yedeklenmez. Oturumu kapatsan da bu cihazda kalır; ortak bilgisayarda işin bitince sil. Tarayıcıya sızan zararlı bir betik bu verilere erişebilir; "yalnızca cihazda" ifadesi "şifreli" anlamına gelmez. <button class="secondary" data-local-purge="${esc(keys.join("|"))}" style="margin:6px 0 0;width:auto;padding:6px 10px">Bu cihazdaki verileri güvenli sil</button></div>`;
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-local-purge]"); if (!b) return;
+  if (!confirm("Bu cihazda saklanan veriler silinecek; geri alınamaz. Devam edilsin mi?")) return;
+  b.dataset.localPurge.split("|").forEach(k => { try { localStorage.removeItem(k); } catch { /* yoksay */ } });
+  toast("Bu cihazdaki veriler silindi."); setTimeout(() => location.reload(), 600);
+});
+async function publishedLegalText(key = "aydinlatma") {
+  const { data } = await sb.from("legal_texts").select("*").eq("key", key).eq("status", "onayli").not("published_at", "is", null).order("version", { ascending: false }).limit(1);
+  return (data || [])[0] || null;
+}
+function legalTextHtml(t) {
+  if (!t) return `<div class="msg" style="background:var(--surface-2);border:1px solid var(--line);color:var(--ink);font-size:12.5px">Aydınlatma metni henüz yayımlanmadı: taslak hukuk danışmanı onayı bekliyor. Yayımlanınca burada görünecek ve kayıt sırasında onay istenecek.</div>`;
+  const row = (l, v) => v ? `<div style="margin-top:6px"><strong>${l}:</strong> ${esc(v)}</div>` : "";
+  return `<div class="card" style="background:var(--surface-2);font-size:13px"><h4 style="margin-top:0">${esc(t.title)} <span style="color:var(--muted);font-weight:400">(sürüm ${t.version}, ${fmtDate(String(t.published_at).slice(0, 10))})</span></h4>
+    <div style="white-space:pre-wrap">${esc(t.body)}</div>
+    ${row("Veri sorumlusu", [t.veri_sorumlusu, t.veri_sorumlusu_adres, t.veri_sorumlusu_eposta].filter(Boolean).join(" · "))}${row("İşleme amacı", t.isleme_amaci)}${row("Hukuki sebep", t.hukuki_sebep)}${row("Aktarılan taraflar", t.alici_kategorileri)}${row("Saklama süresi", t.saklama_suresi)}${row("Haklarınız", t.ilgili_kisi_haklari)}${row("Başvuru yöntemi", t.basvuru_yontemi)}</div>`;
+}
+/* Kayıt sırasında görülen metin sürümünü, oturum kurulunca kaydeder. */
+async function recordPendingConsent(user) {
+  let pending = null; try { pending = JSON.parse(localStorage.getItem("pendingConsent") || "null"); } catch { /* yoksay */ }
+  if (!pending || !user) return;
+  const { error } = await sb.from("consent_records").insert({ user_id: user.id, legal_text_id: pending.id, text_key: pending.key || "aydinlatma", version: pending.version });
+  if (!error || /duplicate/i.test(error.message)) localStorage.removeItem("pendingConsent");
+}
 const AUDIT_TABLE_TR = { teachers: "Personel", monthly_tasks: "Aylık görev", checklist_items: "Teftiş maddesi", committees: "Kurul/komisyon", committee_members: "Kurul üyesi", requests: "Talep", pano_items: "Pano içeriği", discipline_cases: "Disiplin dosyası", discipline_docs: "Disiplin belgesi", ekders_sheets: "Ek ders çizelgesi", lesson_observations: "Ders denetimi", maintenance_items: "Bakım kalemi", subjects: "Ders", classes: "Sınıf", class_subject_hours: "Ders çizelgesi satırı", duty_periods: "Nöbet dönemi", duty_areas: "Nöbet alanı", duty_time_slots: "Nöbet dilimi", idareci_duty_assignments: "İdareci nöbeti", idareci_invites: "İdareci daveti", schools: "Okul ayarları", profiles: "Profil", teacher_blocked_areas: "Yasaklı alan", lesson_periods: "Ders saati", observation_criteria: "Denetim ölçütü" };
 const AUDIT_ACTION_TR = { INSERT: "Eklendi", UPDATE: "Güncellendi", DELETE: "Silindi" };
 /* Ortak mutasyon katmanı: Supabase hatası her zaman kontrol edilir, Türkçe bildirim gösterilir, sonuç nesnesi döner. */
@@ -2556,6 +2756,7 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
   (blockedAll || []).forEach(b => { (blockedByTeacher[b.teacher_id] ??= new Set()).add(b.duty_area_id); });
   const areaLabelById = Object.fromEntries((areas || []).map(a => [a.id, a.label]));
   const editTeacher = editingId ? (teachers || []).find(t => t.id === editingId) : null;
+  if (editTeacher) sb.rpc("log_sensitive_access", { p_table: "teachers", p_record_id: editTeacher.id, p_label: editTeacher.full_name }).then(() => {}, () => {});
 
   content.innerHTML = `
     <div class="card" style="margin-bottom:16px">
@@ -2578,6 +2779,7 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
       <label>İşe başlama tarihi</label>
       ${dateInputHtml("t-hire", editTeacher?.hire_date || "")}
       <div id="t-kidem-hint" style="font-size:11.5px;color:var(--muted);margin:6px 0 12px"></div>
+      <p style="font-size:11.5px;color:var(--muted);margin:8px 0 2px">🔒 Hassas veri: aşağıdaki alanlar yalnızca nöbet uygunluğu için tutulur (teşhis/rapor ayrıntısı kaydedilmez), listelerde gösterilmez; görüntüleme ve değişiklikler İşlem Günlüğü'ne yazılır.</p>
       <div class="check-row"><input type="checkbox" id="t-seniority" ${editTeacher?.seniority_waiver_requested ? "checked" : ""}><label for="t-seniority">Kıdem muafiyeti talep etti (kadın 20 / erkek 25 yıl doldu, istemiyor)</label></div>
       <label>Hamilelik muafiyeti bitiş tarihi <span style="color:var(--muted);font-weight:400">(boş bırak, yoksa)</span></label>
       ${dateInputHtml("t-pregnancy", editTeacher?.pregnancy_exempt_until || "")}
@@ -4909,6 +5111,7 @@ async function renderKelebek(school, content, draftGroups = null, lastExam = nul
   }
 
   content.innerHTML = `
+    ${localVeriNotuHtml([kelebekKey(school)], "sınav oturma planları ve öğrenci listeleri")}
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">Yeni Sınav Oturma Planı</h3>
       <label>Sınav adı</label>
@@ -5702,6 +5905,7 @@ async function renderOgretmenAraclari(profile, school, tool = "analiz", state = 
       <button class="navlink" id="back-dash">← Panele dön</button>
       <div class="eyebrow">Öğretmen Araçları</div>
       <h1>${esc(school.name)}</h1>
+      ${localVeriNotuHtml([oaKey(school, profile)], "sınav analizleri, ölçekler ve oturma planları")}
       <div class="subtitle">🔒 Öğrenci adları ve puanları yalnızca bu tarayıcıda, senin hesabına bağlı saklanır; sunucuya gönderilmez. Listeyi e-Okul'dan kopyalayıp yapıştırman yeterli.</div>
       <div class="subtabs" style="flex-wrap:wrap">${OA_TOOLS.map(t => `<div class="subtab ${t.id === tool ? "active" : ""}" data-oa-tab="${t.id}">${t.label}</div>`).join("")}</div>
       <div id="oa-content"></div>
@@ -9694,7 +9898,9 @@ async function renderPlatformAdmin(profile, formMsg = "") {
       </div>
       <div id="pa-list"><p style="color:var(--muted)">Yükleniyor…</p></div>
     </div>
+      <div id="pa-legal"></div>
   `;
+  renderLegalAdmin(profile, document.getElementById("pa-legal"));
   document.getElementById("back-dash").onclick = () => boot();
 
   document.getElementById("pa-create").onclick = async () => {
@@ -9808,6 +10014,7 @@ async function boot() {
     return;
   }
   if (new URLSearchParams(location.search).get("reset") === "1" || sessionStorage.getItem("pwRecovery") === "1") { renderPasswordReset(); return; }
+  recordPendingConsent(user);
   try {
     const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
     if (aal && aal.nextLevel === "aal2" && aal.currentLevel !== "aal2") { renderMfaChallenge(); return; }
