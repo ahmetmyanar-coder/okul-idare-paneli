@@ -666,6 +666,18 @@ async function renderIdareciList(profile, school, content) {
     sb.from("idareci_invites").select("*").eq("school_id", school.id).is("used_at", null).order("created_at", { ascending: false }),
   ]);
 
+  const [{ data: auditRows }, { data: actorRows }] = await Promise.all([
+    sb.from("audit_log").select("id, actor_id, action, table_name, record_id, label, changed_cols, created_at").eq("school_id", school.id).order("created_at", { ascending: false }).limit(100),
+    sb.from("profiles").select("id, full_name").eq("school_id", school.id),
+  ]);
+  const actorName = Object.fromEntries((actorRows || []).map(p => [p.id, p.full_name]));
+  const auditHtml = `
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin-top:0">İşlem Günlüğü <span style="color:var(--muted);font-weight:400;font-size:12.5px">(son 100 değişiklik; kim, ne zaman, hangi kayıt — içerik değerleri yazılmaz)</span></h3>
+      ${(auditRows || []).length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Zaman</th><th>Kim</th><th>İşlem</th><th>Kayıt</th><th>Değişen alanlar</th></tr></thead><tbody>
+        ${auditRows.map(r => `<tr><td style="white-space:nowrap">${fmtDateTime(r.created_at)}</td><td>${esc(actorName[r.actor_id] || (r.actor_id ? "Bilinmeyen kullanıcı" : "Sistem"))}</td><td>${AUDIT_ACTION_TR[r.action] || esc(r.action)}</td><td>${esc(AUDIT_TABLE_TR[r.table_name] || r.table_name)}${r.label ? `: <strong>${esc(r.label)}</strong>` : ""}</td><td style="font-size:11.5px;color:var(--muted)">${esc((r.changed_cols || []).join(", "))}</td></tr>`).join("")}
+      </tbody></table></div>` : `<p style="color:var(--muted);font-size:13px">Henüz kayıt yok.</p>`}
+    </div>`;
   content.innerHTML = `
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">Mevcut İdareciler (${(idareciler || []).length})</h3>
@@ -703,6 +715,7 @@ async function renderIdareciList(profile, school, content) {
         </div>
       `).join("")}
     </div>` : ""}
+    ${auditHtml}
   `;
 
   document.getElementById("inv-create").onclick = async () => {
@@ -719,7 +732,7 @@ async function renderIdareciList(profile, school, content) {
 
   content.querySelectorAll("[data-cancel-invite]").forEach(b => b.onclick = async () => {
     if (!confirm("Bu daveti iptal etmek istediğine emin misin?")) return;
-    await sb.from("idareci_invites").delete().eq("id", b.dataset.cancelInvite);
+    await mut(sb.from("idareci_invites").delete().eq("id", b.dataset.cancelInvite));
     await renderIdareciList(profile, school, content);
   });
 }
@@ -860,7 +873,7 @@ async function renderPersonelModule(profile, school, tab = "staff") {
 
 async function personelTeachers(school) {
   const { data } = await sb.from("teachers").select("*").eq("school_id", school.id).order("full_name");
-  return data || [];
+  return (data || []).sort((a, b) => (Number(b.is_active !== false) - Number(a.is_active !== false)) || a.full_name.localeCompare(b.full_name, "tr"));
 }
 
 async function renderPersonelStaff(school, content, editingId = null, notice = "") {
@@ -902,7 +915,7 @@ async function renderPersonelStaff(school, content, editingId = null, notice = "
       <button class="primary" id="ps-save">${edit ? "Güncelle" : "Ekle"}</button>
       ${edit ? `<button class="secondary" id="ps-cancel" style="margin-top:8px;width:100%">İptal</button>` : ""}
       <div id="ps-msg"></div>
-      <p style="font-size:12px;color:var(--muted);margin:10px 0 0">Nöbet kotası, muafiyetler, yasaklı alanlar ve davet kodu Nöbet Programı → Öğretmenler sekmesinde; ders yükü Ders Dağıtım'da düzenlenir.</p>
+      <p style="font-size:12px;color:var(--muted);margin:10px 0 0">Nöbet kotası, muafiyetler, yasaklı alanlar ve davet kodu Nöbet Programı → Öğretmenler sekmesinde; ders yükü Ders Dağıtım'da düzenlenir. Okuldan ayrılan personeli silmek yerine <strong>pasifleştir</strong>: nöbet/ders listelerinden çıkar, geçmiş kayıtlar ve belgeler korunur.</p>
     </div>
     <div class="card">
       <h3 style="margin-top:0">Personel Listesi (${teachers.length}) <span style="font-size:12px;font-weight:400;color:var(--muted)">${Object.entries(counts).map(([k, n]) => `${STAFF_TYPE_LABELS[k] || k}: ${n}`).join(" · ")}</span></h3>
@@ -913,12 +926,12 @@ async function renderPersonelStaff(school, content, editingId = null, notice = "
           ${teachers.map(t => { const ky = kidemYili(t.hire_date); return `
             <tr>
               <td><strong>${esc(t.full_name)}</strong></td>
-              <td><span class="pill ${STAFF_TYPE_PILL[t.staff_type] || ""}">${esc(STAFF_TYPE_LABELS[t.staff_type] || t.staff_type)}</span>${t.title ? `<div style="font-size:11.5px;color:var(--muted)">${esc(t.title)}</div>` : ""}</td>
+              <td><span class="pill ${STAFF_TYPE_PILL[t.staff_type] || ""}">${esc(STAFF_TYPE_LABELS[t.staff_type] || t.staff_type)}</span>${t.is_active === false ? ` <span class="pill warn" title="${t.deactivated_at ? esc(fmtDate(t.deactivated_at.slice(0, 10))) + " tarihinde pasifleştirildi" : ""}">Pasif</span>` : ""}${t.title ? `<div style="font-size:11.5px;color:var(--muted)">${esc(t.title)}</div>` : ""}</td>
               <td>${esc(t.branch || "")}${(t.off_days || []).length ? `<div style="font-size:11px;color:var(--muted)">Boş gün: ${t.off_days.map(d => DERS_GUN_KISA[d]).join(", ")}</div>` : ""}</td>
               <td>${t.phone ? `<a href="${waLink(t.phone)}" target="_blank" rel="noopener">${esc(t.phone)}</a>` : ""}</td>
               <td>${t.hire_date ? `${fmtDate(t.hire_date)}${ky !== null ? `<div style="font-size:11.5px;color:var(--muted)">${ky} yıl</div>` : ""}` : ""}</td>
               <td style="font-size:12px">${t.user_id ? `<span style="color:var(--good)">✅ Bağlı</span>` : t.invite_code ? `Davet kodu: <strong style="font-family:ui-monospace,monospace">${esc(t.invite_code)}</strong>` : `<span style="color:var(--muted)">—</span>`}</td>
-              <td class="row-actions"><button data-ps-edit="${t.id}">Düzenle</button><button data-ps-del="${t.id}">Sil</button></td>
+              <td class="row-actions"><button data-ps-edit="${t.id}">Düzenle</button>${t.is_active === false ? `<button data-ps-activate="${t.id}">Etkinleştir</button>` : `<button data-ps-deactivate="${t.id}" title="Nöbet, ders ve diğer listelerden çıkar; kayıtları ve geçmişi korunur">Pasifleştir</button>`}<button data-ps-del="${t.id}">Sil</button></td>
             </tr>`; }).join("") || `<tr><td colspan="7" style="color:var(--muted)">Henüz personel eklenmedi.</td></tr>`}
         </tbody>
       </table>
@@ -958,11 +971,22 @@ async function renderPersonelStaff(school, content, editingId = null, notice = "
   const cancelBtn = document.getElementById("ps-cancel");
   if (cancelBtn) cancelBtn.onclick = () => renderPersonelStaff(school, content);
   content.querySelectorAll("[data-ps-edit]").forEach(b => b.onclick = () => renderPersonelStaff(school, content, b.dataset.psEdit));
+  content.querySelectorAll("[data-ps-deactivate]").forEach(b => b.onclick = async () => {
+    const t = teachers.find(x => x.id === b.dataset.psDeactivate);
+    if (!confirm(`${t.full_name} pasifleştirilsin mi?\n\nNöbet, ders dağıtımı, ek ders, denetim ve LGS listelerinde görünmez; mevcut kayıtları ve geçmişi korunur. İstediğin zaman yeniden etkinleştirebilirsin.`)) return;
+    const { error } = await mut(sb.from("teachers").update({ is_active: false, deactivated_at: new Date().toISOString() }).eq("id", t.id), { ok: `${t.full_name} pasifleştirildi.` });
+    if (!error) await renderPersonelStaff(school, content);
+  });
+  content.querySelectorAll("[data-ps-activate]").forEach(b => b.onclick = async () => {
+    const t = teachers.find(x => x.id === b.dataset.psActivate);
+    const { error } = await mut(sb.from("teachers").update({ is_active: true, deactivated_at: null }).eq("id", t.id), { ok: `${t.full_name} yeniden etkin.` });
+    if (!error) await renderPersonelStaff(school, content);
+  });
   content.querySelectorAll("[data-ps-del]").forEach(b => b.onclick = async () => {
     const t = teachers.find(x => x.id === b.dataset.psDel);
-    if (!confirm(`${t.full_name} silinsin mi? Nöbet, ders dağıtımı, ek ders ve denetim kayıtlarındaki bağlantıları da etkilenir. Okuldan ayrılan personel için silmek yerine "Not" alanına ayrılış tarihini yazmayı düşün.`)) return;
+    if (!confirm(`${t.full_name} KALICI olarak silinsin mi?\n\nNöbet, ders çizelgesi, ek ders, denetim ve LGS koçluk kayıtlarındaki bağlantıları etkilenir; bazı kayıtlar silinir, bazıları öğretmensiz kalır. Okuldan ayrılan personel için "Pasifleştir" önerilir (geçmiş korunur).`)) return;
     const { error } = await sb.from("teachers").delete().eq("id", t.id);
-    if (error) { await renderPersonelStaff(school, content, null, `<div class="msg err">Silinemedi: ${esc(errMsg(error))} — önce bu personele bağlı nöbet/ders kayıtlarını kaldır.</div>`); return; }
+    if (error) { await renderPersonelStaff(school, content, null, `<div class="msg err">Silinemedi: ${esc(errMsg(error))} — bu personele bağlı kayıtlar var; silmek yerine "Pasifleştir" kullan.</div>`); return; }
     await renderPersonelStaff(school, content, null, `<div class="msg ok">${esc(t.full_name)} silindi.</div>`);
   });
 }
@@ -1432,13 +1456,13 @@ async function renderAylik(school, content, editingId = null) {
   if (cancelBtn) cancelBtn.onclick = () => renderAylik(school, content);
 
   content.querySelectorAll("[data-done]").forEach(cb => cb.onchange = async () => {
-    await sb.from("monthly_tasks").update({ is_done: cb.checked }).eq("id", cb.dataset.done);
+    await mut(sb.from("monthly_tasks").update({ is_done: cb.checked }).eq("id", cb.dataset.done), { ok: false });
     await renderAylik(school, content);
   });
   content.querySelectorAll("[data-edit-task]").forEach(b => b.onclick = () => renderAylik(school, content, b.dataset.editTask));
   content.querySelectorAll("[data-del-task]").forEach(b => b.onclick = async () => {
     if (!confirm("Bu görevi silmek istediğine emin misin?")) return;
-    await sb.from("monthly_tasks").delete().eq("id", b.dataset.delTask);
+    await mut(sb.from("monthly_tasks").delete().eq("id", b.dataset.delTask));
     await renderAylik(school, content);
   });
 }
@@ -1577,7 +1601,7 @@ async function renderTeftis(school, content, editingId = null) {
 
   const seedBtn = document.getElementById("seed-btn");
   if (seedBtn) seedBtn.onclick = async () => {
-    await sb.from("checklist_items").insert(missingSeedItems.map((it, idx) => ({ school_id: school.id, ...it, sort_order: total + idx })));
+    await mut(sb.from("checklist_items").insert(missingSeedItems.map((it, idx) => ({ school_id: school.id, ...it, sort_order: total + idx }))));
     await renderTeftis(school, content);
   };
 
@@ -1602,13 +1626,13 @@ async function renderTeftis(school, content, editingId = null) {
   if (cancelBtn) cancelBtn.onclick = () => renderTeftis(school, content);
 
   content.querySelectorAll("[data-done]").forEach(cb => cb.onchange = async () => {
-    await sb.from("checklist_items").update({ is_done: cb.checked }).eq("id", cb.dataset.done);
+    await mut(sb.from("checklist_items").update({ is_done: cb.checked }).eq("id", cb.dataset.done), { ok: false });
     await renderTeftis(school, content);
   });
   content.querySelectorAll("[data-edit-item]").forEach(b => b.onclick = () => renderTeftis(school, content, b.dataset.editItem));
   content.querySelectorAll("[data-del-item]").forEach(b => b.onclick = async () => {
     if (!confirm("Bu maddeyi silmek istediğine emin misin?")) return;
-    await sb.from("checklist_items").delete().eq("id", b.dataset.delItem);
+    await mut(sb.from("checklist_items").delete().eq("id", b.dataset.delItem));
     await renderTeftis(school, content);
   });
 }
@@ -1647,6 +1671,43 @@ const ERR_TR = [
   [/GUN_GECERSIZ/, "Geçersiz gün değeri."],
 ];
 let nobetFlash = null, dersFlash = null, lgsFlash = null;
+
+/* Bildirim (toast): ekran okuyucu için aria-live; hata 7 sn, başarı 2,6 sn. */
+function toast(text, kind = "ok") {
+  let wrap = document.getElementById("toast-wrap");
+  if (!wrap) {
+    wrap = document.createElement("div"); wrap.id = "toast-wrap"; wrap.setAttribute("role", "status"); wrap.setAttribute("aria-live", "polite");
+    wrap.style.cssText = "position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none";
+    document.body.appendChild(wrap);
+  }
+  const t = document.createElement("div");
+  t.className = `msg ${kind}`; t.style.cssText = "box-shadow:0 6px 24px rgba(0,0,0,.18);pointer-events:auto;max-width:min(92vw,520px);margin:0";
+  t.textContent = text; wrap.appendChild(t);
+  setTimeout(() => t.remove(), kind === "err" ? 7000 : 2600);
+}
+const MUT_OK = { POST: "Kaydedildi.", PATCH: "Güncellendi.", DELETE: "Silindi." };
+const AUDIT_TABLE_TR = { teachers: "Personel", monthly_tasks: "Aylık görev", checklist_items: "Teftiş maddesi", committees: "Kurul/komisyon", committee_members: "Kurul üyesi", requests: "Talep", pano_items: "Pano içeriği", discipline_cases: "Disiplin dosyası", discipline_docs: "Disiplin belgesi", ekders_sheets: "Ek ders çizelgesi", lesson_observations: "Ders denetimi", maintenance_items: "Bakım kalemi", subjects: "Ders", classes: "Sınıf", class_subject_hours: "Ders çizelgesi satırı", duty_periods: "Nöbet dönemi", duty_areas: "Nöbet alanı", duty_time_slots: "Nöbet dilimi", idareci_duty_assignments: "İdareci nöbeti", idareci_invites: "İdareci daveti", schools: "Okul ayarları", profiles: "Profil", teacher_blocked_areas: "Yasaklı alan", lesson_periods: "Ders saati", observation_criteria: "Denetim ölçütü" };
+const AUDIT_ACTION_TR = { INSERT: "Eklendi", UPDATE: "Güncellendi", DELETE: "Silindi" };
+/* Ortak mutasyon katmanı: Supabase hatası her zaman kontrol edilir, Türkçe bildirim gösterilir, sonuç nesnesi döner. */
+async function mut(builder, opts = {}) {
+  const res = await builder;
+  if (res?.error) { toast(errMsg(res.error), "err"); return res; }
+  if (opts.ok !== false) toast(opts.ok || MUT_OK[builder?.method] || "İşlem tamamlandı.");
+  return res;
+}
+/* Silme onayı: kaydın adı ve etki kapsamı gösterilir. */
+function confirmDelete(btn, what, scope) {
+  const row = btn?.closest("tr, .list-item, .card");
+  const label = (row?.querySelector("strong, span, td")?.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80);
+  return confirm(`${what}${label ? ` "${label}"` : ""} silinsin mi?${scope ? `\n\n${scope}` : ""}\n\nBu işlem geri alınamaz.`);
+}
+/* Çift tıklama / çift gönderim koruması: aynı düğmeye 700 ms içinde ikinci tık yok sayılır (data-no-guard hariç). */
+document.addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b || b.hasAttribute("data-no-guard")) return;
+  if (Date.now() < (+b.dataset.busyUntil || 0)) { e.stopImmediatePropagation(); e.preventDefault(); return; }
+  b.dataset.busyUntil = String(Date.now() + 700);
+}, true);
 const VERSION_REASON = { etkinlestirme_oncesi: "etkinleştirme öncesi", geri_alma_oncesi: "geri alma öncesi" };
 /* Program sürümleri kartı (nöbet/ders ortak): otomatik yedekler ve "bu sürüme dön". */
 function surumlerHtml(versions, baslik) {
@@ -2310,21 +2371,23 @@ async function renderAyarlar(profile, school, content) {
   document.getElementById("add-slot").onclick = async () => {
     const label = document.getElementById("new-slot").value.trim();
     if (!label) return;
-    await sb.from("duty_time_slots").insert({ school_id: school.id, label, sort_order: (slots || []).length });
+    await mut(sb.from("duty_time_slots").insert({ school_id: school.id, label, sort_order: (slots || []).length }));
     await renderNobet(profile, school, "ayarlar");
   };
   document.getElementById("add-area").onclick = async () => {
     const label = document.getElementById("new-area").value.trim();
     if (!label) return;
-    await sb.from("duty_areas").insert({ school_id: school.id, label, sort_order: (areas || []).length });
+    await mut(sb.from("duty_areas").insert({ school_id: school.id, label, sort_order: (areas || []).length }));
     await renderNobet(profile, school, "ayarlar");
   };
   content.querySelectorAll("[data-del-slot]").forEach(b => b.onclick = async () => {
-    await sb.from("duty_time_slots").delete().eq("id", b.dataset.delSlot);
+    if (!confirmDelete(b, "Zaman dilimi", "Bu dilime bağlı nöbet atamaları da silinir.")) return;
+    await mut(sb.from("duty_time_slots").delete().eq("id", b.dataset.delSlot));
     await renderNobet(profile, school, "ayarlar");
   });
   content.querySelectorAll("[data-del-area]").forEach(b => b.onclick = async () => {
-    await sb.from("duty_areas").delete().eq("id", b.dataset.delArea);
+    if (!confirmDelete(b, "Nöbet alanı", "Bu alana bağlı nöbet atamaları ve yasaklı alan kayıtları da silinir.")) return;
+    await mut(sb.from("duty_areas").delete().eq("id", b.dataset.delArea));
     await renderNobet(profile, school, "ayarlar");
   });
 }
@@ -2348,7 +2411,7 @@ function kidemEsigiDoldu(t) {
 
 async function renderOgretmenler(profile, school, content, editingId = null) {
   const [{ data: teachers }, { data: areas }, { data: blockedAll }] = await Promise.all([
-    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).order("full_name"),
+    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).eq("is_active", true).order("full_name"),
     sb.from("duty_areas").select("*").eq("school_id", school.id).order("sort_order"),
     sb.from("teacher_blocked_areas").select("*"),
   ]);
@@ -2486,9 +2549,9 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
       teacherId = data.id;
     }
     const selectedAreas = Array.from(content.querySelectorAll("#t-blocked .chip.on")).map(c => c.dataset.area);
-    await sb.from("teacher_blocked_areas").delete().eq("teacher_id", teacherId);
+    await mut(sb.from("teacher_blocked_areas").delete().eq("teacher_id", teacherId), { ok: false });
     if (selectedAreas.length) {
-      await sb.from("teacher_blocked_areas").insert(selectedAreas.map(area_id => ({ teacher_id: teacherId, duty_area_id: area_id, area: areaLabelById[area_id] || "" })));
+      await mut(sb.from("teacher_blocked_areas").insert(selectedAreas.map(area_id => ({ teacher_id: teacherId, duty_area_id: area_id, area: areaLabelById[area_id] || "" }))));
     }
     await renderNobet(profile, school, "ogretmenler");
   };
@@ -2501,12 +2564,12 @@ async function renderOgretmenler(profile, school, content, editingId = null) {
   });
   content.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
     if (!confirm("Bu öğretmeni silmek istediğine emin misin?")) return;
-    await sb.from("teachers").delete().eq("id", b.dataset.del);
+    await mut(sb.from("teachers").delete().eq("id", b.dataset.del));
     await renderNobet(profile, school, "ogretmenler");
   });
   content.querySelectorAll("[data-gen-code]").forEach(b => b.onclick = async () => {
     const code = randomInviteCode();
-    await sb.from("teachers").update({ invite_code: code }).eq("id", b.dataset.genCode);
+    await mut(sb.from("teachers").update({ invite_code: code }).eq("id", b.dataset.genCode));
     await renderNobet(profile, school, "ogretmenler");
   });
 }
@@ -2795,7 +2858,7 @@ function lessonDayIndex(rows) {
 
 async function suggestSubstitute(school, assignments, target) {
   const [{ data: teachers }, { data: lessonRows }] = await Promise.all([
-    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]),
+    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).eq("is_active", true),
     sb.from("lesson_assignments").select("teacher_id, day_of_week").eq("school_id", school.id),
   ]);
   const { data: blocked } = await sb.from("teacher_blocked_areas").select("*").in("teacher_id", (teachers || []).map(t => t.id).length ? (teachers || []).map(t => t.id) : ["00000000-0000-0000-0000-000000000000"]);
@@ -2859,7 +2922,7 @@ function weekKeyOf(dateStr) {
 /* Yalnızca hesaplar; veritabanına yazmaz. Sonuç önizlenir, kullanıcı onaylayınca activate_duty_schedule RPC'si tek transaction içinde etkinleştirir. */
 async function generateSchedule(school, period) {
   const [{ data: teachers }, { data: slots }, { data: areas }, { data: existing }, { data: lessonRows }] = await Promise.all([
-    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]),
+    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).eq("is_active", true),
     sb.from("duty_time_slots").select("*").eq("school_id", school.id).order("sort_order"),
     sb.from("duty_areas").select("*").eq("school_id", school.id).order("sort_order"),
     sb.from("duty_assignments").select("*").eq("duty_period_id", period.id),
@@ -3056,7 +3119,7 @@ async function renderIdareciNobeti(profile, school, content, editingId = null) {
   content.querySelectorAll("[data-edit-idareci]").forEach(b => b.onclick = () => renderIdareciNobeti(profile, school, content, b.dataset.editIdareci));
   content.querySelectorAll("[data-del-idareci]").forEach(b => b.onclick = async () => {
     if (!confirm("Bu nöbet kaydını silmek istediğine emin misin?")) return;
-    await sb.from("idareci_duty_assignments").delete().eq("id", b.dataset.delIdareci);
+    await mut(sb.from("idareci_duty_assignments").delete().eq("id", b.dataset.delIdareci));
     await renderIdareciNobeti(profile, school, content);
   });
 }
@@ -3645,13 +3708,13 @@ async function renderDersAyarlar(profile, school, content) {
     const name = document.getElementById("new-class").value.trim();
     if (!name) return;
     if (classes.some(c => c.name.toLocaleLowerCase("tr-TR") === name.toLocaleLowerCase("tr-TR"))) { msg.innerHTML = `<div class="msg err">"${esc(name)}" zaten var.</div>`; return; }
-    await sb.from("classes").insert({ school_id: school.id, name, sort_order: classes.length });
+    await mut(sb.from("classes").insert({ school_id: school.id, name, sort_order: classes.length }));
     await renderDersModule(profile, school, "ayarlar");
   };
   document.getElementById("add-period").onclick = async () => {
     const label = document.getElementById("new-period").value.trim();
     if (!label) return;
-    await sb.from("lesson_periods").insert({ school_id: school.id, label, sort_order: (periods || []).length });
+    await mut(sb.from("lesson_periods").insert({ school_id: school.id, label, sort_order: (periods || []).length }));
     await renderDersModule(profile, school, "ayarlar");
   };
   content.querySelectorAll("[data-del-subject]").forEach(b => b.onclick = async () => {
@@ -3666,11 +3729,11 @@ async function renderDersAyarlar(profile, school, content) {
     const c = classes.find(x => x.id === b.dataset.delClass);
     const n = (rows || []).filter(r => r.class_id === c?.id).length;
     if (n && !confirm(`${c.name} sınıfının çizelgesinde ${n} ders var; sınıf silinince bunlar da silinir. Devam edilsin mi?`)) return;
-    await sb.from("classes").delete().eq("id", b.dataset.delClass);
+    await mut(sb.from("classes").delete().eq("id", b.dataset.delClass));
     await renderDersModule(profile, school, "ayarlar");
   });
   content.querySelectorAll("[data-del-period]").forEach(b => b.onclick = async () => {
-    await sb.from("lesson_periods").delete().eq("id", b.dataset.delPeriod);
+    await mut(sb.from("lesson_periods").delete().eq("id", b.dataset.delPeriod));
     await renderDersModule(profile, school, "ayarlar");
   });
 }
@@ -3719,7 +3782,7 @@ async function renderDersAtamalar(profile, school, content) {
     sb.from("class_subject_hours").select("*, classes(name), subjects(name), teachers(full_name)").eq("school_id", school.id),
     sb.from("classes").select("*").eq("school_id", school.id).order("sort_order"),
     sb.from("subjects").select("*").eq("school_id", school.id).order("sort_order"),
-    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).order("full_name"),
+    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).eq("is_active", true).order("full_name"),
   ]);
 
   if (!classesRaw?.length || !subjects?.length || !teachers?.length) {
@@ -3907,7 +3970,8 @@ async function renderDersAtamalar(profile, school, content) {
     await renderDersModule(profile, school, "atamalar");
   });
   content.querySelectorAll("[data-del-assign]").forEach(b => b.onclick = async () => {
-    await sb.from("class_subject_hours").delete().eq("id", b.dataset.delAssign);
+    if (!confirmDelete(b, "Ders ataması", "Sınıfın çizelgesinden bu ders kaldırılır; program yeniden oluşturulmalı.")) return;
+    await mut(sb.from("class_subject_hours").delete().eq("id", b.dataset.delAssign));
     await renderDersModule(profile, school, "atamalar");
   });
 }
@@ -4202,7 +4266,7 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
     sb.from("subjects").select("*").eq("school_id", school.id).order("sort_order"),
     sb.from("lesson_periods").select("*").eq("school_id", school.id).order("sort_order"),
     sb.from("class_subject_hours").select("*").eq("school_id", school.id),
-    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]),
+    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).eq("is_active", true),
     sb.from("lesson_assignments").select("*").eq("school_id", school.id),
   ]);
 
@@ -4381,7 +4445,7 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
   content.querySelectorAll("[data-toggle-pin]").forEach(btn => btn.onclick = async () => {
     const id = btn.dataset.togglePin;
     const current = (existing || []).find(a => a.id === id);
-    await sb.from("lesson_assignments").update({ is_pinned: !current?.is_pinned }).eq("id", id);
+    await mut(sb.from("lesson_assignments").update({ is_pinned: !current?.is_pinned }).eq("id", id), { ok: false });
     await renderDersProgram(profile, school, content, viewMode, genResult);
   });
 
@@ -4938,15 +5002,15 @@ async function renderTalep(school, content, filterStatus = "hepsi") {
     const id = sel.dataset.statusFor;
     const status = sel.value;
     const resolved_at = (status === "tamamlandi" || status === "reddedildi") ? new Date().toISOString() : null;
-    await sb.from("requests").update({ status, resolved_at }).eq("id", id);
+    await mut(sb.from("requests").update({ status, resolved_at }).eq("id", id));
     await renderTalep(school, content, filterStatus);
   });
   content.querySelectorAll("[data-note-for]").forEach(input => input.onchange = async () => {
-    await sb.from("requests").update({ note: input.value.trim() || null }).eq("id", input.dataset.noteFor);
+    await mut(sb.from("requests").update({ note: input.value.trim() || null }).eq("id", input.dataset.noteFor));
   });
   content.querySelectorAll("[data-del-request]").forEach(b => b.onclick = async () => {
     if (!confirm("Bu talebi silmek istediğine emin misin?")) return;
-    await sb.from("requests").delete().eq("id", b.dataset.delRequest);
+    await mut(sb.from("requests").delete().eq("id", b.dataset.delRequest));
     await renderTalep(school, content, filterStatus);
   });
 }
@@ -5200,7 +5264,7 @@ async function renderPlanlama(school, content, activeId = null) {
   content.querySelectorAll("[data-del-committee]").forEach(b => b.onclick = async (e) => {
     e.stopPropagation();
     if (!confirm("Bu kurulu (ve tüm üye/toplantı kayıtlarını) silmek istediğine emin misin?")) return;
-    await sb.from("committees").delete().eq("id", b.dataset.delCommittee);
+    await mut(sb.from("committees").delete().eq("id", b.dataset.delCommittee));
     await renderPlanlama(school, content, activeId === b.dataset.delCommittee ? null : activeId);
   });
 
@@ -5287,11 +5351,12 @@ async function renderCommitteeDetail(school, committee, el) {
     }
     const role = document.getElementById("m-role").value.trim() || null;
     if (!member_name) return;
-    await sb.from("committee_members").insert({ school_id: school.id, committee_id: committee.id, member_name, teacher_id, role });
+    await mut(sb.from("committee_members").insert({ school_id: school.id, committee_id: committee.id, member_name, teacher_id, role }));
     await renderCommitteeDetail(school, committee, el);
   };
   el.querySelectorAll("[data-del-member]").forEach(b => b.onclick = async () => {
-    await sb.from("committee_members").delete().eq("id", b.dataset.delMember);
+    if (!confirmDelete(b, "Kurul üyesi", "")) return;
+    await mut(sb.from("committee_members").delete().eq("id", b.dataset.delMember));
     await renderCommitteeDetail(school, committee, el);
   });
   document.getElementById("mt-save").onclick = async () => {
@@ -5300,11 +5365,12 @@ async function renderCommitteeDetail(school, committee, el) {
     const decisions = document.getElementById("mt-decisions").value.trim() || null;
     const msg = document.getElementById("detail-msg");
     if (!meeting_date) { msg.innerHTML = `<div class="msg err">Tarih gerekli.</div>`; return; }
-    await sb.from("committee_meetings").insert({ school_id: school.id, committee_id: committee.id, meeting_date, agenda, decisions });
+    await mut(sb.from("committee_meetings").insert({ school_id: school.id, committee_id: committee.id, meeting_date, agenda, decisions }));
     await renderCommitteeDetail(school, committee, el);
   };
   el.querySelectorAll("[data-del-meeting]").forEach(b => b.onclick = async () => {
-    await sb.from("committee_meetings").delete().eq("id", b.dataset.delMeeting);
+    if (!confirmDelete(b, "Toplantı kaydı", "")) return;
+    await mut(sb.from("committee_meetings").delete().eq("id", b.dataset.delMeeting));
     await renderCommitteeDetail(school, committee, el);
   });
 }
@@ -5817,7 +5883,7 @@ async function renderDenetimModule(profile, school, state = { tab: "kayitlar" })
   const [criteria, { data: obsList }, { data: teachers }] = await Promise.all([
     denetimEnsureCriteria(school),
     sb.from("lesson_observations").select("*").eq("school_id", school.id).order("observed_on", { ascending: false }).order("created_at", { ascending: false }),
-    sb.from("teachers").select("id, full_name, branch, hire_date, is_idareci").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).order("full_name"),
+    sb.from("teachers").select("id, full_name, branch, hire_date, is_idareci").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).eq("is_active", true).order("full_name"),
   ]);
   const active = criteria.filter(c => c.is_active);
   const today = toLocalISO(new Date());
@@ -5848,13 +5914,13 @@ async function renderDenetimModule(profile, school, state = { tab: "kayitlar" })
     content.querySelectorAll("[data-done]").forEach(b => b.onclick = async () => {
       const note = prompt("Öğretmenin geri bildirimi / yapılan çalışma (isteğe bağlı):", "") ;
       if (note === null) return;
-      await sb.from("lesson_observations").update({ followup_done: true, followup_note: note.trim() || null, updated_at: new Date().toISOString() }).eq("id", b.dataset.done);
+      await mut(sb.from("lesson_observations").update({ followup_done: true, followup_note: note.trim() || null, updated_at: new Date().toISOString() }).eq("id", b.dataset.done));
       await rerender();
     });
     content.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
       const o = list.find(x => x.id === b.dataset.del);
       if (!confirm(`${o.teacher_name} — ${fmtDate(o.observed_on)} denetim kaydı silinsin mi?`)) return;
-      await sb.from("lesson_observations").delete().eq("id", o.id);
+      await mut(sb.from("lesson_observations").delete().eq("id", o.id));
       await rerender();
     });
     return;
@@ -6172,7 +6238,7 @@ async function renderEkdersList(profile, school, content) {
   content.querySelectorAll("[data-del-sheet]").forEach(b => b.onclick = async () => {
     const s = sheets.find(x => x.id === b.dataset.delSheet);
     if (!confirm(`"${s.title}" çizelgesini tüm satırlarıyla silmek istediğine emin misin?`)) return;
-    await sb.from("ekders_sheets").delete().eq("id", s.id);
+    await mut(sb.from("ekders_sheets").delete().eq("id", s.id));
     await renderEkdersList(profile, school, content);
   });
   document.getElementById("es-save").onclick = async () => {
@@ -6310,7 +6376,7 @@ async function renderEkdersSheet(profile, school, content, sheetId) {
   document.getElementById("ek-fill").onclick = async () => {
     const msg = document.getElementById("ek-rmsg");
     const [{ data: teachers }, { data: profs }, { data: csh }, { data: duties }] = await Promise.all([
-      sb.from("teachers").select("id, full_name, branch, is_idareci").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).order("full_name"),
+      sb.from("teachers").select("id, full_name, branch, is_idareci").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).eq("is_active", true).order("full_name"),
       sb.from("profiles").select("id, full_name, role").eq("school_id", school.id).neq("role", "ogretmen"),
       sb.from("class_subject_hours").select("teacher_id, weekly_hours").eq("school_id", school.id),
       sb.from("duty_assignments").select("teacher_id").gte("duty_date", toLocalISO(new Date(Date.now() - 45 * 86400000))),
@@ -6349,7 +6415,7 @@ async function renderEkdersSheet(profile, school, content, sheetId) {
     ]);
     const err = results.find(x => x && x.error);
     if (err) { msg.innerHTML = `<div class="msg err">${esc(errMsg(err.error))}</div>`; return; }
-    await sb.from("ekders_sheets").update({ updated_at: new Date().toISOString() }).eq("id", sheetId);
+    await mut(sb.from("ekders_sheets").update({ updated_at: new Date().toISOString() }).eq("id", sheetId));
     await renderEkdersSheet(profile, school, content, sheetId);
   };
   document.getElementById("ek-save-settings").onclick = async () => {
@@ -7071,7 +7137,7 @@ async function renderDisiplinList(profile, school, content, filter = "acik") {
   content.querySelectorAll("[data-del-case]").forEach(b => b.onclick = async () => {
     const c = rows.find(x => x.id === b.dataset.delCase);
     if (!confirm(`${disCaseNo(c)} numaralı dosyayı (${c.student_name}) tüm belgeleriyle birlikte kalıcı olarak silmek istediğine emin misin?`)) return;
-    await sb.from("discipline_cases").delete().eq("id", c.id);
+    await mut(sb.from("discipline_cases").delete().eq("id", c.id));
     await renderDisiplinList(profile, school, content, filter);
   });
   document.getElementById("dc-save").onclick = async () => {
@@ -7260,7 +7326,7 @@ async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
 
   document.getElementById("dis-back-list").onclick = () => renderDisiplinModule(profile, school);
   content.querySelectorAll("[data-stage]").forEach(el => el.onclick = async () => {
-    await sb.from("discipline_cases").update({ stage: el.dataset.stage, updated_at: new Date().toISOString() }).eq("id", caseId);
+    await mut(sb.from("discipline_cases").update({ stage: el.dataset.stage, updated_at: new Date().toISOString() }).eq("id", caseId));
     await rerender();
   });
 
@@ -7305,7 +7371,7 @@ async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
     if (docTpl.key === "mudur_onayi" && data.tarih) patch.approval_date = data.tarih;
     if (docTpl.key === "ilce_ust_yazi" && data.tarih) { if (kase.appeal_on) patch.appeal_sent_on = data.tarih; else patch.ilce_sent_on = data.tarih; }
     if (docTpl.key === "tedbir_karari") { if (data.baslangic) patch.tedbir_start = data.baslangic; if (data.bitis) patch.tedbir_end = data.bitis; }
-    await sb.from("discipline_cases").update(patch).eq("id", caseId);
+    await mut(sb.from("discipline_cases").update(patch).eq("id", caseId));
     await rerender({ newDoc: null, openDocId: saved.id });
   };
 
@@ -7313,7 +7379,7 @@ async function renderDisiplinCase(profile, school, content, caseId, ui = {}) {
   content.querySelectorAll("[data-open-doc]").forEach(b => b.onclick = () => openDoc((docs || []).find(d => d.id === b.dataset.openDoc)));
   content.querySelectorAll("[data-del-doc]").forEach(b => b.onclick = async () => {
     if (!confirm("Bu belgeyi dosyadan silmek istediğine emin misin?")) return;
-    await sb.from("discipline_docs").delete().eq("id", b.dataset.delDoc);
+    await mut(sb.from("discipline_docs").delete().eq("id", b.dataset.delDoc));
     await rerender({ newDoc: null });
   });
   document.getElementById("dd-dizi").onclick = () => disShowPreview(document.getElementById("dis-preview"), disDiziPusulasiHtml(school, kase, docs || []), `${disCaseNo(kase).replace("/", "-")} Dizi Pusulası`);
@@ -7587,7 +7653,7 @@ async function renderBakim(profile, school, content, state = {}) {
     const r = rows.find(x => x.id === b.dataset.delBakim);
     const n = logsByItem[b.dataset.delBakim]?.length || 0;
     if (!confirm(`"${r?.name}" kalemini${n ? ` ve ${n} bakım geçmişi kaydını` : ""} silmek istediğine emin misin?`)) return;
-    await sb.from("maintenance_items").delete().eq("id", b.dataset.delBakim);
+    await mut(sb.from("maintenance_items").delete().eq("id", b.dataset.delBakim));
     await rerender({ editingId: null, logItemId: null, historyItemId: null });
   });
   content.querySelectorAll("[data-log-for]").forEach(b => b.onclick = () => rerender({ logItemId: logItemId === b.dataset.logFor ? null : b.dataset.logFor, historyItemId: null }));
@@ -7608,7 +7674,7 @@ async function renderBakim(profile, school, content, state = {}) {
     if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     // Geriye dönük (eski tarihli) bir kayıt giriliyorsa son yapılma tarihi geri gitmesin.
     const newLast = !item.last_done_on || done_on > item.last_done_on ? done_on : item.last_done_on;
-    await sb.from("maintenance_items").update({ last_done_on: newLast }).eq("id", logItemId);
+    await mut(sb.from("maintenance_items").update({ last_done_on: newLast }).eq("id", logItemId));
     await rerender({ logItemId: null, historyItemId: logItemId });
   };
   const blCancel = document.getElementById("bl-cancel");
@@ -7616,7 +7682,7 @@ async function renderBakim(profile, school, content, state = {}) {
 
   content.querySelectorAll("[data-del-log]").forEach(b => b.onclick = async () => {
     if (!confirm("Bu bakım geçmişi kaydını silmek istediğine emin misin?")) return;
-    await sb.from("maintenance_logs").delete().eq("id", b.dataset.delLog);
+    await mut(sb.from("maintenance_logs").delete().eq("id", b.dataset.delLog));
     await rerender({});
   });
 }
@@ -7689,7 +7755,7 @@ function renderBakimGecmis(school, rows, logs, content, rerender) {
   if (printBtn) printBtn.onclick = () => window.print();
   content.querySelectorAll("[data-del-log]").forEach(b => b.onclick = async () => {
     if (!confirm("Bu bakım geçmişi kaydını silmek istediğine emin misin?")) return;
-    await sb.from("maintenance_logs").delete().eq("id", b.dataset.delLog);
+    await mut(sb.from("maintenance_logs").delete().eq("id", b.dataset.delLog));
     await rerender({});
   });
 }
@@ -7743,7 +7809,7 @@ async function renderLgsOgrenciler(profile, school, content, editingId = null) {
   const [{ data: students }, { data: classes }, { data: teachers }] = await Promise.all([
     sb.from("lgs_students").select("*").eq("school_id", school.id).order("full_name"),
     sb.from("classes").select("*").eq("school_id", school.id).order("sort_order"),
-    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).order("full_name"),
+    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).eq("is_active", true).order("full_name"),
   ]);
   const classById = Object.fromEntries((classes || []).map(c => [c.id, c.name]));
   const teacherById = Object.fromEntries((teachers || []).map(t => [t.id, t.full_name]));
@@ -7832,7 +7898,8 @@ async function renderLgsOgrenciler(profile, school, content, editingId = null) {
   if (cancelBtn) cancelBtn.onclick = () => renderLgsOgrenciler(profile, school, content);
   content.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => renderLgsOgrenciler(profile, school, content, b.dataset.edit));
   content.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
-    await sb.from("lgs_students").delete().eq("id", b.dataset.del);
+    if (!confirmDelete(b, "Öğrenci", "Öğrencinin tüm deneme sonuçları, konu hataları ve görevleri de silinir. Okuldan ayrıldıysa silmek yerine koçunu boşaltıp not düşmeyi düşün.")) return;
+    await mut(sb.from("lgs_students").delete().eq("id", b.dataset.del));
     await renderLgsOgrenciler(profile, school, content);
   });
 }
@@ -7886,7 +7953,7 @@ async function renderLgsDersler(profile, school, content, activeSubjectId = null
   if (!isIdareci) return;
   const seedBtn = document.getElementById("seed-subjects");
   if (seedBtn) seedBtn.onclick = async () => {
-    await sb.from("lgs_subjects").insert(STANDARD_LGS_SUBJECTS.map((s, i) => ({ school_id: school.id, name: s.name, question_count: s.question_count, sort_order: i })));
+    await mut(sb.from("lgs_subjects").insert(STANDARD_LGS_SUBJECTS.map((s, i) => ({ school_id: school.id, name: s.name, question_count: s.question_count, sort_order: i }))));
     await renderLgsDersler(profile, school, content);
   };
   document.getElementById("add-subj").onclick = async () => {
@@ -7894,11 +7961,12 @@ async function renderLgsDersler(profile, school, content, activeSubjectId = null
     const count = Number(document.getElementById("new-subj-count").value);
     const msg = document.getElementById("subj-msg");
     if (!name || !count || count < 1) { msg.innerHTML = `<div class="msg err">Ders adı ve geçerli soru sayısı gerekli.</div>`; return; }
-    await sb.from("lgs_subjects").insert({ school_id: school.id, name, question_count: count, sort_order: (subjects || []).length });
+    await mut(sb.from("lgs_subjects").insert({ school_id: school.id, name, question_count: count, sort_order: (subjects || []).length }));
     await renderLgsDersler(profile, school, content);
   };
   content.querySelectorAll("[data-del-subj]").forEach(b => b.onclick = async () => {
-    await sb.from("lgs_subjects").delete().eq("id", b.dataset.delSubj);
+    if (!confirmDelete(b, "LGS dersi", "Bu derse ait tüm deneme sonuçları ve konular silinir.")) return;
+    await mut(sb.from("lgs_subjects").delete().eq("id", b.dataset.delSubj));
     await renderLgsDersler(profile, school, content);
   });
 }
@@ -7931,18 +7999,19 @@ async function renderLgsTopicList(profile, school, el, subjectId, subjectName, o
   if (!isIdareci) return;
   const seedTopicsBtn = document.getElementById("seed-topics");
   if (seedTopicsBtn) seedTopicsBtn.onclick = async () => {
-    await sb.from("lgs_topics").insert(standardTopics.map((name, i) => ({ school_id: school.id, lgs_subject_id: subjectId, name, sort_order: i })));
+    await mut(sb.from("lgs_topics").insert(standardTopics.map((name, i) => ({ school_id: school.id, lgs_subject_id: subjectId, name, sort_order: i }))));
     await onChange();
   };
   document.getElementById("add-topic").onclick = async () => {
     const name = document.getElementById("new-topic-name").value.trim();
     const msg = document.getElementById("topic-msg");
     if (!name) { msg.innerHTML = `<div class="msg err">Konu adı gerekli.</div>`; return; }
-    await sb.from("lgs_topics").insert({ school_id: school.id, lgs_subject_id: subjectId, name, sort_order: (topics || []).length });
+    await mut(sb.from("lgs_topics").insert({ school_id: school.id, lgs_subject_id: subjectId, name, sort_order: (topics || []).length }));
     await onChange();
   };
   el.querySelectorAll("[data-del-topic]").forEach(b => b.onclick = async () => {
-    await sb.from("lgs_topics").delete().eq("id", b.dataset.delTopic);
+    if (!confirmDelete(b, "Konu", "Bu konuya girilmiş hata sayıları silinir.")) return;
+    await mut(sb.from("lgs_topics").delete().eq("id", b.dataset.delTopic));
     await onChange();
   });
 }
@@ -7996,7 +8065,8 @@ async function renderLgsDenemeler(profile, school, content, activeExamId = null)
   content.querySelectorAll("[data-open-exam]").forEach(el => el.onclick = () => renderLgsDenemeler(profile, school, content, el.dataset.openExam));
   content.querySelectorAll("[data-del-exam]").forEach(b => b.onclick = async (ev) => {
     ev.stopPropagation();
-    await sb.from("lgs_mock_exams").delete().eq("id", b.dataset.delExam);
+    if (!confirmDelete(b, "Deneme", "Bu denemeye girilmiş tüm sonuçlar silinir.")) return;
+    await mut(sb.from("lgs_mock_exams").delete().eq("id", b.dataset.delExam));
     await renderLgsDenemeler(profile, school, content);
   });
   if (activeExam) {
@@ -8518,11 +8588,12 @@ async function renderLgsGorevler(profile, school, content, formStudentId = null)
     await renderLgsGorevler(profile, school, content, studentId);
   };
   content.querySelectorAll("[data-advance]").forEach(b => b.onclick = async () => {
-    await sb.from("lgs_study_tasks").update({ status: b.dataset.to }).eq("id", b.dataset.advance);
+    await mut(sb.from("lgs_study_tasks").update({ status: b.dataset.to }).eq("id", b.dataset.advance));
     await renderLgsGorevler(profile, school, content, formStudentId);
   });
   content.querySelectorAll("[data-del-task]").forEach(b => b.onclick = async () => {
-    await sb.from("lgs_study_tasks").delete().eq("id", b.dataset.delTask);
+    if (!confirmDelete(b, "Görev", "")) return;
+    await mut(sb.from("lgs_study_tasks").delete().eq("id", b.dataset.delTask));
     await renderLgsGorevler(profile, school, content, formStudentId);
   });
 }
@@ -8627,7 +8698,7 @@ async function renderLgsOzet(profile, school, content) {
   }
   const [{ data: students }, { data: teachers }, { data: results }, { data: tasks }, { data: exams }, { data: lgsSubjects }] = await Promise.all([
     sb.from("lgs_students").select("*").eq("school_id", school.id),
-    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]),
+    sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]).eq("is_active", true),
     sb.from("lgs_mock_exam_results").select("*").eq("school_id", school.id),
     sb.from("lgs_study_tasks").select("*").eq("school_id", school.id),
     sb.from("lgs_mock_exams").select("*").eq("school_id", school.id),
@@ -9079,7 +9150,7 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
   }
   const genBtn = document.getElementById("gen-token");
   if (genBtn) genBtn.onclick = async () => {
-    await sb.from("schools").update({ display_token: crypto.randomUUID() }).eq("id", school.id);
+    await mut(sb.from("schools").update({ display_token: crypto.randomUUID() }).eq("id", school.id));
     await renderPano(profile, school, content, typeFilter, statusFilter);
   };
   const regenBtn = document.getElementById("regen-token");
@@ -9087,7 +9158,7 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
     if (!confirm("Görüntüleme linki yenilenecek.\n\n• Eski link hemen geçersiz olur.\n• Koridordaki ekranda yeni linki açman gerekir.\n• PIN ayarı korunur.\n\nDevam edilsin mi?")) return;
     const newToken = crypto.randomUUID();
     try { const oldPin = localStorage.getItem(`pano_pin_${schoolRow.display_token}`); if (oldPin) localStorage.setItem(`pano_pin_${newToken}`, oldPin); } catch { /* yoksay */ }
-    await sb.from("schools").update({ display_token: newToken }).eq("id", school.id);
+    await mut(sb.from("schools").update({ display_token: newToken }).eq("id", school.id));
     await renderPano(profile, school, content, typeFilter, statusFilter);
   };
   const pinSaveBtn = document.getElementById("pano-pin-save");
@@ -9190,14 +9261,14 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
   content.querySelectorAll("[data-toggle-status]").forEach(b => b.onclick = async () => {
     const item = (items || []).find(i => i.id === b.dataset.toggleStatus);
     const newStatus = item.status === "yayinda" ? "taslak" : "yayinda";
-    await sb.from("pano_items").update({ status: newStatus, published_at: newStatus === "yayinda" ? new Date().toISOString() : item.published_at }).eq("id", item.id);
+    await mut(sb.from("pano_items").update({ status: newStatus, published_at: newStatus === "yayinda" ? new Date().toISOString() : item.published_at }).eq("id", item.id));
     await renderPano(profile, school, content, typeFilter, statusFilter);
   });
   content.querySelectorAll("[data-del-item]").forEach(b => b.onclick = async () => {
     if (!confirm("Bu içeriği silmek istediğine emin misin?")) return;
     const item = (items || []).find(i => i.id === b.dataset.delItem);
     if (item?.media_path) await sb.storage.from("pano-media").remove([item.media_path]);
-    await sb.from("pano_items").delete().eq("id", item.id);
+    await mut(sb.from("pano_items").delete().eq("id", item.id));
     await renderPano(profile, school, content, typeFilter, statusFilter);
   });
 }
@@ -9556,7 +9627,7 @@ async function renderPlatformAdmin(profile, formMsg = "") {
   listEl.querySelectorAll("[data-regen-school]").forEach(btn => {
     btn.onclick = async () => {
       btn.disabled = true;
-      await sb.from("schools").update({ invite_code: randomInviteCode() }).eq("id", btn.dataset.regenSchool);
+      await mut(sb.from("schools").update({ invite_code: randomInviteCode() }).eq("id", btn.dataset.regenSchool));
       await renderPlatformAdmin(profile);
     };
   });
