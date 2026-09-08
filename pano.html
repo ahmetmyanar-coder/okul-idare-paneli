@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
 <title>Okul Panosu</title>
 <style>
   :root{
@@ -109,23 +110,12 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-function toEmbedUrl(url) {
-  try {
-    const u = new URL(url);
-    if (u.hostname.includes("youtu.be")) {
-      return `https://www.youtube.com/embed/${u.pathname.slice(1)}?autoplay=1&mute=1&controls=0&rel=0`;
-    }
-    if (u.hostname.includes("youtube.com")) {
-      const id = u.searchParams.get("v");
-      if (id) return `https://www.youtube.com/embed/${id}?autoplay=1&mute=1&controls=0&rel=0`;
-      if (u.pathname.startsWith("/embed/")) return `${url}${url.includes("?") ? "&" : "?"}autoplay=1&mute=1&controls=0`;
-    }
-    if (u.hostname.includes("vimeo.com")) {
-      const id = u.pathname.split("/").filter(Boolean).pop();
-      return `https://player.vimeo.com/video/${id}?autoplay=1&muted=1`;
-    }
-  } catch (e) { /* fall through */ }
-  return url;
+/* Gömülü video: sunucu (get_published_pano) yalnızca izin listesinden geçen sağlayıcı+video kimliği gönderir; burada yeniden doğrulanır. */
+function embedSrc(item) {
+  const id = String(item.media_video_id || "");
+  if (item.media_provider === "youtube" && /^[A-Za-z0-9_-]{6,20}$/.test(id)) return `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&mute=1&controls=0&rel=0`;
+  if (item.media_provider === "vimeo" && /^[0-9]{5,12}$/.test(id)) return `https://player.vimeo.com/video/${id}?autoplay=1&muted=1`;
+  return null;
 }
 
 function clockText() {
@@ -157,8 +147,10 @@ function renderSlide(item) {
   } else if (item.type === "medya") {
     slideClass += " media-slide";
     let mediaEl = "";
-    if (item.media_kind === "embed_video" && item.media_url) {
-      mediaEl = `<iframe src="${esc(toEmbedUrl(item.media_url))}" allow="autoplay" allowfullscreen></iframe>`;
+    if (item.media_kind === "embed_video" && embedSrc(item)) {
+      mediaEl = `<iframe src="${esc(embedSrc(item))}" sandbox="allow-scripts allow-same-origin allow-presentation" allow="autoplay; fullscreen" referrerpolicy="no-referrer" allowfullscreen title="${esc(item.title || "Video")}"></iframe>`;
+    } else if (item.media_kind === "embed_video") {
+      mediaEl = `<div class="slide-body" style="display:flex;align-items:center;justify-content:center;color:var(--muted)">Video bağlantısı doğrulanamadı</div>`;
     } else if (item.media_kind === "upload_video" && item.media_path) {
       mediaEl = `<video src="${esc(panoUrl(item.media_path))}" autoplay muted playsinline></video>`;
     } else if (item.media_path) {

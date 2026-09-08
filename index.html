@@ -8818,10 +8818,27 @@ async function renderPanoModule(profile, school) {
   await renderPano(profile, school, document.getElementById("pano-content"));
 }
 
+/* Gömülü video izin listesi: yalnızca https YouTube/Vimeo; yalnızca video kimliği kullanılır. Sunucuda aynı kural pano_parse_embed() ile uygulanır. */
+function panoParseEmbed(url) {
+  let u;
+  try { u = new URL(String(url || "").trim()); } catch { return { ok: false, reason: "Geçerli bir bağlantı değil" }; }
+  if (u.protocol !== "https:") return { ok: false, reason: "Yalnızca https:// ile başlayan bağlantılar kabul edilir" };
+  const host = u.hostname.toLowerCase().replace(/^(www|m)\./, "");
+  const idOk = s => /^[A-Za-z0-9_-]{6,20}$/.test(s || "");
+  if (host === "youtu.be") { const id = u.pathname.split("/").filter(Boolean)[0]; if (idOk(id)) return { ok: true, provider: "youtube", id }; }
+  if (host === "youtube.com" || host === "youtube-nocookie.com") {
+    const v = u.searchParams.get("v"); if (u.pathname === "/watch" && idOk(v)) return { ok: true, provider: "youtube", id: v };
+    const m = u.pathname.match(/^\/(?:embed|shorts|live)\/([A-Za-z0-9_-]{6,20})(?:\/|$)/); if (m) return { ok: true, provider: "youtube", id: m[1] };
+  }
+  if (host === "vimeo.com" || host === "player.vimeo.com") { const m = u.pathname.match(/^\/(?:video\/)?(\d{5,12})(?:\/|$)/); if (m) return { ok: true, provider: "vimeo", id: m[1] }; }
+  return { ok: false, reason: "Yalnızca YouTube ve Vimeo bağlantıları destekleniyor (örn. https://www.youtube.com/watch?v=… veya https://vimeo.com/…)" };
+}
+function panoEmbedSrc(p) { return p.provider === "youtube" ? `https://www.youtube-nocookie.com/embed/${p.id}?autoplay=1&mute=1&controls=0&rel=0` : `https://player.vimeo.com/video/${p.id}?autoplay=1&muted=1`; }
+
 function renderPanoMediaInput(kind, existing) {
   const el = document.getElementById("p-media-input");
   if (kind === "embed_video") {
-    el.innerHTML = `<label>YouTube/Vimeo linki</label><input id="p-media-url" value="${esc(existing?.media_url || "")}" placeholder="https://www.youtube.com/watch?v=...">`;
+    el.innerHTML = `<label>YouTube/Vimeo linki <span style="color:var(--muted);font-weight:400">(yalnızca https; sistem sadece video kimliğini saklar)</span></label><input id="p-media-url" type="url" value="${esc(existing?.media_url || "")}" placeholder="https://www.youtube.com/watch?v=...">`;
   } else {
     const limit = kind === "upload_video" ? "100MB" : "10MB";
     const accept = kind === "upload_video" ? "video/*" : "image/*";
@@ -8955,6 +8972,7 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
       <div id="pano-pin-msg"></div>
     </div>` : ""}
 
+    <div id="pano-embed-review"></div>
     ${displayLink ? `
     <div class="card" style="margin-bottom:16px">
       <h3 style="margin-top:0">Canlı Önizleme</h3>
@@ -9012,6 +9030,17 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
   const typeSelect = document.getElementById("p-type");
   if (!editItem) typeSelect.onchange = (ev) => renderPanoFormFields(null, ev.target.value);
 
+  const reviewWrap = document.getElementById("pano-embed-review");
+  if (reviewWrap) {
+    const bad = (items || []).filter(i => i.media_kind === "embed_video" && !panoParseEmbed(i.media_url).ok);
+    reviewWrap.innerHTML = bad.length ? `
+      <div class="card" style="margin-bottom:16px;border-color:var(--warn)">
+        <h3 style="margin-top:0">⚠️ İzin listesine uymayan gömülü videolar (${bad.length})</h3>
+        <p style="font-size:12.5px;margin:0 0 8px">Bu kayıtlar koridor ekranına gönderilmez; silinmez, sen düzeltirsin. Yalnızca https YouTube/Vimeo bağlantıları kabul edilir.</p>
+        ${bad.map(i => `<div class="list-item"><span><strong>${esc(i.title)}</strong> <span class="pill ${i.status === "yayinda" ? "warn" : ""}">${i.status === "yayinda" ? "Yayında" : "Taslak"}</span><div style="font-size:12px;color:var(--muted)">${esc(panoParseEmbed(i.media_url).reason)}: <code>${esc(String(i.media_url || "").slice(0, 80))}</code></div></span><div class="row-actions"><button data-edit-item="${i.id}">Düzenle</button></div></div>`).join("")}
+      </div>` : "";
+    reviewWrap.querySelectorAll("[data-edit-item]").forEach(b => b.onclick = () => renderPano(profile, school, content, typeFilter, statusFilter, b.dataset.editItem));
+  }
   const genBtn = document.getElementById("gen-token");
   if (genBtn) genBtn.onclick = async () => {
     await sb.from("schools").update({ display_token: crypto.randomUUID() }).eq("id", school.id);
@@ -9019,7 +9048,7 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
   };
   const regenBtn = document.getElementById("regen-token");
   if (regenBtn) regenBtn.onclick = async () => {
-    if (!confirm("Eski link artık çalışmayacak, koridordaki ekranı yeni linkle güncellemen gerekecek. Devam?")) return;
+    if (!confirm("Görüntüleme linki yenilenecek.\n\n• Eski link hemen geçersiz olur.\n• Koridordaki ekranda yeni linki açman gerekir.\n• PIN ayarı korunur.\n\nDevam edilsin mi?")) return;
     const newToken = crypto.randomUUID();
     try { const oldPin = localStorage.getItem(`pano_pin_${schoolRow.display_token}`); if (oldPin) localStorage.setItem(`pano_pin_${newToken}`, oldPin); } catch { /* yoksay */ }
     await sb.from("schools").update({ display_token: newToken }).eq("id", school.id);
@@ -9091,7 +9120,9 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
       if (kind === "embed_video") {
         const url = document.getElementById("p-media-url").value.trim();
         if (!url) { msg.innerHTML = `<div class="msg err">Link gerekli.</div>`; return; }
-        payload.media_url = url;
+        const parsed = panoParseEmbed(url);
+        if (!parsed.ok) { msg.innerHTML = `<div class="msg err">Bağlantı kabul edilmedi: ${esc(parsed.reason)}.</div>`; return; }
+        payload.media_url = parsed.provider === "youtube" ? `https://www.youtube.com/watch?v=${parsed.id}` : `https://vimeo.com/${parsed.id}`;
         payload.media_path = null;
       } else {
         const fileInput = document.getElementById("p-media-file");
@@ -9109,7 +9140,7 @@ async function renderPano(profile, school, content, typeFilter = "hepsi", status
     const { error } = editItem
       ? await sb.from("pano_items").update(payload).eq("id", editItem.id)
       : await sb.from("pano_items").insert({ ...payload, created_by: profile.id, sort_order: (items || []).length });
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
+    if (error) { msg.innerHTML = `<div class="msg err">${/PANO_URL_GECERSIZ/.test(error.message) ? "Sunucu bağlantıyı reddetti: yalnızca https:// ile başlayan YouTube veya Vimeo bağlantısı kabul edilir." : "Kaydedilemedi: " + esc(error.message)}</div>`; return; }
     await renderPano(profile, school, content, typeFilter, statusFilter);
   };
 
