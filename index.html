@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://kwowxdunvwsxwghbdmdk.supabase.co" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preload" href="app.js" as="script">
 <title>Okul İdare Paneli</title>
 <style>
   :root {
@@ -154,11 +157,31 @@
   .faq-item .faq-answer { padding: 0 14px 14px; font-size: 13.5px; color: var(--ink-soft); line-height: 1.6; }
   .faq-cat { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 0 8px; }
   .faq-cat:first-child { margin-top: 0; }
+
+  /* --- erişilebilirlik ve mobil (7, 8): kontrast, hareket azaltma, dokunma hedefi, taşma --- */
+  :root { --muted: #6b6155; }
+  @media (prefers-color-scheme: dark) { :root { --muted: #a39a89; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+  html, body { overflow-x: hidden; }
+  .topbar { flex-wrap: wrap; gap: 12px; }
+  .account-line { flex-wrap: wrap; }
+  .subtabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: thin; padding-bottom: 2px; }
+  .subtab { white-space: nowrap; min-height: 40px; display: inline-flex; align-items: center; }
+  .tabs .tab, button.primary, button.secondary, .signout { min-height: 44px; }
+  .row-actions button { min-height: 40px; min-width: 40px; }
+  .mod.clickable:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  @media (max-width: 480px) {
+    .wrap, .wrap.wide { padding-left: 12px; padding-right: 12px; }
+    h1 { font-size: 22px; }
+    .topbar > div:last-child { width: 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+    .signout { flex: 1 1 auto; text-align: center; }
+  }
 </style>
 </head>
 <body>
 
-<div id="app"></div>
+<main id="app"></main>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.116.0/dist/umd/supabase.js" integrity="sha384-iLddHTLokph6Omwoyid4XKxHaWa6w41BnoEj0q5oOrzmYPpHIKt1wyjReA7s//pP" crossorigin="anonymous"></script>
 <script src="app.js"></script>

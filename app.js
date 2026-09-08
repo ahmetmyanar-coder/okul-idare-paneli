@@ -431,6 +431,7 @@ function renderJoinError(message) {
 }
 
 function renderTeacherDashboard(profile, school) {
+  routeCtx = { profile, school };
   app.innerHTML = `
     <div class="wrap dash">
       <div class="topbar">
@@ -834,6 +835,7 @@ async function maybeShowPendingBadges(school) {
 }
 
 function renderDashboard(profile, school) {
+  routeCtx = { profile, school };
   app.innerHTML = `
     <div class="wrap dash">
       <div class="topbar">
@@ -1699,6 +1701,7 @@ async function renderAylik(school, content, editingId = null) {
       <textarea id="m-desc" rows="2" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px">${esc(editTask?.description || "")}</textarea>
       <label>Resmî dayanak <span style="color:var(--muted);font-weight:400">(varsa, emin değilsen boş bırak, uydurma)</span></label>
       <input id="m-dayanak" value="${esc(editTask?.resmi_dayanak || "")}" placeholder="örn. İlgili yönetmelik, madde numarası">
+      ${mevzuatFieldsHtml("m", editTask)}
       <button class="primary" id="m-save">${editTask ? "Güncelle" : "Ekle"}</button>
       ${editTask ? `<button class="secondary" id="m-cancel" style="margin-top:8px;width:100%">İptal</button>` : ""}
       <div id="m-msg"></div>
@@ -1714,7 +1717,7 @@ async function renderAylik(school, content, editingId = null) {
               <div style="flex:1">
                 <div style="font-weight:600;${t.is_done ? "text-decoration:line-through;color:var(--muted)" : ""}">${esc(t.title)}</div>
                 ${t.description ? `<div style="font-size:13px;color:var(--ink-soft);margin-top:4px">${esc(t.description)}</div>` : ""}
-                ${t.resmi_dayanak ? `<div style="font-size:11.5px;color:var(--accent);margin-top:4px">📖 ${esc(t.resmi_dayanak)}</div>` : ""}
+                ${t.resmi_dayanak ? `<div style="font-size:11.5px;color:var(--accent);margin-top:4px">📖 ${esc(t.resmi_dayanak)} ${mevzuatBadgeHtml(t)}</div>` : ""}
               </div>
               <div class="row-actions">
                 <button data-edit-task="${t.id}">Düzenle</button>
@@ -1744,11 +1747,12 @@ async function renderAylik(school, content, editingId = null) {
     const resmi_dayanak = document.getElementById("m-dayanak").value.trim() || null;
     const msg = document.getElementById("m-msg");
     if (!title) { msg.innerHTML = `<div class="msg err">Görev başlığı gerekli.</div>`; return; }
+    const mv = mevzuatFieldsRead("m"); if (mv.error) { msg.innerHTML = `<div class="msg err">${esc(mv.error)}</div>`; return; }
     if (editTask) {
-      const { error } = await sb.from("monthly_tasks").update({ month, title, description, resmi_dayanak }).eq("id", editTask.id);
+      const { error } = await sb.from("monthly_tasks").update({ month, title, description, resmi_dayanak, ...mv.values }).eq("id", editTask.id);
       if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     } else {
-      const { error } = await sb.from("monthly_tasks").insert({ school_id: school.id, month, title, description, resmi_dayanak, sort_order: (tasks || []).length });
+      const { error } = await sb.from("monthly_tasks").insert({ school_id: school.id, month, title, description, resmi_dayanak, ...mv.values, sort_order: (tasks || []).length });
       if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     }
     await renderAylik(school, content);
@@ -1871,6 +1875,7 @@ async function renderTeftis(school, content, editingId = null) {
       <textarea id="c-madde" rows="2" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px">${esc(editItem?.madde_metni || "")}</textarea>
       <label>Resmî dayanak <span style="color:var(--muted);font-weight:400">(emin değilsen boş bırak, uydurma)</span></label>
       <input id="c-dayanak" value="${esc(editItem?.resmi_dayanak || "")}" placeholder="örn. İlgili yönetmelik, madde numarası">
+      ${mevzuatFieldsHtml("c", editItem)}
       <label>Pratik not <span style="color:var(--muted);font-weight:400">(sahadan — asıl fark burada)</span></label>
       <textarea id="c-not" rows="3" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px">${esc(editItem?.pratik_not || "")}</textarea>
       <button class="primary" id="c-save">${editItem ? "Güncelle" : "Ekle"}</button>
@@ -1887,7 +1892,7 @@ async function renderTeftis(school, content, editingId = null) {
               <input type="checkbox" data-done="${i.id}" ${i.is_done ? "checked" : ""} style="width:auto;margin-top:3px">
               <div style="flex:1">
                 <div style="${i.is_done ? "text-decoration:line-through;color:var(--muted)" : ""}">${esc(i.madde_metni)}</div>
-                ${i.resmi_dayanak ? `<div style="font-size:11.5px;color:var(--accent);margin-top:4px">📖 ${esc(i.resmi_dayanak)}</div>` : ""}
+                ${i.resmi_dayanak ? `<div style="font-size:11.5px;color:var(--accent);margin-top:4px">📖 ${esc(i.resmi_dayanak)} ${mevzuatBadgeHtml(i)}</div>` : ""}
                 ${i.pratik_not ? `<div style="font-size:12.5px;color:var(--ink-soft);margin-top:6px;padding:8px 10px;background:var(--surface-2);border-radius:8px">💡 ${esc(i.pratik_not)}</div>` : ""}
               </div>
               <div class="row-actions">
@@ -1914,11 +1919,12 @@ async function renderTeftis(school, content, editingId = null) {
     const pratik_not = document.getElementById("c-not").value.trim() || null;
     const msg = document.getElementById("c-msg");
     if (!category || !madde_metni) { msg.innerHTML = `<div class="msg err">Kategori ve madde metni gerekli.</div>`; return; }
+    const mv = mevzuatFieldsRead("c"); if (mv.error) { msg.innerHTML = `<div class="msg err">${esc(mv.error)}</div>`; return; }
     if (editItem) {
-      const { error } = await sb.from("checklist_items").update({ category, madde_metni, resmi_dayanak, pratik_not }).eq("id", editItem.id);
+      const { error } = await sb.from("checklist_items").update({ category, madde_metni, resmi_dayanak, pratik_not, ...mv.values }).eq("id", editItem.id);
       if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     } else {
-      const { error } = await sb.from("checklist_items").insert({ school_id: school.id, category, madde_metni, resmi_dayanak, pratik_not, sort_order: (items || []).length });
+      const { error } = await sb.from("checklist_items").insert({ school_id: school.id, category, madde_metni, resmi_dayanak, pratik_not, ...mv.values, sort_order: (items || []).length });
       if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
     }
     await renderTeftis(school, content);
@@ -1991,6 +1997,34 @@ function toast(text, kind = "ok") {
 }
 const MUT_OK = { POST: "Kaydedildi.", PATCH: "Güncellendi.", DELETE: "Silindi." };
 let idareciInviteFlash = null;
+const YURURLUK_TR = { yururlukte: "yürürlükte", degisti: "değişti (güncellenmeli)", yururlukten_kalkti: "yürürlükten kalktı" };
+/* Mevzuat kaydı doğrulama alanları (9): kaynak URL, yayım/yürürlük tarihi, yürürlük durumu, "birincil kaynaktan doğruladım". Doğrulayan ve tarih sunucuda yazılır. */
+function mevzuatFieldsHtml(p, row) {
+  return `
+    <div class="grid" style="margin-top:6px">
+      <div><label for="${p}-dayanak-url">Resmî kaynak bağlantısı <span style="color:var(--muted);font-weight:400">(mevzuat.gov.tr, meb.gov.tr…)</span></label><input id="${p}-dayanak-url" type="url" value="${esc(row?.dayanak_url || "")}" placeholder="https://www.mevzuat.gov.tr/…"></div>
+      <div><label for="${p}-dayanak-tarih">Yayım / yürürlük tarihi</label><input id="${p}-dayanak-tarih" type="date" value="${esc(row?.dayanak_yayim_tarihi || "")}"></div>
+      <div><label for="${p}-yururluk">Yürürlük durumu</label><select id="${p}-yururluk">${Object.entries(YURURLUK_TR).map(([k, v]) => `<option value="${k}" ${(row?.yururluk_durumu || "yururlukte") === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+      <div><label for="${p}-dogrulandi" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:26px"><input id="${p}-dogrulandi" type="checkbox" style="width:auto;margin:0" ${row?.dogrulama_durumu === "dogrulandi" ? "checked" : ""}>Kaynağı birincil metinden doğruladım</label></div>
+    </div>
+    <p style="font-size:11.5px;color:var(--muted);margin:4px 0 8px">Serbest metin tek başına "doğrulanmış" sayılmaz: kutu işaretlenince doğrulayan (sen) ve tarih sunucuda kaydedilir; kaynak/dayanak alanları değiştikçe değişiklik geçmişi tutulur.${row?.dogrulama_tarihi ? ` Son doğrulama: ${fmtDate(row.dogrulama_tarihi)}.` : ""}${(row?.degisiklik_gecmisi || []).length ? ` Değişiklik: ${row.degisiklik_gecmisi.length} kayıt.` : ""}</p>`;
+}
+function mevzuatFieldsRead(p) {
+  const url = document.getElementById(`${p}-dayanak-url`).value.trim();
+  if (url && !/^https:\/\//i.test(url)) return { error: "Kaynak bağlantısı https:// ile başlamalı." };
+  return { values: {
+    dayanak_url: url || null,
+    dayanak_yayim_tarihi: document.getElementById(`${p}-dayanak-tarih`).value || null,
+    yururluk_durumu: document.getElementById(`${p}-yururluk`).value,
+    dogrulama_durumu: document.getElementById(`${p}-dogrulandi`).checked ? "dogrulandi" : "dogrulanmadi",
+  } };
+}
+function mevzuatBadgeHtml(r) {
+  const ok = r.dogrulama_durumu === "dogrulandi";
+  const yur = r.yururluk_durumu && r.yururluk_durumu !== "yururlukte" ? ` <span class="pill warn">${esc(YURURLUK_TR[r.yururluk_durumu] || r.yururluk_durumu)}</span>` : "";
+  const link = r.dayanak_url && /^https:\/\//i.test(r.dayanak_url) ? ` <a href="${esc(r.dayanak_url)}" target="_blank" rel="noopener noreferrer" style="font-size:11px">kaynak ↗</a>` : "";
+  return `<span class="pill ${ok ? "good" : "warn"}" title="${ok ? `Birincil kaynaktan doğrulandı${r.dogrulama_tarihi ? " — " + fmtDate(r.dogrulama_tarihi) : ""}` : "Henüz doğrulanmadı: serbest metin"}">${ok ? "doğrulanmış" : "doğrulanmadı"}</span>${yur}${link}`;
+}
 const DR_TYPE_TR = { bilgi: "Bilgi edinme", duzeltme: "Düzeltme", silme: "Silme", anonimlestirme: "Anonimleştirme", disa_aktarma: "Dışa aktarma", itiraz: "İtiraz" };
 const DR_STATUS_TR = { acik: "Açık", tamamlandi: "Tamamlandı", reddedildi: "Reddedildi" };
 /* Telefon maskesi: liste ekranlarında yalnızca son iki hane görünür; WhatsApp bağlantısı çalışmaya devam eder. */
@@ -2029,7 +2063,7 @@ const AUDIT_ACTION_TR = { INSERT: "Eklendi", UPDATE: "Güncellendi", DELETE: "Si
 async function mut(builder, opts = {}) {
   const res = await builder;
   if (res?.error) { toast(errMsg(res.error), "err"); return res; }
-  if (opts.ok !== false) toast(opts.ok || MUT_OK[builder?.method] || "İşlem tamamlandı.");
+  if (opts.ok !== false) toast(`${opts.ok || MUT_OK[builder?.method] || "İşlem tamamlandı."} · ${new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}`);
   return res;
 }
 /* Silme onayı: kaydın adı ve etki kapsamı gösterilir. */
@@ -2038,6 +2072,60 @@ function confirmDelete(btn, what, scope) {
   const label = (row?.querySelector("strong, span, td")?.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80);
   return confirm(`${what}${label ? ` "${label}"` : ""} silinsin mi?${scope ? `\n\n${scope}` : ""}\n\nBu işlem geri alınamaz.`);
 }
+/* ---- Erişilebilirlik katmanı (7): etiket-alan bağı, canlı bölgeler, kart ve sekme rolleri, klavye, başlığa odak ---- */
+let a11yUid = 0;
+function a11yEnhance(root) {
+  root.querySelectorAll("label:not([for])").forEach(l => {
+    if (l.querySelector("input,select,textarea")) return;
+    let ctl = l.nextElementSibling;
+    if (ctl && ctl.tagName === "DIV" && ctl.querySelector("input,select,textarea") && ctl.classList.contains("date3")) ctl = ctl.querySelector("input,select");
+    if (!ctl || !/^(INPUT|SELECT|TEXTAREA)$/.test(ctl.tagName)) return;
+    if (!ctl.id) ctl.id = `f-${++a11yUid}`;
+    l.setAttribute("for", ctl.id);
+  });
+  root.querySelectorAll('[id$="-msg"]:not([aria-live])').forEach(m => m.setAttribute("aria-live", "polite"));
+  root.querySelectorAll(".mod.clickable:not([role])").forEach(c => { c.setAttribute("role", "button"); c.tabIndex = 0; });
+  root.querySelectorAll(".subtabs:not([role])").forEach(g => g.setAttribute("role", "tablist"));
+  root.querySelectorAll(".subtab:not([role])").forEach(t => t.setAttribute("role", "tab"));
+  root.querySelectorAll(".subtab").forEach(t => { const on = t.classList.contains("active"); t.setAttribute("aria-selected", on ? "true" : "false"); t.tabIndex = on ? 0 : -1; });
+  root.querySelectorAll(".tabs .tab").forEach(t => { const on = t.classList.contains("active"); t.setAttribute("aria-pressed", on ? "true" : "false"); });
+}
+document.addEventListener("keydown", e => {
+  const t = e.target;
+  if (!(t instanceof Element)) return;
+  if (t.matches(".mod.clickable") && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); t.click(); return; }
+  if (t.matches(".subtab") && ["ArrowRight", "ArrowLeft", "Home", "End"].includes(e.key)) {
+    const tabs = [...t.parentElement.querySelectorAll(".subtab")]; let i = tabs.indexOf(t);
+    if (e.key === "ArrowRight") i = (i + 1) % tabs.length; else if (e.key === "ArrowLeft") i = (i - 1 + tabs.length) % tabs.length; else if (e.key === "Home") i = 0; else i = tabs.length - 1;
+    e.preventDefault(); tabs[i].focus(); tabs[i].click();
+  }
+});
+new MutationObserver(muts => {
+  const top = muts.some(m => m.target === app);
+  a11yEnhance(app);
+  if (top) {
+    const h = app.querySelector("h1");
+    if (h) { if (!h.hasAttribute("tabindex")) h.tabIndex = -1; if (!app.contains(document.activeElement) || document.activeElement === document.body) { try { h.focus({ preventScroll: true }); } catch { /* yoksay */ } } }
+    if (window.scrollY > 0) window.scrollTo({ top: 0 });
+  }
+}).observe(app, { childList: true, subtree: true });
+
+/* ---- Yönlendirme (8): #/modul/<ad> — geri/ileri, yenileme ve doğrudan bağlantı; panele dönüş #/ ---- */
+let routeCtx = null;
+document.addEventListener("click", e => {
+  const card = e.target.closest?.("[data-mod].clickable");
+  if (card && app.contains(card)) { const want = "#/modul/" + encodeURIComponent(card.dataset.mod); if (location.hash !== want) history.pushState({ mod: card.dataset.mod }, "", want); return; }
+  if (e.target.closest?.("#back-dash") && location.hash && location.hash !== "#/") history.pushState({}, "", "#/");
+}, true);
+window.addEventListener("popstate", () => openRoute());
+async function openRoute() {
+  if (!routeCtx) return;
+  const { profile, school } = routeCtx;
+  if (profile.role === "ogretmen") await renderTeacherDashboard(profile, school); else await renderDashboard(profile, school);
+  const m = location.hash.match(/^#\/modul\/(.+)$/);
+  if (m) { const name = decodeURIComponent(m[1]); const card = app.querySelector(`[data-mod="${CSS.escape(name)}"]`); if (card) card.click(); }
+}
+
 /* Çift tıklama / çift gönderim koruması: aynı düğmeye 700 ms içinde ikinci tık yok sayılır (data-no-guard hariç). */
 document.addEventListener("click", e => {
   const b = e.target.closest("button");
@@ -2185,6 +2273,8 @@ function officialSignatureName(fullName) {
  * "Sayı:" alanı bilerek boş bırakıldı: gerçek kayıt numarası ancak okulun kendi resmî
  * yazışma sistemi (EBYS/kurumsal kayıt defteri) üzerinden alınabilir, burada uydurulmadı.
  */
+/* Evrak şablonlarının dayandığı mevzuat sürümü ve son doğrulama tarihi (belge dipnotunda gösterilir). */
+const EVRAK_MEVZUAT_SURUM = "Şablon mevzuat sürümü 2026-09: MEB Okul Öncesi Eğitim ve İlköğretim Kurumları Yönetmeliği, MEB Ortaöğretim Kurumları Yönetmeliği, Ders ve Ek Ders Saatlerine İlişkin Karar (2026/07 değişiklikleriyle), MEB Eğitim Kurulları ve Zümreleri Yönergesi; son doğrulama 07.09.2026.";
 function docWrapper(school, bodyHtml, meta = {}) {
   const ilce = (school.ilce || "").trim();
   const il = (school.il || "").trim();
@@ -2208,10 +2298,10 @@ function docWrapper(school, bodyHtml, meta = {}) {
 <!--[if gte mso 9]>
 <xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml>
 <![endif]-->
-<style>@page { size: 21cm 29.7cm; margin: 1.5cm; } body { margin: 0; }</style>
+<style>@page { size: 21cm 29.7cm; margin: 1.5cm; } body { margin: 0; } @media screen { body { padding: 1.5cm; } } @media print { body { padding: 0; } }</style>
 </head>
 <body>
-    <div style="font-family: 'Times New Roman', serif; max-width: 700px; margin: 0 auto; padding: 1.5cm; background:#fff; color:#111; line-height:1.5; font-size:12pt">
+    <div style="font-family: 'Times New Roman', serif; max-width: 700px; margin: 0 auto; background:#fff; color:#111; line-height:1.5; font-size:12pt">
       <div style="text-align:center; margin-bottom:4px">
         <div>T.C.</div>
         ${ustIdare ? `<div style="font-weight:bold">${ustIdare}</div>` : ""}
@@ -2220,7 +2310,7 @@ function docWrapper(school, bodyHtml, meta = {}) {
       ${ustBlok}
       ${bodyHtml}
       <div style="margin-top:40px;border-top:1px solid #ccc;padding-top:6px;font-size:8pt;color:#666;text-align:center">
-        Bu belge Okul İdare Paneli üzerinden taslak olarak oluşturulmuştur. Resmî sayı/kayıt numarası okulunuzun kendi resmî yazışma sistemi (EBYS/kurumsal kayıt) üzerinden alınmalıdır.
+        Bu belge Okul İdare Paneli üzerinden taslak olarak oluşturulmuştur; kurum kontrolünden geçmeden resmî işlem yapılmamalıdır. Resmî sayı/kayıt numarası okulunuzun kendi resmî yazışma sistemi (EBYS/kurumsal kayıt) üzerinden alınmalıdır. ${EVRAK_MEVZUAT_SURUM}
       </div>
     </div>
 </body>
@@ -2613,7 +2703,7 @@ function renderDocForm(school, key) {
     const preview = document.getElementById("doc-preview");
     preview.innerHTML = `
       <div style="border:1px solid var(--line);border-radius:8px;overflow:hidden">
-        <iframe id="doc-frame" style="width:100%;height:500px;border:none;background:#fff"></iframe>
+        <iframe id="doc-frame" sandbox="allow-same-origin allow-modals" style="width:100%;height:500px;border:none;background:#fff"></iframe>
       </div>
       <div style="display:flex;gap:8px;margin-top:12px">
         <button class="secondary" id="doc-print" style="flex:1">Yazdır</button>
@@ -3519,7 +3609,7 @@ async function renderMevzuat(school, content) {
         <div class="card" style="margin-bottom:10px">
           <span class="pill">${esc(r.source)}</span> ${r.category ? `<span class="pill">${esc(r.category)}</span>` : ""}
           <div style="margin-top:8px;font-weight:600">${esc(r.content)}</div>
-          ${r.dayanak ? `<div style="font-size:11.5px;color:var(--accent);margin-top:6px">📖 ${esc(r.dayanak)}</div>` : ""}
+          ${r.dayanak ? `<div style="font-size:11.5px;color:var(--accent);margin-top:6px">📖 ${esc(r.dayanak)} ${mevzuatBadgeHtml(r)}</div>` : `<div style="margin-top:6px">${mevzuatBadgeHtml(r)}</div>`}
           ${r.note ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">💡 ${esc(r.note)}</div>` : ""}
         </div>
       `).join("")
@@ -5095,7 +5185,7 @@ function renderSeatingResult(school, exam) {
         <button class="secondary" id="k-print" style="flex:1">Yazdır</button>
         <button class="secondary" id="k-download" style="flex:1">Word olarak indir</button>
       </div>
-      <iframe id="k-frame" style="display:none"></iframe>
+      <iframe id="k-frame" sandbox="allow-same-origin allow-modals" style="display:none"></iframe>
     </div>
   `;
 }
@@ -7365,7 +7455,7 @@ function disDiziPusulasiHtml(school, kase, docs) {
 
 function disShowPreview(container, fullHtml, filename) {
   container.innerHTML = `
-    <div style="border:1px solid var(--line);border-radius:8px;overflow:hidden"><iframe class="dis-frame" style="width:100%;height:520px;border:none;background:#fff"></iframe></div>
+    <div style="border:1px solid var(--line);border-radius:8px;overflow:hidden"><iframe class="dis-frame" sandbox="allow-same-origin allow-modals" style="width:100%;height:520px;border:none;background:#fff"></iframe></div>
     <div style="display:flex;gap:8px;margin-top:10px">
       <button class="secondary dis-print" style="flex:1">Yazdır</button>
       <button class="secondary dis-download" style="flex:1">Word olarak indir</button>
@@ -8632,6 +8722,11 @@ async function lgsChart(canvasId, config) {
   const ctx = document.getElementById(canvasId);
   if (!ctx) return;
   window.__lgsCharts[canvasId] = new Chart(ctx, config);
+  try {
+    const labels = config.data?.labels || [], ds = config.data?.datasets?.[0];
+    ctx.setAttribute("role", "img");
+    ctx.setAttribute("aria-label", `${config.options?.plugins?.title?.text || ds?.label || "Grafik"}: ${labels.map((l, i) => `${l} ${ds?.data?.[i] ?? ""}`).join(", ")}`);
+  } catch { /* yoksay */ }
 }
 
 function computeLgsTopicWeakness(topics, examsById, topicErrorsForStudent) {
@@ -9680,7 +9775,7 @@ const KILAVUZ_SECTIONS = [
     <p><strong>Atamalar</strong>: çizelgedeki her satıra öğretmen atanır. Ders seçilince öğretmen derse göre önerilir (bu dersi zaten veren → branşı uygun ve en az yüklü → diğerleri); Ek Ders Kararı üst sınırını aşacak aday atlanır. "Önerilen öğretmenlerle doldur" düğmesi seçili sınıfın öğretmensiz ve eksik zorunlu derslerini tek seferde doldurur. Öğretmen Yükü kartı kişi başına aylık karşılığı ders görevi, ek ders ve üst sınırı gösterir (Ek Ders Kararı md.5/1 ve md.6/1-2). <strong>Program</strong>: öğretmeni atanmış saatlerden çakışmasız, dengeli haftalık program üretilir; sınıf/öğretmen bazlı görünüm ve dayanak dipnotlu yazdırma/Word çıktısı vardır.</p>
   ` },
   { id: "kelebek", title: "Sınav Kelebek", html: `
-    <p>🔒 Sadece bu cihazda saklanır. Sınıf/şube gruplarını (öğrenci listeleriyle) gir, oturma planını oluştur — aynı gruptan öğrenciler yan yana, art arda ya da çapraz komşu olmayacak şekilde otomatik dağıtılır.</p>
+    <p>Yalnızca bu cihazın tarayıcısında saklanır (sunucuya gönderilmez; şifreli değildir, cihazı paylaşıyorsan işin bitince sil). Sınıf/şube gruplarını (öğrenci listeleriyle) gir, oturma planını oluştur — aynı gruptan öğrenciler yan yana, art arda ya da çapraz komşu olmayacak şekilde otomatik dağıtılır.</p>
   ` },
   { id: "talep", title: "Talep Takibi", html: `
     <p>Öğretmenlerden gelen talep/bildirimleri (malzeme, bakım-tamirat, izin, diğer) kaydet, durumunu (bekliyor / işlemde / tamamlandı / reddedildi) güncelle. Talep eden, öğretmen listesinden seçilebilir ya da öğretmen olmayan biri için elle yazılabilir.</p>
@@ -9755,6 +9850,14 @@ const KILAVUZ_SECTIONS = [
     <p><strong>Haftalık Görevler</strong>: zayıflık analizinden gelen önerileri tek tıkla göreve çevir, koç onay akışıyla takip et. <strong>Veli Bilgilendirme</strong>: tek tıkla, son deneme + öncelik + görev durumunu özetleyen bir WhatsApp mesajı hazırlar. <strong>Kayıt Geçmişi</strong>: kim, ne zaman, neyi değiştirdi. <strong>Müdür Özeti</strong> (sadece idareci): koçsuz/verisiz/telefonsuz öğrenci uyarıları ve koç yükü.</p>
     <p>Öğretmen hesabıyla girildiğinde bütün bu ekranlar aynen çalışır, sadece veriler o öğretmene atanmış öğrencilerle sınırlıdır.</p>
     <p style="color:var(--muted)">LGS 8. sınıfa özgü olduğu için okul türü "Ortaokul" dışında kurulan okullarda bu kart varsayılan olarak kapalı gelir — istersen platform yöneticisinden açtırabilirsin.</p>
+  ` },
+  { id: "guvenlik", title: "Hesap, Güvenlik ve KVKK", html: `
+    <p><strong>Giriş ve şifre</strong>: "Şifremi unuttum" e-postayla sıfırlama bağlantısı gönderir; oturum içinden "Şifre değiştir" ile de değiştirilir. İdareci hesapları için <strong>iki adımlı doğrulama (TOTP)</strong> önerilir: İdareci Yönetimi → Hesap Güvenliği'nden kurulur, girişte doğrulayıcı uygulama kodu istenir. "Diğer cihazlardaki oturumları kapat" bu cihaz dışındaki tüm oturumları sonlandırır.</p>
+    <p><strong>Davet kodları</strong> rastgele üretilir ve sürelidir (idareci 7 gün ve tek kullanımlık, öğretmen 7 gün, okul 30 gün); art arda hatalı denemeler 15 dakika kilitlenir ve kaydedilir.</p>
+    <p><strong>Program sürümleri</strong>: Nöbet ve ders programı önce önizlenir; "Etkinleştir" deyince mevcut program otomatik yedeklenir ve tek işlemde değiştirilir. "Önceki Sürümler" kartından geri dönülebilir.</p>
+    <p><strong>İşlem Günlüğü</strong> (İdareci Yönetimi): kim, ne zaman, hangi kaydı ekledi/değiştirdi/sildi; hassas personel alanlarının görüntülenmesi de kaydedilir. İçerik değerleri (telefon, not) günlüğe yazılmaz.</p>
+    <p><strong>KVKK</strong>: Her kullanıcı "Verilerim"den hakkındaki veriyi görür, JSON olarak indirir ve düzeltme/silme/anonimleştirme talebi iletir; idareci talepleri İdareci Yönetimi → KVKK Talepleri'nden 30 gün içinde yanıtlar. Okuldan ayrılan personel silinmek yerine <strong>pasifleştirilir</strong> ya da talep üzerine <strong>anonimleştirilir</strong> (ad/telefon/muafiyet silinir, program geçmişi "Eski Personel" adıyla kalır). Aydınlatma metni Platform Yönetimi'nde sürümlenir ve hukuk danışmanı onayı olmadan yayımlanmaz; kayıt olanlar gördükleri sürümü onaylar ve bu kayıt saklanır.</p>
+    <p><strong>Yalnızca bu cihazda saklanan veriler</strong> (Personel değişiklik/devam kayıtları, Sınav Kelebek, Öğretmen Araçları) sunucuya gitmez, yedeklenmez ve şifreli değildir; ilgili ekranlardaki "Bu cihazdaki verileri güvenli sil" düğmesiyle silinir.</p>
   ` },
 ];
 
@@ -10063,10 +10166,12 @@ async function boot() {
   }
   profile.email = user.email;
   if (profile.role === "ogretmen") {
-    renderTeacherDashboard(profile, profile.schools);
+    await renderTeacherDashboard(profile, profile.schools);
+    if (/^#\/modul\//.test(location.hash)) openRoute();
     return;
   }
   renderDashboard(profile, profile.schools);
+  if (/^#\/modul\//.test(location.hash)) openRoute();
 }
 
 sb.auth.onAuthStateChange((event) => {
