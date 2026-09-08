@@ -1637,7 +1637,26 @@ const ERR_TR = [
   [/check constraint|23514/, "Girilen değer izin verilen aralığın dışında."],
   [/Failed to fetch|NetworkError|network|ERR_INTERNET|Load failed/i, "Sunucuya ulaşılamadı; internet bağlantını kontrol edip tekrar dene."],
   [/Payload too large|413|exceeded the maximum allowed size/i, "Dosya çok büyük."],
+  [/DONEM_YOK/, "Nöbet dönemi bulunamadı ya da bu okula ait değil."],
+  [/SURUM_YOK/, "Program sürümü bulunamadı."],
+  [/SATIR_BICIMI/, "Program verisi beklenen biçimde değil."],
+  [/TARIH_DONEM_DISI/, "Bazı nöbet tarihleri dönem aralığının dışında; dönem tarihlerini kontrol et."],
+  [/OGRETMEN_OKUL_DISI|ALAN_OKUL_DISI|DILIM_OKUL_DISI|SINIF_OKUL_DISI|DERS_OKUL_DISI|SAAT_OKUL_DISI/, "Programda bu okula ait olmayan bir kayıt var; sayfayı yenileyip programı yeniden oluştur."],
+  [/CAKISMA_ALAN|CAKISMA_SINIF/, "Aynı noktaya iki atama düşüyor (sabitlenmiş kayıtlarla çakışma); programı yeniden oluştur."],
+  [/CAKISMA_OGRETMEN/, "Bir öğretmen aynı anda iki yerde görünüyor (sabitlenmiş kayıtlarla çakışma); programı yeniden oluştur."],
+  [/GUN_GECERSIZ/, "Geçersiz gün değeri."],
 ];
+let nobetFlash = null, dersFlash = null, lgsFlash = null;
+const VERSION_REASON = { etkinlestirme_oncesi: "etkinleştirme öncesi", geri_alma_oncesi: "geri alma öncesi" };
+/* Program sürümleri kartı (nöbet/ders ortak): otomatik yedekler ve "bu sürüme dön". */
+function surumlerHtml(versions, baslik) {
+  if (!(versions || []).length) return "";
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">${baslik} <span style="color:var(--muted);font-weight:400;font-size:12.5px">(etkinleştirme ve geri alma öncesi otomatik yedekler; son 10)</span></h3>
+      ${versions.map(v => `<div class="list-item"><span>${fmtDateTime(v.created_at)} · ${esc(v.profiles?.full_name || "—")} · <strong>${v.row_count}</strong> kayıt <span class="pill">${VERSION_REASON[v.reason] || esc(v.reason)}</span>${v.note ? `<div style="font-size:11.5px;color:var(--muted)">${esc(v.note)}</div>` : ""}</span><div class="row-actions"><button data-restore-version="${v.id}" ${v.row_count ? "" : 'title="Bu sürüm boş — dönülürse program boşalır"'}>Bu sürüme dön</button></div></div>`).join("")}
+    </div>`;
+}
 function errMsg(err) {
   const raw = typeof err === "string" ? err : String(err?.message || err?.error_description || err?.msg || "");
   const code = String(err?.code || err?.status || "");
@@ -2622,20 +2641,36 @@ async function renderSchedule(profile, school, period, area, devretId = null, ge
     </div>
   ` : "";
 
+  const preview = genResult?.preview ? genResult : null;
+  const previewHtml = preview ? `
+    <div class="card" style="margin-bottom:16px;border-color:var(--accent)">
+      <h3 style="margin-top:0">Önizleme — henüz kaydedilmedi</h3>
+      <p style="font-size:13px;margin:0 0 8px">${preview.created} yeni atama üretildi${preview.pinnedCount ? `, ${preview.pinnedCount} sabitlenmiş atama korunacak` : ""}. "Etkinleştir" deyince mevcut çizelge otomatik yedeklenir ve tek işlemde değiştirilir; hata olursa eski çizelge aynen kalır.</p>
+      <div class="table-wrap"><table class="data"><thead><tr><th>Öğretmen</th><th style="text-align:center">Nöbet</th></tr></thead><tbody>${Object.entries(preview.countByTeacher).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).map(([id, n]) => `<tr><td>${esc(preview.teacherNames[id] || "?")}</td><td style="text-align:center">${n}</td></tr>`).join("") || `<tr><td colspan="2" style="color:var(--muted)">Atama üretilemedi.</td></tr>`}</tbody></table></div>
+      <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
+        <button class="primary" id="preview-activate" style="margin:0;width:auto;padding:10px 18px" ${preview.created ? "" : "disabled"}>Etkinleştir</button>
+        <button class="secondary" id="preview-cancel" style="margin:0;width:auto;padding:10px 18px">Vazgeç</button>
+      </div>
+      <div id="preview-msg"></div>
+    </div>` : "";
+  const { data: versions } = await sb.from("schedule_versions").select("id, reason, note, row_count, created_at, profiles(full_name)").eq("school_id", school.id).eq("kind", "nobet").eq("scope_id", period.id).order("created_at", { ascending: false }).limit(10);
+
   area.innerHTML = `
     ${devretPanelHtml}
     ${warningHtml}
+    ${previewHtml}
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <div>
           <h3 style="margin:0">${esc(period.title)}</h3>
           <p style="color:var(--muted);font-size:12.5px;margin:4px 0 0">${fmtDate(period.starts_on)} — ${fmtDate(period.ends_on)}${period.holiday_dates?.length ? ` · <span title="${esc(period.holiday_dates.slice().sort().map(h => `${fmtDate(h)}${tatilAdi(h) ? " " + tatilAdi(h) : ""}`).join(", "))}" style="text-decoration:underline dotted;cursor:help">${period.holiday_dates.length} tatil günü hariç</span>` : ""}</p>
         </div>
-        <button class="primary" id="gen-btn" style="margin:0;width:auto;padding:10px 18px">${assignments?.length ? "Yeniden Oluştur" : "Çizelge Oluştur"}</button>
+        <button class="primary" id="gen-btn" style="margin:0;width:auto;padding:10px 18px" ${preview ? "disabled" : ""}>${assignments?.length ? "Yeniden Oluştur" : "Çizelge Oluştur"}</button>
       </div>
       <p style="color:var(--muted);font-size:11.5px;margin:6px 0 0">Yeniden oluşturma, "Devret" ile sabitlenmiş atamaları korur. Ders Dağıtım Programı'nda haftanın bazı günlerinde hiç dersi olmayan öğretmenler o günlere otomatik nöbetçi yazılmaz (ders programı hiç girilmemişse bu kısıt uygulanmaz).</p>
-      <div id="gen-msg"></div>
+      <div id="gen-msg">${nobetFlash ? `<div class="msg ok">${esc(nobetFlash)}</div>` : ""}</div>
     </div>
+    ${surumlerHtml(versions, "Önceki Çizelge Sürümleri")}
     ${summaryRows.length ? `
       <div class="card" style="margin-bottom:16px">
         <h3 style="margin-top:0">Kim Kaç Nöbet Tuttu</h3>
@@ -2670,11 +2705,35 @@ async function renderSchedule(profile, school, period, area, devretId = null, ge
     ` : `<p style="color:var(--muted)">Bu dönem için henüz çizelge oluşturulmadı.</p>`}
   `;
 
+  nobetFlash = null;
+  const actBtn = document.getElementById("preview-activate");
+  if (actBtn) actBtn.onclick = async () => {
+    const cancel = document.getElementById("preview-cancel"), pm = document.getElementById("preview-msg");
+    actBtn.disabled = true; cancel.disabled = true;
+    pm.innerHTML = `<div class="msg ok">Etkinleştiriliyor…</div>`;
+    const { data, error } = await sb.rpc("activate_duty_schedule", { p_period_id: period.id, p_rows: preview.rows, p_note: `Otomatik çizelge (${preview.created} atama, ${preview.totalUnfilled} boş nokta)`, p_settings: preview.settings });
+    if (error) { pm.innerHTML = `<div class="msg err">${esc(errMsg(error))} Mevcut çizelge değiştirilmedi.</div>`; actBtn.disabled = false; cancel.disabled = false; return; }
+    nobetFlash = `Çizelge etkinleştirildi: ${data.inserted} yeni atama, ${data.kept_pinned} sabitlenmiş atama korundu. Önceki çizelge "Önceki Çizelge Sürümleri"ne yedeklendi.`;
+    await renderSchedule(profile, school, period, area);
+  };
+  const cancelBtn = document.getElementById("preview-cancel");
+  if (cancelBtn) cancelBtn.onclick = () => renderSchedule(profile, school, period, area);
+  area.querySelectorAll("[data-restore-version]").forEach(b => b.onclick = async () => {
+    const v = (versions || []).find(x => x.id === b.dataset.restoreVersion);
+    if (!v) return;
+    if (!confirm(`${fmtDateTime(v.created_at)} tarihli sürüme dönülecek (${v.row_count} atama).\n\nŞu anki çizelge önce yedeklenir, sonra bu sürümle değiştirilir; devir kayıtları o sürümdeki hâliyle gelir.\n\nDevam edilsin mi?`)) return;
+    b.disabled = true;
+    const { data, error } = await sb.rpc("restore_duty_schedule", { p_version_id: v.id });
+    if (error) { document.getElementById("gen-msg").innerHTML = `<div class="msg err">${esc(errMsg(error))} Çizelge değiştirilmedi.</div>`; b.disabled = false; return; }
+    nobetFlash = `Sürüme dönüldü: ${data.restored} atama geri yüklendi${data.skipped ? `, ${data.skipped} atama (artık listede olmayan öğretmen) atlandı` : ""}. Önceki durum yedeklendi.`;
+    await renderSchedule(profile, school, period, area);
+  });
+
   document.getElementById("gen-btn").onclick = async () => {
     const btn = document.getElementById("gen-btn");
     const msg = document.getElementById("gen-msg");
     btn.disabled = true;
-    msg.innerHTML = `<div class="msg ok">Oluşturuluyor…</div>`;
+    msg.innerHTML = `<div class="msg ok">Hesaplanıyor… (önce önizleme gösterilir, mevcut çizelge değişmez)</div>`;
     let result = null;
     try {
       result = await generateSchedule(school, period);
@@ -2797,9 +2856,8 @@ function weekKeyOf(dateStr) {
   return toLocalISO(monday);
 }
 
+/* Yalnızca hesaplar; veritabanına yazmaz. Sonuç önizlenir, kullanıcı onaylayınca activate_duty_schedule RPC'si tek transaction içinde etkinleştirir. */
 async function generateSchedule(school, period) {
-  await sb.from("duty_assignments").delete().eq("duty_period_id", period.id).eq("is_pinned", false);
-
   const [{ data: teachers }, { data: slots }, { data: areas }, { data: existing }, { data: lessonRows }] = await Promise.all([
     sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]),
     sb.from("duty_time_slots").select("*").eq("school_id", school.id).order("sort_order"),
@@ -2885,14 +2943,15 @@ async function generateSchedule(school, period) {
     }
   }
 
-  if (newRows.length) {
-    const { error } = await sb.from("duty_assignments").insert(newRows);
-    if (error) throw error;
-  }
   const totalSlots = days.length * slots.length * areas.length;
   const totalUnfilled = Object.values(unfilledByDate).reduce((s, n) => s + n, 0);
   const fullyEmptyDays = days.filter(d => (unfilledByDate[d] || 0) === slots.length * areas.length && !pinned.some(p => p.duty_date === d));
-  return { created: newRows.length, totalSlots, totalUnfilled, unfilledByDate, fullyEmptyDays };
+  const teacherNames = Object.fromEntries(teachers.map(t => [t.id, t.full_name]));
+  return {
+    preview: true, rows: newRows, pinnedCount: pinned.length, countByTeacher, teacherNames,
+    created: newRows.length, totalSlots, totalUnfilled, unfilledByDate, fullyEmptyDays,
+    settings: { algoritma: "adalet-v1", isGunu: days.length, dilim: slots.length, alan: areas.length, tatil: (period.holiday_dates || []).length },
+  };
 }
 
 /**
@@ -4207,8 +4266,21 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
     </div>
   ` : "";
 
+  const previewMode = !!genResult?.preview;
+  const rowsForGrid = previewMode ? genResult.placed.map((p, i) => ({ ...p, id: p.id || `preview-${i}` })) : (existing || []);
+  const { data: dersVersions } = await sb.from("schedule_versions").select("id, reason, note, row_count, created_at, profiles(full_name)").eq("school_id", school.id).eq("kind", "ders").order("created_at", { ascending: false }).limit(10);
+  const previewHtml = previewMode ? `
+    <div class="card" style="margin-bottom:16px;border-color:var(--accent)">
+      <h3 style="margin-top:0">Önizleme — henüz kaydedilmedi</h3>
+      <p style="font-size:13px;margin:0 0 8px">${genResult.placed.filter(p => !p.is_pinned).length} saat üretildi${genResult.placed.some(p => p.is_pinned) ? `, ${genResult.placed.filter(p => p.is_pinned).length} sabitlenmiş saat korunacak` : ""}${genResult.unplaced.length ? `, <strong>${genResult.unplaced.length} saat yerleşemedi</strong>` : ""}. "Etkinleştir" deyince mevcut program otomatik yedeklenir ve tek işlemde değiştirilir; hata olursa eski program aynen kalır. Aşağıdaki tablolar önizlemedir.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="primary" id="preview-activate" style="margin:0;width:auto;padding:10px 18px" ${genResult.placed.some(p => !p.is_pinned) ? "" : "disabled"}>Etkinleştir</button>
+        <button class="secondary" id="preview-cancel" style="margin:0;width:auto;padding:10px 18px">Vazgeç</button>
+      </div>
+      <div id="preview-msg"></div>
+    </div>` : "";
   const byClassCell = {}, byTeacherCell = {};
-  (existing || []).forEach(a => {
+  rowsForGrid.forEach(a => {
     (byClassCell[a.class_id] ??= {})[`${a.day_of_week}|${a.period_id}`] = a;
     (byTeacherCell[a.teacher_id] ??= {})[`${a.day_of_week}|${a.period_id}`] = a;
   });
@@ -4244,7 +4316,7 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
   const placedIn = (map, id) => Object.keys(map[id] || {}).length;
   const classLabel = c => { const p = plannedByClass[c.id] || 0, pl = placedIn(byClassCell, c.id); const k = kontrolById[c.id]; return `${c.name} — ${p} saat/hafta${k?.target ? ` (çizelge ${k.target})` : ""}${pl !== p ? ` · ${pl} yerleşti` : ""}`; };
   const teacherLabel = t => { const p = plannedByTeacher[t.id] || 0, pl = placedIn(byTeacherCell, t.id); const n = dersOgretmenNorm(t, school); return `${t.full_name} — ${p} saat/hafta (aylık karşılığı ${n.maas}, ek ders ${Math.max(0, p - n.maas)})${(t.off_days || []).length ? ` · boş gün: ${t.off_days.map(d => DERS_GUN_KISA[d]).join(", ")}` : ""}${pl !== p ? ` · ${pl} yerleşti` : ""}`; };
-  const sinifHtml = renderEntityGrid(classes, byClassCell, classLabel, a => esc(teacherById[a.teacher_id]?.full_name || "?"), true);
+  const sinifHtml = renderEntityGrid(classes, byClassCell, classLabel, a => esc(teacherById[a.teacher_id]?.full_name || "?"), !previewMode);
   const ogretmenHtml = renderEntityGrid(teachers || [], byTeacherCell, teacherLabel, a => esc(classById[a.class_id]?.name || "?"), false);
 
   content.innerHTML = `
@@ -4252,23 +4324,25 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
     ${ogretmensizHtml}
     ${bosGunHtml}
     ${cizelgeHtml}
+    ${previewHtml}
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <div>
-          <h3 style="margin:0">Haftalık Ders Programı</h3>
-          <p style="color:var(--muted);font-size:12.5px;margin:4px 0 0">${totalNeeded} saat/hafta talep · ${(existing || []).length} saat yerleştirilmiş${genResult ? ` · optimizasyon skoru: ${genResult.score} (düşük daha iyi)` : ""}</p>
+          <h3 style="margin:0">Haftalık Ders Programı${previewMode ? ' <span class="pill warn">önizleme</span>' : ""}</h3>
+          <p style="color:var(--muted);font-size:12.5px;margin:4px 0 0">${totalNeeded} saat/hafta talep · ${rowsForGrid.length} saat ${previewMode ? "önizlemede" : "yerleştirilmiş"}${genResult ? ` · optimizasyon skoru: ${genResult.score} (düşük daha iyi)` : ""}</p>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          ${existing?.length ? `<button class="secondary" id="print-ders-btn" style="margin:0;width:auto;padding:10px 18px">Yazdır / Word</button>` : ""}
-          <button class="primary" id="gen-ders-btn" style="margin:0;width:auto;padding:10px 18px">${existing?.length ? "Yeniden Oluştur" : "Program Oluştur"}</button>
+          ${rowsForGrid.length && !previewMode ? `<button class="secondary" id="print-ders-btn" style="margin:0;width:auto;padding:10px 18px">Yazdır / Word</button>` : ""}
+          <button class="primary" id="gen-ders-btn" style="margin:0;width:auto;padding:10px 18px" ${previewMode ? "disabled" : ""}>${(existing || []).length ? "Yeniden Oluştur" : "Program Oluştur"}</button>
         </div>
       </div>
       <p style="color:var(--muted);font-size:11.5px;margin:6px 0 0">Yeniden oluşturma, sabitlenmiş dersleri korur. Kurallar: dersler 2 saatlik bloklar hâlinde ve farklı günlere (6 → 2+2+2, 5 → 2+2+1); akademik dersler erken, beceri/sanat/spor dersleri geç saatlerde; seçmeliler okul geneli ortak dilimde (çizelge açıklaması); öğretmenin boş gün talebine ders yazılmaz, gününde boşluk bırakılmaz, yükü günlere dengeli dağıtılır, 4 saatten uzun ardışık dizi kaçınılır.${ciz ? ` Haftalık saatler ${esc(HDC_DAYANAK)} esas alınarak belirlenir.` : ""}</p>
       ${statsHtml}
-      <div id="gen-ders-msg"></div>
+      <div id="gen-ders-msg">${dersFlash ? `<div class="msg ok">${esc(dersFlash)}</div>` : ""}</div>
     </div>
+    ${surumlerHtml(dersVersions, "Önceki Program Sürümleri")}
     <div id="ders-print" style="margin-bottom:16px"></div>
-    ${existing?.length ? `
+    ${rowsForGrid.length ? `
       <div class="subtabs" style="margin-bottom:16px">
         <div class="subtab ${viewMode === "sinif" ? "active" : ""}" data-view="sinif">Sınıf Bazlı</div>
         <div class="subtab ${viewMode === "ogretmen" ? "active" : ""}" data-view="ogretmen">Öğretmen Bazlı</div>
@@ -4277,7 +4351,32 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
     ` : `<p style="color:var(--muted)">Henüz program oluşturulmadı.</p>`}
   `;
 
+  dersFlash = null;
   content.querySelectorAll("[data-view]").forEach(el => el.onclick = () => renderDersProgram(profile, school, content, el.dataset.view, genResult));
+  const actBtn = document.getElementById("preview-activate");
+  if (actBtn) actBtn.onclick = async () => {
+    const cancel = document.getElementById("preview-cancel"), pm = document.getElementById("preview-msg");
+    actBtn.disabled = true; cancel.disabled = true;
+    pm.innerHTML = `<div class="msg ok">Etkinleştiriliyor…</div>`;
+    const rows = genResult.placed.filter(p => !p.is_pinned).map(p => ({ class_id: p.class_id, subject_id: p.subject_id, teacher_id: p.teacher_id, day_of_week: p.day_of_week, period_id: p.period_id }));
+    const { data, error } = await sb.rpc("activate_lesson_schedule", { p_rows: rows, p_note: `Otomatik program (${rows.length} saat, skor ${genResult.score})`, p_settings: genResult.stats || {} });
+    if (error) { pm.innerHTML = `<div class="msg err">${esc(errMsg(error))} Mevcut program değiştirilmedi.</div>`; actBtn.disabled = false; cancel.disabled = false; return; }
+    dersFlash = `Program etkinleştirildi: ${data.inserted} saat yazıldı, ${data.kept_pinned} sabitlenmiş saat korundu. Önceki program "Önceki Program Sürümleri"ne yedeklendi.`;
+    const kept = { ...genResult, preview: false };
+    await renderDersProgram(profile, school, content, viewMode, kept);
+  };
+  const cancelBtn = document.getElementById("preview-cancel");
+  if (cancelBtn) cancelBtn.onclick = () => renderDersProgram(profile, school, content, viewMode, null);
+  content.querySelectorAll("[data-restore-version]").forEach(b => b.onclick = async () => {
+    const v = (dersVersions || []).find(x => x.id === b.dataset.restoreVersion);
+    if (!v) return;
+    if (!confirm(`${fmtDateTime(v.created_at)} tarihli sürüme dönülecek (${v.row_count} saat).\n\nŞu anki program önce yedeklenir, sonra bu sürümle değiştirilir (sabitlemeler o sürümdeki hâliyle gelir).\n\nDevam edilsin mi?`)) return;
+    b.disabled = true;
+    const { data, error } = await sb.rpc("restore_lesson_schedule", { p_version_id: v.id });
+    if (error) { document.getElementById("gen-ders-msg").innerHTML = `<div class="msg err">${esc(errMsg(error))} Program değiştirilmedi.</div>`; b.disabled = false; return; }
+    dersFlash = `Sürüme dönüldü: ${data.restored} saat geri yüklendi${data.skipped ? `, ${data.skipped} saat (silinmiş sınıf/ders/öğretmen) atlandı` : ""}. Önceki durum yedeklendi.`;
+    await renderDersProgram(profile, school, content, viewMode, null);
+  });
 
   content.querySelectorAll("[data-toggle-pin]").forEach(btn => btn.onclick = async () => {
     const id = btn.dataset.togglePin;
@@ -4313,21 +4412,14 @@ async function renderDersProgram(profile, school, content, viewMode = "sinif", g
     const btn = document.getElementById("gen-ders-btn");
     const msg = document.getElementById("gen-ders-msg");
     btn.disabled = true;
-    msg.innerHTML = `<div class="msg ok">Program oluşturuluyor (optimizasyon çalışıyor)…</div>`;
+    msg.innerHTML = `<div class="msg ok">Program hesaplanıyor… (önce önizleme gösterilir, mevcut program değişmez)</div>`;
     await new Promise(r => setTimeout(r, 30));
     let result = null;
     try {
-      await sb.from("lesson_assignments").delete().eq("school_id", school.id).eq("is_pinned", false);
-      const { data: freshExisting } = await sb.from("lesson_assignments").select("*").eq("school_id", school.id);
+      const { data: freshExisting, error: exErr } = await sb.from("lesson_assignments").select("*").eq("school_id", school.id);
+      if (exErr) throw exErr;
       result = generateLessonSchedule(school, { classes, subjects, periods, hours, existing: freshExisting, teachers: teachers || [] });
-      const toInsert = result.placed.filter(p => !p.is_pinned).map(p => ({
-        school_id: school.id, class_id: p.class_id, subject_id: p.subject_id, teacher_id: p.teacher_id,
-        day_of_week: p.day_of_week, period_id: p.period_id, is_pinned: false,
-      }));
-      if (toInsert.length) {
-        const { error } = await sb.from("lesson_assignments").insert(toInsert);
-        if (error) throw error;
-      }
+      result.preview = true;
     } catch (e) {
       msg.innerHTML = `<div class="msg err">${esc(errMsg(e))}</div>`;
       btn.disabled = false;
@@ -7938,6 +8030,8 @@ async function renderLgsDenemeDetay(profile, school, el, exam, editStudentId = n
 
   const editStudent = editStudentId ? students.find(s => s.id === editStudentId) : null;
   const editResults = editStudent ? (resultsByStudent[editStudent.id] || {}) : {};
+  const studentName = Object.fromEntries(students.map(s => [s.id, s.full_name])), subjectName = Object.fromEntries(subjects.map(s => [s.id, s.name]));
+  const sifirlar = (results || []).filter(r => r.correct_count === 0 && r.wrong_count === 0 && r.blank_count === 0).sort((a, b) => (studentName[a.student_id] || "").localeCompare(studentName[b.student_id] || "", "tr"));
   const editTopicErrors = {};
   if (editStudent) {
     (topicErrors || []).filter(te => te.student_id === editStudent.id).forEach(te => editTopicErrors[te.lgs_topic_id] = te.error_count);
@@ -7974,9 +8068,18 @@ async function renderLgsDenemeDetay(profile, school, el, exam, editStudentId = n
           ` : ""}
         `).join("")}
       </div>
+      <p style="font-size:11.5px;color:var(--muted);margin:0 0 8px">Bir dersin üç alanı da boş bırakılırsa o ders "girilmedi" sayılır ve analize katılmaz; gerçek sıfır için 0 yaz.</p>
       <button class="primary" id="r-save" style="width:100%">Kaydet</button>
-      <div id="r-msg"></div>
+      <div id="r-msg">${lgsFlash ? `<div class="msg ok">${esc(lgsFlash)}</div>` : ""}</div>
     </div>
+    ${sifirlar.length ? `
+    <div class="card" style="margin-bottom:16px;border-color:var(--warn)">
+      <h3 style="margin-top:0">Şüpheli kayıtlar: 0 doğru / 0 yanlış / 0 boş <span style="color:var(--muted);font-weight:400;font-size:12.5px">(${sifirlar.length})</span></h3>
+      <p style="font-size:12.5px;margin:0 0 8px">Bu satırlar büyük olasılıkla giriş yapılmadan kaydedilmiş (eski sürümde boş alanlar 0 sayılıyordu). Öğrenci gerçekten sınava girip tüm soruları boş bıraktıysa dokunma. Girilmediyse işaretle ve "girilmedi say": satır silinir, analiz o dersi değerlendirmez. Otomatik silme yapılmaz.</p>
+      ${sifirlar.map(r => `<label style="display:flex;align-items:center;gap:8px;font-weight:400;margin:4px 0"><input type="checkbox" class="sifir-sec" value="${r.id}" style="width:auto;margin:0">${esc(studentName[r.student_id] || "?")} — ${esc(subjectName[r.lgs_subject_id] || "?")}</label>`).join("")}
+      <div style="display:flex;gap:8px;margin-top:8px"><button class="secondary" id="sifir-hepsi" style="margin:0;width:auto">Hepsini seç</button><button class="secondary" id="sifir-sil" style="margin:0;width:auto">Seçilenleri "girilmedi" say</button></div>
+      <div id="sifir-msg"></div>
+    </div>` : ""}
     <div class="card">
       <h3 style="margin-top:0">Sınıf Özeti</h3>
       <div class="table-wrap">
@@ -8005,19 +8108,39 @@ async function renderLgsDenemeDetay(profile, school, el, exam, editStudentId = n
     const studentId = document.getElementById("r-student").value;
     const msg = document.getElementById("r-msg");
     if (!studentId) { msg.innerHTML = `<div class="msg err">Önce öğrenci seç.</div>`; return; }
-    const rows = [];
+    /* Üç alan da boşsa ders "girilmedi" sayılır: satır yazılmaz, varsa eski satır silinir. En az bir alan doluysa boş bırakılanlar gerçek 0'dır. */
+    const rows = [], deleteIds = [], girilmedi = [], kaydedilen = [];
     for (const s of subjects) {
-      const c = Number(document.querySelector(`[data-subj="${s.id}"][data-field="correct"]`).value) || 0;
-      const w = Number(document.querySelector(`[data-subj="${s.id}"][data-field="wrong"]`).value) || 0;
-      const b = Number(document.querySelector(`[data-subj="${s.id}"][data-field="blank"]`).value) || 0;
+      const raw = f => document.querySelector(`[data-subj="${s.id}"][data-field="${f}"]`).value.trim();
+      const rc = raw("correct"), rw = raw("wrong"), rb = raw("blank");
+      if (rc === "" && rw === "" && rb === "") {
+        if (editResults[s.id]?.id) deleteIds.push(editResults[s.id].id);
+        girilmedi.push(s.name);
+        continue;
+      }
+      const c = Number(rc) || 0, w = Number(rw) || 0, b = Number(rb) || 0;
+      if (c < 0 || w < 0 || b < 0 || !Number.isInteger(c) || !Number.isInteger(w) || !Number.isInteger(b)) {
+        msg.innerHTML = `<div class="msg err">${esc(s.name)}: sayılar 0 veya pozitif tam sayı olmalı.</div>`;
+        return;
+      }
       if (c + w + b > s.question_count) {
         msg.innerHTML = `<div class="msg err">${esc(s.name)}: doğru + yanlış + boş toplamı ${s.question_count}'i geçemez.</div>`;
         return;
       }
       rows.push({ school_id: school.id, mock_exam_id: exam.id, student_id: studentId, lgs_subject_id: s.id, correct_count: c, wrong_count: w, blank_count: b });
+      kaydedilen.push(s.name);
     }
-    const { error } = await sb.from("lgs_mock_exam_results").upsert(rows, { onConflict: "mock_exam_id,student_id,lgs_subject_id" });
-    if (error) { msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
+    if (!rows.length && !deleteIds.length) { msg.innerHTML = `<div class="msg err">Hiçbir derse değer girilmedi. Bir dersin üç alanı da boşsa o ders "girilmedi" sayılır; gerçek 0 için 0 yaz.</div>`; return; }
+    const saveBtn = document.getElementById("r-save"); saveBtn.disabled = true;
+    if (rows.length) {
+      const { error } = await sb.from("lgs_mock_exam_results").upsert(rows, { onConflict: "mock_exam_id,student_id,lgs_subject_id" });
+      if (error) { saveBtn.disabled = false; msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
+    }
+    if (deleteIds.length) {
+      const { error } = await sb.from("lgs_mock_exam_results").delete().in("id", deleteIds);
+      if (error) { saveBtn.disabled = false; msg.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
+    }
+    lgsFlash = `Kaydedildi: ${kaydedilen.length} ders${girilmedi.length ? ` · girilmedi sayılan: ${girilmedi.join(", ")}` : ""}.`;
 
     const topicUpserts = [];
     const topicDeleteIds = [];
@@ -8036,6 +8159,21 @@ async function renderLgsDenemeDetay(profile, school, el, exam, editStudentId = n
     await renderLgsDenemeDetay(profile, school, el, exam, studentId);
   };
   el.querySelectorAll("[data-edit-student]").forEach(td => td.onclick = () => renderLgsDenemeDetay(profile, school, el, exam, td.dataset.editStudent));
+  lgsFlash = null;
+  const hepsi = document.getElementById("sifir-hepsi");
+  if (hepsi) hepsi.onclick = () => el.querySelectorAll(".sifir-sec").forEach(c => c.checked = true);
+  const sil = document.getElementById("sifir-sil");
+  if (sil) sil.onclick = async () => {
+    const ids = [...el.querySelectorAll(".sifir-sec:checked")].map(c => c.value);
+    const sm = document.getElementById("sifir-msg");
+    if (!ids.length) { sm.innerHTML = `<div class="msg err">Önce kayıt seç.</div>`; return; }
+    if (!confirm(`${ids.length} kayıt "girilmedi" sayılacak (silinecek). Bu işlem geri alınamaz; gerçek sıfır olanları seçmediğinden emin misin?`)) return;
+    sil.disabled = true;
+    const { error } = await sb.from("lgs_mock_exam_results").delete().in("id", ids);
+    if (error) { sil.disabled = false; sm.innerHTML = `<div class="msg err">${esc(errMsg(error))}</div>`; return; }
+    lgsFlash = `${ids.length} şüpheli kayıt "girilmedi" sayıldı.`;
+    await renderLgsDenemeDetay(profile, school, el, exam, editStudentId);
+  };
 }
 
 function computeLgsWeakness(subjects, examsById, resultsForStudent) {
@@ -8399,15 +8537,19 @@ function lgsVeliMessage(school, student, subjects, examsById, resultsForStudent,
       .sort((a, b) => new Date(b.exam_date || b.created_at) - new Date(a.exam_date || a.created_at));
     const latestExam = sortedExams[0];
     if (latestExam) {
-      const totalNet = resultsForStudent.filter(r => r.mock_exam_id === latestExam.id).reduce((sum, r) => sum + netOf(r), 0);
-      latestNetLabel = `${latestExam.title}: ${totalNet.toFixed(2)} net`;
-      latestExamLine = `📊 Son deneme (${latestExam.title}): ${totalNet.toFixed(2)} net`;
+      const latestRows = resultsForStudent.filter(r => r.mock_exam_id === latestExam.id);
+      const totalNet = latestRows.reduce((sum, r) => sum + netOf(r), 0);
+      const gotIds = new Set(latestRows.map(r => r.lgs_subject_id));
+      const eksik = subjects.filter(s => !gotIds.has(s.id)).map(s => s.name);
+      latestNetLabel = `${latestExam.title}: ${totalNet.toFixed(2)} net${eksik.length ? ` (${eksik.length} ders girilmedi)` : ""}`;
+      latestExamLine = `📊 Son deneme (${latestExam.title}): ${totalNet.toFixed(2)} net${eksik.length ? ` — girilmeyen dersler: ${eksik.join(", ")} (toplama dahil değil)` : ""}`;
     }
   }
+  const hicVeriYok = subjects.filter(s => !resultsForStudent.some(r => r.lgs_subject_id === s.id)).map(s => s.name);
 
   const weakness = subjects.length ? computeLgsWeakness(subjects, examsById, resultsForStudent) : [];
   const weaknessLine = weakness.length
-    ? `🎯 Öncelikli çalışması gereken dersler: ${weakness.slice(0, 2).map(w => w.subject.name).join(", ")}`
+    ? `🎯 Öncelikli çalışması gereken dersler: ${weakness.slice(0, 2).map(w => w.subject.name).join(", ")}${hicVeriYok.length && resultsForStudent.length ? ` (hiç sonucu olmayan dersler değerlendirilmedi: ${hicVeriYok.join(", ")})` : ""}`
     : "";
 
   const counts = { bekliyor: 0, yapildi: 0, onaylandi: 0 };
@@ -8483,12 +8625,13 @@ async function renderLgsOzet(profile, school, content) {
     content.innerHTML = `<div class="card"><p style="color:var(--muted)">Bu özet sadece okul idaresi içindir.</p></div>`;
     return;
   }
-  const [{ data: students }, { data: teachers }, { data: results }, { data: tasks }, { data: exams }] = await Promise.all([
+  const [{ data: students }, { data: teachers }, { data: results }, { data: tasks }, { data: exams }, { data: lgsSubjects }] = await Promise.all([
     sb.from("lgs_students").select("*").eq("school_id", school.id),
     sb.from("teachers").select("*").eq("school_id", school.id).in("staff_type", ["ogretmen", "yonetici"]),
     sb.from("lgs_mock_exam_results").select("*").eq("school_id", school.id),
     sb.from("lgs_study_tasks").select("*").eq("school_id", school.id),
     sb.from("lgs_mock_exams").select("*").eq("school_id", school.id),
+    sb.from("lgs_subjects").select("id, name").eq("school_id", school.id),
   ]);
   if (!students?.length) {
     content.innerHTML = `<div class="card"><p style="color:var(--muted)">Önce <strong>Öğrenciler</strong> sekmesinden öğrenci ekle.</p></div>`;
@@ -8514,6 +8657,12 @@ async function renderLgsOzet(profile, school, content) {
         const latest = new Date(Math.max(...dates));
         const daysSince = Math.floor((Date.now() - latest) / 86400000);
         if (daysSince > 21) flags.push(`Son deneme ${daysSince} gün önce`);
+        const latestId = examIds.sort((a, b) => new Date(examsById[b]?.exam_date || examsById[b]?.created_at || 0) - new Date(examsById[a]?.exam_date || examsById[a]?.created_at || 0))[0];
+        const girilen = new Set(myResults.filter(r => r.mock_exam_id === latestId).map(r => r.lgs_subject_id));
+        const eksik = (lgsSubjects || []).filter(s => !girilen.has(s.id)).length;
+        if (eksik) flags.push(`Son denemede ${eksik} ders girilmedi`);
+        const sifir = myResults.filter(r => r.correct_count === 0 && r.wrong_count === 0 && r.blank_count === 0).length;
+        if (sifir) flags.push(`${sifir} şüpheli 0/0/0 kayıt`);
       }
     }
     return { student: s, flags };
