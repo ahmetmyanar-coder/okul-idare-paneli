@@ -803,7 +803,10 @@ async function maybeShowPlatformAdminLink(profile) {
  * geciktirmemek için maybeShowPlatformAdminLink ile aynı desende, ayrı ve asenkron.
  * İlgili kart (Platform Yönetimi'nden kapatılmışsa) yoksa sessizce atlanır.
  */
-async function maybeShowPendingBadges(school) {
+/* Panelin giriş ekranındaki "bugün dikkat isteyen ne var" hesabı.
+   Tek sorgu turu; hem modül kartlarındaki rozetler hem Gün Özeti şeridi
+   bunu kullanıyor. Yeni bir sinyal eklerken buraya eklemek yeterli. */
+async function pendingSignals(school) {
   const [{ count: talepCount }, { data: aylikTasks }, { data: bakimItems }, { data: disCases }, { data: denFollowups }] = await Promise.all([
     sb.from("requests").select("id", { count: "exact", head: true }).eq("school_id", school.id).eq("status", "bekliyor"),
     sb.from("monthly_tasks").select("month").eq("school_id", school.id).eq("is_done", false),
@@ -832,6 +835,67 @@ async function maybeShowPendingBadges(school) {
   addBadge("Periyodik Bakım Takibi", bakimOverdue);
   addBadge("Öğrenci Disiplin Dosyası", disOverdue);
   addBadge("Ders Denetimi", denOverdue);
+
+  return {
+    talep: talepCount || 0,
+    aylik: aylikPendingThisMonth || 0,
+    bakim: bakimOverdue || 0,
+    disiplin: disOverdue || 0,
+    denetim: denOverdue || 0,
+  };
+}
+
+async function maybeShowPendingBadges(school) {
+  let sig;
+  try {
+    sig = await pendingSignals(school);
+  } catch (e) {
+    const kap = document.getElementById("gun-ozeti");
+    if (kap) kap.innerHTML = `<div class="go-yukleniyor">Gün özeti şu an alınamadı (${esc(errMsg(e))}).</div>`;
+    return;
+  }
+  renderGunOzeti(sig);
+}
+
+/* Gün Özeti: yalnızca dikkat isteyen satırlar görünür. Hiçbiri yoksa
+   ekran sessiz kalır — panelin bütün fikri bu. Satıra tıklamak ilgili
+   modül kartını tetikler, böylece açılış mantığı tek yerde kalır. */
+function renderGunOzeti(sig) {
+  const kap = document.getElementById("gun-ozeti");
+  if (!kap) return;
+  const bugun = new Date().toLocaleDateString("tr-TR", { day: "numeric", month: "long", weekday: "long" });
+
+  const satirlar = [
+    { n: sig.disiplin, duzey: "crit", mod: "Öğrenci Disiplin Dosyası", metin: a => `${a} disiplin dosyasında süre geçti` },
+    { n: sig.bakim,    duzey: "crit", mod: "Periyodik Bakım Takibi",   metin: a => `${a} periyodik bakım gecikti` },
+    { n: sig.denetim,  duzey: "warn", mod: "Ders Denetimi",            metin: a => `${a} ders denetimi takibi gecikti` },
+    { n: sig.talep,    duzey: "warn", mod: "Talep Takibi",             metin: a => `${a} talep yanıt bekliyor` },
+    { n: sig.aylik,    duzey: "warn", mod: "Aylık Yönetim Akışı",      metin: a => `Bu ayın ${a} işi tamamlanmadı` },
+  ].filter(r => r.n > 0 && document.querySelector(`[data-mod="${r.mod}"]`));
+
+  if (!satirlar.length) {
+    kap.innerHTML = `
+      <div class="go-bas"><span class="go-tarih">${esc(bugun)}</span></div>
+      <div class="go-sakin">Bugün yanan bir şey yok. Bekleyen talep, gecikmiş bakım ya da süresi kaçan dosya görünmüyor.</div>`;
+    return;
+  }
+
+  const toplam = satirlar.reduce((t, r) => t + r.n, 0);
+  kap.innerHTML = `
+    <div class="go-bas">
+      <span class="go-tarih">${esc(bugun)}</span>
+      <h2 class="go-baslik">Dikkat isteyen ${toplam} şey var</h2>
+    </div>
+    ${satirlar.map(r => `
+      <button type="button" class="go-satir ${r.duzey}" data-git="${esc(r.mod)}">
+        <span class="go-lamba"></span>
+        <span class="go-metin">${esc(r.metin(r.n))}</span>
+        <span class="go-ok">&rarr;</span>
+      </button>`).join("")}`;
+
+  kap.querySelectorAll("[data-git]").forEach(b => {
+    b.onclick = () => document.querySelector(`[data-mod="${b.dataset.git}"]`)?.click();
+  });
 }
 
 function renderDashboard(profile, school) {
@@ -851,6 +915,9 @@ function renderDashboard(profile, school) {
           <button class="secondary" id="idareciler-btn" style="font-size:12.5px;padding:7px 12px">İdareciler</button>
         </div>
       </div>
+      <section class="gun-ozeti" id="gun-ozeti" aria-live="polite">
+        <div class="go-yukleniyor">Gün özeti hazırlanıyor…</div>
+      </section>
       <div class="grid">
         ${MODULES.filter(m => isModuleEnabled(school, m.name)).map(m => `
           <div class="mod clickable" data-mod="${m.name}">
