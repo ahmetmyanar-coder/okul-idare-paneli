@@ -9001,14 +9001,19 @@ async function renderLgsAnaliz(profile, school, content, chartStudentId = null) 
       <h3 style="margin-top:0">Öğrenci Bazlı Öncelikler</h3>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Öğrenci</th><th>Öncelikli çalışması gereken dersler</th></tr></thead>
+          <thead><tr><th>Öğrenci</th><th>1. öncelik</th><th>2. öncelik</th><th>3. öncelik</th></tr></thead>
           <tbody>
             ${perStudent.map(({ student, rows }) => `
               <tr>
-                <td>${esc(student.full_name)}</td>
-                <td>${rows.slice(0, 3).map(r => `${esc(r.subject.name)} <span style="color:var(--muted);font-size:11px">(son net ${r.lastNet.toFixed(1)})</span>`).join(", ")}</td>
+                <td class="onc-ad">${esc(student.full_name)}</td>
+                ${[0, 1, 2].map(i => {
+                  const r = rows[i];
+                  return r
+                    ? `<td class="onc"><span class="onc-bas">${esc(r.subject.name)}</span><span class="onc-alt">son net ${r.lastNet.toFixed(1)}</span></td>`
+                    : `<td class="onc onc-yok">—</td>`;
+                }).join("")}
               </tr>
-            `).join("") || `<tr><td colspan="2" style="color:var(--muted)">Henüz veri yok.</td></tr>`}
+            `).join("") || `<tr><td colspan="4" style="color:var(--muted)">Henüz veri yok.</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -9019,12 +9024,17 @@ async function renderLgsAnaliz(profile, school, content, chartStudentId = null) 
       <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Denemelerde konu bazlı hata girilen öğrenciler için — hangi konuda tekrar eden hata var, önce oraya çalışılmalı.</p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Öğrenci</th><th>Öneri: önce bu konulara çalış</th></tr></thead>
+          <thead><tr><th>Öğrenci</th><th>Önce bu konu</th><th>Sonra</th><th>Sonra</th></tr></thead>
           <tbody>
             ${perStudentTopics.map(({ student, rows }) => `
               <tr>
-                <td>${esc(student.full_name)}</td>
-                <td>${rows.slice(0, 3).map(r => `${esc(r.topic.name)} <span style="color:var(--muted);font-size:11px">(${r.totalErrors} hata)</span>`).join(", ")}</td>
+                <td class="onc-ad">${esc(student.full_name)}</td>
+                ${[0, 1, 2].map(i => {
+                  const r = rows[i];
+                  return r
+                    ? `<td class="onc"><span class="onc-bas">${esc(r.topic.name)}</span><span class="onc-alt">${r.totalErrors} hata</span></td>`
+                    : `<td class="onc onc-yok">—</td>`;
+                }).join("")}
               </tr>
             `).join("")}
           </tbody>
@@ -9283,27 +9293,25 @@ async function renderLgsVeli(profile, school, content) {
     <div class="card">
       <h3 style="margin-top:0">Veli Bilgilendirme</h3>
       <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Her öğrenci için son deneme sonucu, öncelikli dersler ve görev durumunu özetleyen bir WhatsApp mesajı hazırlar — göndermeden önce metni düzenleyebilirsin.</p>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Öğrenci</th><th>Veli</th><th>Son Deneme</th><th>Görevler</th><th></th></tr></thead>
-          <tbody>
-            ${students.map(s => {
-              const m = lgsVeliMessage(school, s, subjects || [], examsById, resultsByStudent[s.id] || [], tasksByStudent[s.id] || []);
-              const link = s.veli_telefon ? waLink(s.veli_telefon, m.text) : null;
-              return `
-                <tr>
-                  <td>${esc(s.full_name)}</td>
-                  <td>${s.veli_adi ? esc(s.veli_adi) : "—"}</td>
-                  <td>${esc(m.latestNetLabel)}</td>
-                  <td>${esc(m.taskLabel)}</td>
-                  <td>${link
-                    ? `<a href="${esc(link)}" target="_blank" rel="noopener" class="pill" style="text-decoration:none">📲 Veliye Gönder</a>`
-                    : `<span style="font-size:10.5px;color:var(--muted)">tel. yok</span>`}</td>
-                </tr>
-              `;
-            }).join("")}
-          </tbody>
-        </table>
+      <div class="veli-liste">
+        ${students.map(s => {
+          const m = lgsVeliMessage(school, s, subjects || [], examsById, resultsByStudent[s.id] || [], tasksByStudent[s.id] || []);
+          const link = s.veli_telefon ? waLink(s.veli_telefon, m.text) : null;
+          return `
+            <div class="veli-satir">
+              <div class="veli-kim">
+                <strong>${esc(s.full_name)}</strong>
+                <span>${s.veli_adi ? esc(s.veli_adi) : "veli adı girilmemiş"}</span>
+              </div>
+              <div class="veli-olcu">
+                <div><span class="vo-etiket">Son deneme</span><span class="vo-deger">${esc(m.latestNetLabel)}</span></div>
+                <div><span class="vo-etiket">Görevler</span><span class="vo-deger">${esc(m.taskLabel)}</span></div>
+              </div>
+              <div class="veli-eylem">${link
+                ? `<a href="${esc(link)}" target="_blank" rel="noopener" class="pill" style="text-decoration:none">📲 Veliye gönder</a>`
+                : `<span class="veli-telsiz">telefon girilmemiş</span>`}</div>
+            </div>`;
+        }).join("") || `<p style="color:var(--muted);margin:0">Henüz öğrenci eklenmemiş.</p>`}
       </div>
     </div>
   `;
