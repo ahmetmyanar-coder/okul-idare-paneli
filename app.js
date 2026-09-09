@@ -84,9 +84,9 @@ function renderAuth(mode = "login") {
           <input id="idareci-name" placeholder="Ad Soyad">
         ` : ""}
         ${mode === "signup" && !pendingSchool && !pendingIdareci ? `
-          <label>Öğretmen davet kodu <span style="color:var(--muted);font-weight:400">(okul idarenden aldıysan gir; boş bırakırsan yeni bir okul hesabı açılır)</span></label>
+          <label>Davet kodu <span style="color:var(--muted);font-weight:400">(öğretmen, idareci ya da okul davet kodu — hangisi olduğunu bilmene gerek yok; boş bırakırsan yeni bir okul hesabı açılır)</span></label>
           <input id="join-code" value="${esc(pendingJoin)}" placeholder="örn. AB3K9XPZ" style="text-transform:uppercase">
-        ` : (mode === "login" && pendingJoin && !pendingSchool && !pendingIdareci ? `<div class="msg ok" style="margin-top:10px">Bekleyen bir öğretmen daveti var (kod: ${esc(pendingJoin)}). Giriş yaptığında otomatik tamamlanacak.</div>` : "")}
+        ` : (mode === "login" && pendingJoin && !pendingSchool && !pendingIdareci ? `<div class="msg ok" style="margin-top:10px">Bekleyen bir davet var (kod: ${esc(pendingJoin)}). Giriş yaptığında otomatik tamamlanacak.</div>` : "")}
         <div id="legal-wrap" style="margin:10px 0 4px;font-size:12.5px"><button type="button" class="navlink" id="legal-toggle" style="font-size:12.5px">Aydınlatma metni</button></div>
         <div id="legal-body" class="hidden"></div>
         <button class="primary" id="submit">${mode === "login" ? "Giriş yap" : "Hesap oluştur"}</button>
@@ -158,7 +158,7 @@ function renderAuth(mode = "login") {
         ? "E-posta ya da şifre hatalı. E-postayı kayıt olduğun hâliyle (büyük/küçük harf ve boşluk olmadan) yaz; şifreni hatırlamıyorsan yöneticiye bildir."
         : /rate limit|too many/i.test(error.message)
         ? "Çok fazla deneme yapıldı; birkaç dakika bekleyip tekrar dene."
-        : error.message;
+        : errMsg(error);
       msg.innerHTML = `<div class="msg err">${tr}</div>`;
       return;
     }
@@ -10153,12 +10153,29 @@ async function boot() {
     }
     const pendingCode = localStorage.getItem("pendingJoinCode");
     if (pendingCode) {
-      const { data: r, error } = await sb.rpc("join_school_as_teacher", { p_code: pendingCode });
-      if (!error && r?.ok) {
-        localStorage.removeItem("pendingJoinCode");
-        return boot();
+      /* Tek alan, üç davet türü. Kullanıcının elindeki kodun öğretmen mi,
+         idareci mi, okul daveti mi olduğunu bilmesi gerekmiyor: en sık
+         kullanılandan başlayarak sırayla denenir, ilk tutan kazanır.
+         Önceden yalnızca öğretmen akışı denendiği için idareci ve okul
+         kodları bu alandan hiçbir zaman çalışmıyordu. */
+      const adSoyad = localStorage.getItem("pendingIdareciName") || "";
+      const denemeler = [
+        ["join_school_as_teacher", { p_code: pendingCode }],
+        ["claim_idareci_invite", { p_code: pendingCode, p_full_name: adSoyad }],
+        ["claim_school_as_mudur", { p_code: pendingCode }],
+      ];
+      let hizSiniri = null;
+      for (const [fn, args] of denemeler) {
+        const { data: r, error } = await sb.rpc(fn, args);
+        if (!error && r?.ok) {
+          localStorage.removeItem("pendingJoinCode");
+          localStorage.removeItem("pendingIdareciName");
+          return boot();
+        }
+        /* Hız sınırına takıldıysak kalan türleri denemek yalnızca sayacı şişirir */
+        if (r?.reason && /çok fazla/i.test(r.reason)) { hizSiniri = r.reason; break; }
       }
-      renderJoinError(error ? errMsg(error) : (r?.reason || "Davet tamamlanamadı."));
+      renderJoinError(hizSiniri || "Bu davet kodu geçerli değil ya da daha önce kullanılmış. Kodu sana verildiği hâliyle, başında sonunda boşluk bırakmadan yazdığından emin ol.");
       return;
     }
     renderSchoolSetup(user);
