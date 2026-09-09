@@ -115,6 +115,43 @@
   .go-sakin { background: var(--good-soft); border: 1px solid var(--line);
     border-radius: var(--radius-md); padding: 14px 16px; font-size: 13.5px; color: var(--ink-soft); }
   .go-yukleniyor { color: var(--muted); font-size: 12.5px; padding: 8px 0; }
+  /* --- Nöbet çizelgesi ızgarası --- */
+  .cz-ust { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .cz-alt { color: var(--muted); font-size: 12.5px; margin: 4px 0 0; }
+  .cz-arac { display: flex; gap: 8px; flex-wrap: wrap; }
+  .cz-arac button { margin: 0; width: auto; padding: 8px 14px; font-size: 12.5px; }
+  .cz-hafta { margin-bottom: 22px; }
+  .cz-hafta-bas { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .07em; margin-bottom: 8px; }
+  table.cz-tablo { table-layout: fixed; width: 100%; border-collapse: separate; border-spacing: 0; }
+  table.cz-tablo th, table.cz-tablo td { padding: 9px 10px; vertical-align: middle; }
+  table.cz-tablo thead th { text-align: center; line-height: 1.25; }
+  .cz-gun { display: block; font-size: 12.5px; }
+  .cz-tarih { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+  .cz-yan { text-align: left !important; white-space: nowrap; font-size: 12.5px; width: 1%; }
+  .cz-slot { color: var(--muted); font-weight: 500; }
+  .cz-ad { display: block; width: 100%; margin: 0; padding: 7px 8px; font: inherit; font-size: 12.5px;
+    text-align: center; background: var(--surface); color: var(--ink); border: 1px solid var(--line);
+    border-radius: var(--radius-sm); cursor: pointer; white-space: normal; line-height: 1.25; }
+  .cz-ad:hover { border-color: var(--accent); }
+  .cz-im { font-style: normal; margin-left: 3px; font-size: 11px; }
+  td.cz-bos { text-align: center; }
+  td.cz-bos span { display: block; padding: 7px 8px; font-size: 11.5px; color: var(--warn);
+    background: var(--warn-soft); border: 1px dashed var(--warn); border-radius: var(--radius-sm); }
+  .cz-not { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
+
+  /* Yazdırma: yalnızca çizelge, yatay A4 */
+  @media print {
+    @page { size: A4 landscape; margin: 12mm; }
+    body * { visibility: hidden !important; }
+    #cizelge-baski, #cizelge-baski * { visibility: visible !important; }
+    #cizelge-baski { position: absolute; left: 0; top: 0; width: 100%; border: 0; box-shadow: none; padding: 0; }
+    .cz-arac, .cz-not { display: none !important; }
+    .cz-hafta { break-inside: avoid; page-break-inside: avoid; margin-bottom: 14px; }
+    .cz-ad { border-color: #999; background: #fff; }
+    td.cz-bos span { border-color: #999; color: #444; background: #f2f2f2; }
+    .table-wrap { overflow: visible !important; }
+  }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .mod { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-sm); position: relative; transition: box-shadow var(--dur-normal) var(--ease), border-color var(--dur-normal) var(--ease), transform var(--dur-normal) var(--ease); }
   .mod h3 { margin: 0 0 4px; font-size: 14.5px; }

@@ -3248,30 +3248,14 @@ async function renderSchedule(profile, school, period, area, devretId = null, ge
         }).join("")}
       </div>
     ` : ""}
-    ${dates.length ? `
-      <div class="card">
-        <h3 style="margin-top:0">Çizelge</h3>
-        <div class="table-wrap">
-        <table class="data">
-          <thead><tr><th>Tarih</th><th>Zaman Dilimi</th><th>Alan</th><th>Öğretmen</th><th></th></tr></thead>
-          <tbody>
-            ${dates.map(d => byDate[d].map((a, i) => `
-              <tr>
-                <td>${i === 0 ? d : ""}</td>
-                <td>${a.duty_time_slots?.label || "-"}</td>
-                <td>${esc(a.duty_areas?.label || a.area)}</td>
-                <td>${esc(a.teachers?.full_name || "—")} ${a.is_pinned ? '<span class="pill">📌</span>' : ""} ${a.substituted_from ? `<span class="pill" title="Devir sebebi: ${esc(a.substitution_reason || "")}">🔁</span>` : ""}</td>
-                <td class="row-actions"><button data-devret="${a.id}">Devret</button></td>
-              </tr>
-            `).join("")).join("")}
-          </tbody>
-        </table>
-        </div>
-      </div>
-    ` : `<p style="color:var(--muted)">Bu dönem için henüz çizelge oluşturulmadı.</p>`}
+    ${dates.length ? cizelgeGridHtml(period, dates, byDate) : `<p style="color:var(--muted)">Bu dönem için henüz çizelge oluşturulmadı.</p>`}
   `;
 
   nobetFlash = null;
+  const czYazdir = document.getElementById("cz-yazdir");
+  if (czYazdir) czYazdir.onclick = () => window.print();
+  const czExcel = document.getElementById("cz-excel");
+  if (czExcel) czExcel.onclick = () => cizelgeCsvIndir(school, period, dates, byDate);
   const actBtn = document.getElementById("preview-activate");
   if (actBtn) actBtn.onclick = async () => {
     const cancel = document.getElementById("preview-cancel"), pm = document.getElementById("preview-msg");
@@ -3345,6 +3329,130 @@ async function renderSchedule(profile, school, period, area, devretId = null, ge
  * aksi halde ders programını hiç kullanmayan okullarda tüm öğretmenler yanlışlıkla her günden
  * "yok" sayılırdı.
  */
+/* ------------------------------------------------------------------
+   Nöbet çizelgesi görünümü.
+
+   Önceki hâli düz bir atama listesiydi: Tarih | Zaman Dilimi | Alan |
+   Öğretmen. Üç aylık bir dönemde bu yüzlerce satır demek ve okunmuyor.
+   Okulların duvara astığı çizelge zaten ızgaradır: günler yatay, nöbet
+   yerleri dikey, hücrede öğretmen adı. Aşağısı onu üretir; ayrıca
+   yazdırma (PDF) ve Excel çıkışı aynı veriden beslenir.
+------------------------------------------------------------------- */
+function cizelgeBoyutlari(byDate, dates) {
+  const slotlar = [], alanlar = [];
+  dates.forEach(d => (byDate[d] || []).forEach(a => {
+    const s = a.duty_time_slots?.label || "—";
+    const al = a.duty_areas?.label || a.area || "—";
+    if (!slotlar.includes(s)) slotlar.push(s);
+    if (!alanlar.includes(al)) alanlar.push(al);
+  }));
+  return { slotlar, alanlar };
+}
+
+function cizelgeHaftalari(dates) {
+  const h = {};
+  dates.forEach(d => { (h[weekKeyOf(d)] ??= []).push(d); });
+  return Object.keys(h).sort().map(k => ({ hafta: k, gunler: h[k].slice().sort() }));
+}
+
+function cizelgeHucre(byDate, d, slot, alan) {
+  return (byDate[d] || []).find(a =>
+    (a.duty_time_slots?.label || "—") === slot &&
+    (a.duty_areas?.label || a.area || "—") === alan);
+}
+
+function gunBasligi(ds) {
+  const dt = new Date(ds + "T00:00:00");
+  return {
+    ad: dt.toLocaleDateString("tr-TR", { weekday: "long" }),
+    kisa: dt.toLocaleDateString("tr-TR", { weekday: "short" }),
+    tarih: dt.toLocaleDateString("tr-TR", { day: "numeric", month: "long" }),
+  };
+}
+
+function cizelgeGridHtml(period, dates, byDate) {
+  const { slotlar, alanlar } = cizelgeBoyutlari(byDate, dates);
+  const haftalar = cizelgeHaftalari(dates);
+  const cokSlot = slotlar.length > 1;
+
+  const haftaHtml = haftalar.map(({ gunler }) => {
+    const bas = gunBasligi(gunler[0]), sonG = gunBasligi(gunler[gunler.length - 1]);
+    const satirlar = [];
+    slotlar.forEach(slot => alanlar.forEach(alan => {
+      const hucreler = gunler.map(d => {
+        const a = cizelgeHucre(byDate, d, slot, alan);
+        if (!a) return `<td class="cz-bos"><span>boş</span></td>`;
+        const im = `${a.is_pinned ? '<i class="cz-im" title="Sabitlenmiş">📌</i>' : ""}` +
+                   `${a.substituted_from ? `<i class="cz-im" title="Devredildi${a.substitution_reason ? ": " + esc(a.substitution_reason) : ""}">↺</i>` : ""}`;
+        return `<td><button type="button" class="cz-ad" data-devret="${a.id}" title="Nöbeti devret">${esc(a.teachers?.full_name || "—")}${im}</button></td>`;
+      }).join("");
+      satirlar.push(`<tr>${cokSlot ? `<th class="cz-yan cz-slot">${esc(slot)}</th>` : ""}<th class="cz-yan">${esc(alan)}</th>${hucreler}</tr>`);
+    }));
+    return `
+      <div class="cz-hafta">
+        <div class="cz-hafta-bas">${esc(bas.tarih)} — ${esc(sonG.tarih)}</div>
+        <div class="table-wrap">
+          <table class="data cz-tablo">
+            <thead><tr>${cokSlot ? "<th></th>" : ""}<th></th>${gunler.map(d => {
+              const g = gunBasligi(d);
+              return `<th><span class="cz-gun">${esc(g.ad)}</span><span class="cz-tarih">${esc(g.tarih)}</span></th>`;
+            }).join("")}</tr></thead>
+            <tbody>${satirlar.join("")}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="card" id="cizelge-baski">
+      <div class="cz-ust">
+        <div>
+          <h3 style="margin:0">Çizelge</h3>
+          <p class="cz-alt">${esc(period.title)} · ${haftalar.length} hafta</p>
+        </div>
+        <div class="cz-arac">
+          <button type="button" class="secondary" id="cz-yazdir">Yazdır / PDF</button>
+          <button type="button" class="secondary" id="cz-excel">Excel'e aktar</button>
+        </div>
+      </div>
+      ${haftaHtml}
+      <p class="cz-not">Boş görünen göz, o gün o yere nöbetçi atanmadığı anlamına gelir. Bir isme tıklamak nöbeti devretme ekranını açar.</p>
+    </div>`;
+}
+
+/* Excel çıkışı CSV olarak üretiliyor: UTF-8 BOM + noktalı virgül ayracı.
+   Türkçe Excel bunu çift tıklamayla doğrudan sütunlara ayırır ve dosya
+   düzenlenebilir kalır — "beğenirse PDF'i asar, değiştirecekse Excel'de
+   üzerinden geçer" akışı için gereken bu. */
+function cizelgeCsvIndir(school, period, dates, byDate) {
+  const { slotlar, alanlar } = cizelgeBoyutlari(byDate, dates);
+  const cokSlot = slotlar.length > 1;
+  const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const out = [q(school.name), q(`${period.title} — Nöbet Çizelgesi`), ""];
+
+  cizelgeHaftalari(dates).forEach(({ gunler }) => {
+    const bas = gunBasligi(gunler[0]), sonG = gunBasligi(gunler[gunler.length - 1]);
+    out.push(q(`${bas.tarih} — ${sonG.tarih}`));
+    out.push([...(cokSlot ? [q("Zaman dilimi")] : []), q("Nöbet yeri"),
+      ...gunler.map(d => { const g = gunBasligi(d); return q(`${g.ad} ${g.tarih}`); })].join(";"));
+    slotlar.forEach(slot => alanlar.forEach(alan => {
+      const hucreler = gunler.map(d => {
+        const a = cizelgeHucre(byDate, d, slot, alan);
+        return q(a ? (a.teachers?.full_name || "") : "");
+      });
+      out.push([...(cokSlot ? [q(slot)] : []), q(alan), ...hucreler].join(";"));
+    }));
+    out.push("");
+  });
+
+  const blob = new Blob(["﻿" + out.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `nobet-cizelgesi-${toLocalISO(new Date())}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
 function lessonDayIndex(rows) {
   const daysByTeacher = {};
   (rows || []).forEach(r => {
